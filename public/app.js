@@ -675,15 +675,85 @@ async function editOrder(id){
   }
 }
 
-async function ordersView(){const c=$('#content');c.innerHTML=`<div class="page-title"><div><h1>الطلبات والبحث</h1><div class="sub">ابحث بالكود أو الهاتف أو الاسم أو حدّد نطاق أكواد</div></div></div><div class="card"><div class="toolbar"><input id="q" class="input" placeholder="بحث سريع"><input id="fc" class="input" inputmode="numeric" placeholder="من كود"><input id="tc" class="input" inputmode="numeric" placeholder="إلى كود"><select id="ps" class="select"><option value="">كل الطلبات</option><option value="0">غير مطبوعة</option><option value="1">مطبوعة</option></select><button id="searchBtn" class="btn btn-primary">بحث</button></div><div id="ordersTable"></div></div>`;$('#searchBtn').onclick=loadOrders;await loadOrders()}
-async function loadOrders(){const p=new URLSearchParams();if($('#q')?.value)p.set('q',$('#q').value);if($('#fc')?.value)p.set('from_code',$('#fc').value);if($('#tc')?.value)p.set('to_code',$('#tc').value);if($('#ps')?.value!=='')p.set('printed',$('#ps').value);const d=await api('/orders?'+p.toString());state.orders=d.orders;renderOrdersTable('#ordersTable',state.orders,false)}
 
+async function getActiveStores(){
+  try{
+    const d=await api('/stores');
+    return (d.stores||[]).filter(s=>s.is_active);
+  }catch(e){return []}
+}
+function setDatePreset(preset,fromEl,toEl){
+  const now=new Date();
+  const iso=d=>d.toISOString().slice(0,10);
+  let from='',to='';
+  if(preset==='today'){from=to=iso(now)}
+  else if(preset==='yesterday'){const d=new Date(now);d.setDate(d.getDate()-1);from=to=iso(d)}
+  else if(preset==='last7'){const d=new Date(now);d.setDate(d.getDate()-6);from=iso(d);to=iso(now)}
+  else if(preset==='last30'){const d=new Date(now);d.setDate(d.getDate()-29);from=iso(d);to=iso(now)}
+  else if(preset==='this_month'){const d=new Date(now.getFullYear(),now.getMonth(),1);from=iso(d);to=iso(now)}
+  else if(preset==='all'){from='';to=''}
+  else return;
+  fromEl.value=from;toEl.value=to;
+}
+
+async function ordersView(){
+  const c=$('#content');
+  const stores=await getActiveStores();
+  c.innerHTML=`
+    <div class="page-title"><div><h1>الطلبات والبحث</h1><div class="sub">فلترة حسب المتجر، حالة الشحنة، التاريخ، الكود أو الهاتف</div></div></div>
+    <div class="card">
+      <div class="filter-panel">
+        <div class="filter-group"><label>المتجر</label><select id="os" class="select"><option value="">كل المتاجر</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div>
+        <div class="filter-group"><label>عرض فقط</label><select id="statusFilter" class="select">
+          <option value="">الكل</option>
+          <option value="pending">قيد التوصيل</option>
+          <option value="delivered">تم الاستلام</option>
+          <option value="refused_fee_paid">رفض ودفع أجور</option>
+          <option value="refused_no_fee">رفض وعدم دفع أجور</option>
+          <option value="canceled_before_arrival">ملغي قبل الوصول</option>
+          <option value="partial">استلام جزئي</option>
+        </select></div>
+        <div class="filter-group"><label>الطباعة</label><select id="ps" class="select"><option value="">الكل</option><option value="0">غير مطبوع</option><option value="1">مطبوع</option></select></div>
+        <div class="filter-group"><label>الفترة</label><select id="datePreset" class="select"><option value="all">كل المدة</option><option value="today">اليوم</option><option value="yesterday">الأمس</option><option value="last7">آخر 7 أيام</option><option value="last30">آخر 30 يوم</option><option value="this_month">هذا الشهر</option><option value="custom">فترة مخصصة</option></select></div>
+        <div class="filter-group"><label>من تاريخ</label><input id="fdSearch" type="date" class="input"></div>
+        <div class="filter-group"><label>إلى تاريخ</label><input id="tdSearch" type="date" class="input"></div>
+        <div class="filter-group wide"><label>بحث سريع</label><input id="q" class="input" placeholder="كود / هاتف / اسم / عنوان"></div>
+        <div class="filter-group"><label>من كود</label><input id="fc" class="input" inputmode="numeric"></div>
+        <div class="filter-group"><label>إلى كود</label><input id="tc" class="input" inputmode="numeric"></div>
+        <div class="filter-actions"><button id="searchBtn" class="btn btn-primary">بحث</button><button id="resetSearch" class="btn btn-soft">مسح الفلاتر</button></div>
+      </div>
+      <div id="ordersTable"></div>
+    </div>`;
+  $('#datePreset').onchange=()=>setDatePreset($('#datePreset').value,$('#fdSearch'),$('#tdSearch'));
+  $('#searchBtn').onclick=loadOrders;
+  $('#resetSearch').onclick=()=>{
+    ['os','statusFilter','ps','q','fc','tc','fdSearch','tdSearch'].forEach(id=>{const e=$('#'+id);if(e)e.value=''});
+    $('#datePreset').value='all';
+    loadOrders();
+  };
+  await loadOrders();
+}
+async function loadOrders(){
+  const p=new URLSearchParams();
+  if($('#q')?.value)p.set('q',$('#q').value);
+  if($('#fc')?.value)p.set('from_code',$('#fc').value);
+  if($('#tc')?.value)p.set('to_code',$('#tc').value);
+  if($('#ps')?.value!=='')p.set('printed',$('#ps').value);
+  if($('#statusFilter')?.value)p.set('status',$('#statusFilter').value);
+  if($('#os')?.value)p.set('store_id',$('#os').value);
+  if($('#fdSearch')?.value)p.set('from_date',$('#fdSearch').value);
+  if($('#tdSearch')?.value)p.set('to_date',$('#tdSearch').value);
+  const d=await api('/orders?'+p.toString());
+  state.orders=d.orders;
+  renderOrdersTable('#ordersTable',state.orders,false);
+}
 const DELIVERY_STATUS_LABELS={
-  pending:'قيد التنفيذ',
-  delivered:'تم التسليم',
-  delivered_adjusted:'تم التسليم وتعديل قيمة',
-  refused_fee_paid:'رفض مع دفع أجور',
-  refused_no_fee:'رفض مع عدم دفع أجور',
+  pending:'قيد التوصيل',
+  delivered:'تم الاستلام',
+  delivered_adjusted:'تم الاستلام وتعديل قيمة',
+  refused_fee_paid:'رفض ودفع أجور',
+  refused_no_fee:'رفض وعدم دفع أجور',
+  canceled_before_arrival:'ملغي قبل الوصول',
   partial:'استلام جزئي'
 };
 
@@ -905,13 +975,54 @@ function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!order
     window.__corvexInfoBound=true;
   }
   if(selectable){$('#allcheck').onchange=e=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=e.target.checked)}}
-async function printView(){const c=$('#content');const d=await api('/unprinted');state.orders=d.orders;c.innerHTML=`<div class="page-title"><div><h1>جاهز للطباعة</h1><div class="sub">كل الطلبات التي لم تدخل أي دفعة طباعة حتى الآن</div></div><div><span class="pill" style="background:#e9eff4;color:#102a43">${state.orders.length} طلب</span></div></div><div class="card"><div class="actions no-print" style="margin-top:0;margin-bottom:14px"><button id="selAll" class="btn btn-soft">تحديد الكل</button><button id="makeBatch" class="btn btn-accent">إنشاء دفعة وطباعة المحدد</button></div><div id="printTable"></div></div>`;renderOrdersTable('#printTable',state.orders,true);$('#selAll').onclick=()=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=true);$('#makeBatch').onclick=async()=>{const ids=[...document.querySelectorAll('.rowcheck:checked')].map(x=>Number(x.dataset.id));if(!ids.length)return toast('حدد طلباً واحداً على الأقل');try{const r=await api('/print-batches',{method:'POST',body:JSON.stringify({order_ids:ids})});openPrintWindow(r.orders,`دفعة ${r.batch.batch_code}`);toast(`تم إنشاء دفعة ${r.batch.order_count} طلب`);setTimeout(()=>printView(),600)}catch(e){toast(e.message)}}}
+async function printView(){
+  const c=$('#content');
+  const stores=await getActiveStores();
+  c.innerHTML=`
+    <div class="page-title"><div><h1>جاهز للطباعة</h1><div class="sub">كل متجر له دفعة طباعة مستقلة</div></div><div><span id="printCount" class="pill" style="background:#e9eff4;color:#102a43">0 طلب</span></div></div>
+    <div class="card">
+      <div class="store-print-picker no-print"><div class="field"><label>اختر المتجر أولاً</label><select id="printStore" class="select"><option value="">اختر المتجر...</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div></div>
+      <div class="actions no-print" style="margin-top:0;margin-bottom:14px"><button id="selAll" class="btn btn-soft">تحديد الكل</button><button id="makeBatch" class="btn btn-accent">إنشاء دفعة وطباعة المحدد</button></div>
+      <div id="printTable"><div class="empty">اختر متجر لعرض طلباته غير المطبوعة</div></div>
+    </div>`;
+  const loadStore=async()=>{
+    const sid=$('#printStore').value;
+    if(!sid){state.orders=[];$('#printCount').textContent='0 طلب';$('#printTable').innerHTML='<div class="empty">اختر متجر لعرض طلباته غير المطبوعة</div>';return}
+    const d=await api('/unprinted?store_id='+encodeURIComponent(sid));state.orders=d.orders;$('#printCount').textContent=state.orders.length+' طلب';renderOrdersTable('#printTable',state.orders,true)
+  };
+  $('#printStore').onchange=loadStore;
+  $('#selAll').onclick=()=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=true);
+  $('#makeBatch').onclick=async()=>{
+    if(!$('#printStore').value)return toast('اختر المتجر أولاً');
+    const ids=[...document.querySelectorAll('.rowcheck:checked')].map(x=>Number(x.dataset.id));
+    if(!ids.length)return toast('حدد طلباً واحداً على الأقل');
+    try{const r=await api('/print-batches',{method:'POST',body:JSON.stringify({order_ids:ids})});openPrintWindow(r.orders,`دفعة ${r.batch.store_name||''} - ${r.batch.batch_code}`);toast(`تم إنشاء دفعة ${r.batch.order_count} طلب لمتجر ${r.batch.store_name||''}`);setTimeout(loadStore,600)}catch(e){toast(e.message)}
+  };
+}
 function labelHtml(o){return `<div class="label"><div class="label-head"><b>CORVEX SPORT</b><span>#${o.order_code}</span></div><div><strong>المستلم:</strong> ${esc(o.recipient_name)}</div><div><strong>الهاتف:</strong> ${esc(o.phone)}</div><div><strong>العنوان:</strong> ${esc(o.area)} ${esc(o.detailed_address)}</div><div><strong>القيمة:</strong> ${money(o.amount)} د.أ</div><div class="note"><strong>ملاحظات الطلب:</strong><br>${esc(o.order_notes||'-')}</div></div>`}
 function openPrintWindow(orders,title='طباعة'){const w=window.open('','_blank');const pages=[];for(let i=0;i<orders.length;i+=8)pages.push(orders.slice(i,i+8));w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}body{margin:0;font-family:Tahoma,Arial,sans-serif}.page{width:200mm;height:287mm;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:3mm;page-break-after:always}.page:last-child{page-break-after:auto}.label{border:1px solid #555;padding:4mm;font-size:10.5pt;overflow:hidden}.label-head{display:flex;justify-content:space-between;border-bottom:1px solid #999;padding-bottom:2mm;margin-bottom:2mm;font-size:12pt}.note{margin-top:2mm;border-top:1px dashed #aaa;padding-top:2mm;font-weight:700;white-space:pre-line;line-height:1.7;word-break:break-word}</style></head><body>${pages.map(pg=>`<section class="page">${pg.map(labelHtml).join('')}</section>`).join('')}<script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);w.document.close()}
-async function batchesView(){const c=$('#content');const d=await api('/print-batches');state.batches=d.batches;c.innerHTML=`<div class="page-title"><div><h1>دفعات الطباعة</h1><div class="sub">إعادة طباعة دفعة كاملة أو صفحة معينة منها</div></div></div><div class="card">${state.batches.length?state.batches.map(b=>`<div class="batch-card"><div><b>${esc(b.batch_code)}</b><div class="batch-meta">${b.order_count} طلب • ${esc(b.created_by_name||'')} • ${fmtDate(b.created_at)}</div></div><div class="actions" style="margin:0"><button class="btn btn-outline" data-batch="${b.id}" data-mode="all">إعادة الدفعة</button><button class="btn btn-soft" data-batch="${b.id}" data-mode="page">إعادة صفحة</button></div></div>`).join(''):'<div class="empty">لا توجد دفعات بعد</div>'}</div>`;document.querySelectorAll('[data-batch]').forEach(btn=>btn.onclick=async()=>{const d=await api('/print-batches/'+btn.dataset.batch);if(btn.dataset.mode==='all')openPrintWindow(d.orders,`إعادة ${d.batch.batch_code}`);else{const max=Math.ceil(d.orders.length/8);const p=Number(prompt(`رقم الصفحة من 1 إلى ${max}`,'1'));if(p>=1&&p<=max)openPrintWindow(d.orders.slice((p-1)*8,p*8),`صفحة ${p} - ${d.batch.batch_code}`)}})}
-async function reportsView(){const c=$('#content');c.innerHTML=`<div class="page-title"><div><h1>الكشوفات وExcel</h1><div class="sub">حدد فترة ثم اطبع كشف أو نزّل ملف للشركة</div></div></div><div class="card"><div class="toolbar"><input id="fd" type="date" class="input"><input id="td" type="date" class="input"><button id="rr" class="btn btn-primary">عرض</button><button id="rp" class="btn btn-outline">طباعة كشف</button><button id="rx" class="btn btn-accent">تنزيل Excel/CSV</button></div><div id="reportTable"></div></div>`;const today=new Date().toISOString().slice(0,10);$('#fd').value=today;$('#td').value=today;async function load(){const p=new URLSearchParams({from_date:$('#fd').value,to_date:$('#td').value});const d=await api('/orders?'+p);state.orders=d.orders;renderOrdersTable('#reportTable',state.orders,false)}$('#rr').onclick=load;$('#rp').onclick=()=>printReport(state.orders);$('#rx').onclick=()=>downloadCsv(state.orders);await load()}
-function printReport(orders){const w=window.open('','_blank');w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>كشف CORVEX SPORT</title><style>@page{size:A4 landscape;margin:8mm}body{font-family:Tahoma,Arial}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aaa;padding:5px;text-align:right}h2{margin:0 0 10px}</style></head><body><h2>كشف طلبات CORVEX SPORT</h2><table><thead><tr><th>الكود</th><th>الاسم</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr><td>${o.order_code}</td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}</td><td>${esc(o.detailed_address)}</td><td>${money(o.amount)}</td><td>${esc(o.order_notes)}</td><td>${esc(o.created_by_name||'')}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()}
-function downloadCsv(orders){const rows=[['رقم البوليصة','اسم المستلم','رقم الهاتف','المحافظة','العنوان التفصيلي','قيمة الطرد','ملاحظات الطلب','الموظف','تاريخ الإدخال'],...orders.map(o=>[o.order_code,o.recipient_name,o.phone,o.area,o.detailed_address,o.amount,o.order_notes,o.created_by_name||'',o.created_at])];const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`corvex-orders-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(a.href)}
+async function batchesView(){
+  const c=$('#content');
+  const stores=await getActiveStores();
+  c.innerHTML=`<div class="page-title"><div><h1>دفعات الطباعة</h1><div class="sub">الدفعات مفصولة حسب المتجر</div></div></div><div class="card"><div class="toolbar"><select id="batchStore" class="select"><option value="">كل المتاجر</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div><div id="batchList"></div></div>`;
+  const loadBatches=async()=>{
+    const q=$('#batchStore').value?('?store_id='+encodeURIComponent($('#batchStore').value)):'';
+    const d=await api('/print-batches'+q);state.batches=d.batches;
+    $('#batchList').innerHTML=state.batches.length?state.batches.map(b=>`<div class="batch-card"><div><b>${esc(b.batch_code)}</b><div class="batch-meta">${esc(b.store_name||'متجر غير محدد')} • ${b.order_count} طلب • ${esc(b.created_by_name||'')} • ${fmtDate(b.created_at)}</div></div><div class="actions" style="margin:0"><button class="btn btn-outline" data-batch="${b.id}" data-mode="all">إعادة الدفعة</button><button class="btn btn-soft" data-batch="${b.id}" data-mode="page">إعادة صفحة</button></div></div>`).join(''):'<div class="empty">لا توجد دفعات</div>';
+    document.querySelectorAll('[data-batch]').forEach(btn=>btn.onclick=async()=>{const d=await api('/print-batches/'+btn.dataset.batch);if(btn.dataset.mode==='all')openPrintWindow(d.orders,`إعادة ${d.batch.batch_code}`);else{const max=Math.ceil(d.orders.length/8);const p=Number(prompt(`رقم الصفحة من 1 إلى ${max}`,'1'));if(p>=1&&p<=max)openPrintWindow(d.orders.slice((p-1)*8,p*8),`صفحة ${p} - ${d.batch.batch_code}`)}})
+  };
+  $('#batchStore').onchange=loadBatches;await loadBatches()
+}
+async function reportsView(){
+  const c=$('#content');
+  const stores=await getActiveStores();
+  c.innerHTML=`<div class="page-title"><div><h1>الكشوفات وExcel</h1><div class="sub">كشف عام أو كشف لمتجر محدد</div></div></div><div class="card"><div class="toolbar"><select id="reportStore" class="select"><option value="">كل المتاجر</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><input id="fd" type="date" class="input"><input id="td" type="date" class="input"><button id="rr" class="btn btn-primary">عرض</button><button id="rp" class="btn btn-outline">طباعة كشف</button><button id="rx" class="btn btn-accent">تنزيل Excel/CSV</button></div><div id="reportTable"></div></div>`;
+  const today=new Date().toISOString().slice(0,10);$('#fd').value=today;$('#td').value=today;
+  async function load(){const p=new URLSearchParams({from_date:$('#fd').value,to_date:$('#td').value});if($('#reportStore').value)p.set('store_id',$('#reportStore').value);const d=await api('/orders?'+p);state.orders=d.orders;renderOrdersTable('#reportTable',state.orders,false)}
+  $('#rr').onclick=load;$('#rp').onclick=()=>printReport(state.orders);$('#rx').onclick=()=>downloadCsv(state.orders);$('#reportStore').onchange=load;await load()
+}
+function printReport(orders){const w=window.open('','_blank');w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>كشف CORVEX SPORT</title><style>@page{size:A4 landscape;margin:8mm}body{font-family:Tahoma,Arial}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aaa;padding:5px;text-align:right}h2{margin:0 0 10px}</style></head><body><h2>كشف طلبات CORVEX SPORT</h2><table><thead><tr><th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr><td>${o.order_code}</td><td>${esc(o.store_name||'—')}</td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}</td><td>${esc(o.detailed_address)}</td><td>${money(o.amount)}</td><td>${esc(o.order_notes)}</td><td>${esc(o.created_by_name||'')}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()}
+function downloadCsv(orders){const rows=[['رقم البوليصة','المتجر','اسم المستلم','رقم الهاتف','المحافظة','العنوان التفصيلي','قيمة الطرد','ملاحظات الطلب','الموظف','تاريخ الإدخال'],...orders.map(o=>[o.order_code,o.store_name||'',o.recipient_name,o.phone,o.area,o.detailed_address,o.amount,o.order_notes,o.created_by_name||'',o.created_at])];const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`corvex-orders-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(a.href)}
 
 async function storesView(){
   const c=$('#content');
