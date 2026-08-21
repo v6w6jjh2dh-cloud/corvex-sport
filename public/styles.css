@@ -232,3 +232,133 @@ button,input,textarea,select{font:inherit}.hidden{display:none!important}
   }
   .outcome-card .modal-head h3{font-size:20px}
 }
+
+
+/* V13 RESULT MODAL — cleaner centered layout */
+.outcome-modal{
+  display:flex !important;
+  align-items:flex-start !important;
+  justify-content:center !important;
+  overflow-y:auto !important;
+  padding:24px !important;
+  background:rgba(15,23,42,.52) !important;
+}
+.outcome-card{
+  width:min(1040px,96vw) !important;
+  margin:18px auto !important;
+  padding:28px 30px 24px !important;
+  border-radius:22px !important;
+  box-shadow:0 26px 80px rgba(0,0,0,.28) !important;
+}
+.outcome-card .modal-head{
+  display:flex !important;
+  flex-direction:row !important;
+  align-items:center !important;
+  justify-content:space-between !important;
+  gap:16px !important;
+  padding-bottom:14px !important;
+  margin-bottom:18px !important;
+  border-bottom:1px solid #edf1f5 !important;
+}
+.outcome-card .modal-head h3{
+  margin:0 !important;
+  font-size:30px !important;
+  color:#0f172a !important;
+}
+.outcome-form{
+  display:grid !important;
+  grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+  gap:20px 24px !important;
+}
+.outcome-card .field{
+  display:flex !important;
+  flex-direction:column !important;
+  gap:9px !important;
+}
+.outcome-card .field label{
+  font-size:18px !important;
+  font-weight:800 !important;
+  color:#111827 !important;
+}
+.outcome-card .input,
+.outcome-card .select,
+.outcome-card .textarea{
+  min-height:58px !important;
+  border-radius:14px !important;
+  font-size:20px !important;
+  padding:12px 16px !important;
+}
+.outcome-card .textarea{
+  min-height:110px !important;
+  resize:vertical !important;
+}
+.fixed-fee-wrap{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.fixed-fee{
+  background:#f8fafc !important;
+  font-weight:800 !important;
+}
+.fee-unit{
+  white-space:nowrap;
+  background:#eef6ff;
+  border:1px solid #d8e8fb;
+  padding:12px 14px;
+  border-radius:12px;
+  font-weight:700;
+  color:#334155;
+}
+.settlement-preview{
+  margin-top:22px !important;
+  padding:16px 18px !important;
+  border-radius:14px !important;
+  background:#f7fafc !important;
+  font-size:18px !important;
+}
+.outcome-actions{
+  margin-top:18px !important;
+  display:flex !important;
+  gap:12px !important;
+  justify-content:flex-start !important;
+}
+.outcome-actions .btn{
+  min-width:150px;
+  min-height:48px;
+}
+@media(max-width:700px){
+  .outcome-modal{
+    padding:10px !important;
+    align-items:flex-start !important;
+  }
+  .outcome-card{
+    width:100% !important;
+    margin:8px auto 20px !important;
+    padding:18px 16px !important;
+    border-radius:18px !important;
+  }
+  .outcome-card .modal-head h3{
+    font-size:22px !important;
+  }
+  .outcome-form{
+    grid-template-columns:1fr !important;
+    gap:14px !important;
+  }
+  .outcome-card .field label{
+    font-size:16px !important;
+  }
+  .outcome-card .input,
+  .outcome-card .select,
+  .outcome-card .textarea{
+    font-size:18px !important;
+    min-height:52px !important;
+  }
+  .fixed-fee-wrap{
+    align-items:stretch;
+  }
+  .fee-unit{
+    display:flex;
+    align-items:center;
+  }
+}

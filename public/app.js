@@ -458,7 +458,7 @@ async function openOutcome(id){
     const card=overlay.querySelector('.outcome-card');
     card.innerHTML=`
       <div class="modal-head">
-        <h3>نتيجة الطلب #${esc(o.order_code)}</h3>
+        <h3>تحديث نتيجة الطلب #${esc(o.order_code)}</h3>
         <button type="button" class="btn btn-soft outcome-close">✕</button>
       </div>
 
@@ -477,7 +477,10 @@ async function openOutcome(id){
 
         <div class="field">
           <label>أجور التوصيل</label>
-          <input id="outDeliveryFee" class="input" inputmode="decimal" value="${Number(o.delivery_fee||0)}">
+          <div class="fixed-fee-wrap">
+            <input id="outDeliveryFee" class="input fixed-fee" value="2" readonly>
+            <span class="fee-unit">دينار ثابت</span>
+          </div>
         </div>
 
         <div class="field">
@@ -523,9 +526,22 @@ async function openOutcome(id){
       const cost=Number(card.querySelector('#outCost').value||0);
       card.querySelector('#profitPreview').textContent=money(cash-cost);
     };
+
+    const syncDefaultCash=()=>{
+      const status=card.querySelector('#outStatus').value;
+      const amount=Number(card.querySelector('#outDeliveredAmount').value||0);
+      const cashInput=card.querySelector('#outCash');
+      const existing=Number(o.cash_collected||0);
+      if(existing===0 && ['delivered','delivered_adjusted'].includes(status)){
+        cashInput.value=Math.max(0, amount-2);
+      }
+      calc();
+    };
     card.querySelector('#outCash').oninput=calc;
     card.querySelector('#outCost').oninput=calc;
-    calc();
+    card.querySelector('#outStatus').onchange=syncDefaultCash;
+    card.querySelector('#outDeliveredAmount').oninput=syncDefaultCash;
+    syncDefaultCash();
 
     card.querySelector('#saveOutcome').onclick=async()=>{
       const saveBtn=card.querySelector('#saveOutcome');
@@ -537,7 +553,7 @@ async function openOutcome(id){
           body:JSON.stringify({
             delivery_status:card.querySelector('#outStatus').value,
             delivered_amount:card.querySelector('#outDeliveredAmount').value,
-            delivery_fee:card.querySelector('#outDeliveryFee').value,
+            delivery_fee:2,
             cash_collected:card.querySelector('#outCash').value,
             cost_of_goods:card.querySelector('#outCost').value,
             delivered_pieces:card.querySelector('#outDeliveredPieces').value,
