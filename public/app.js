@@ -389,7 +389,7 @@ async function boot(){
 }
 function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);renderShell();show('dashboard')}catch(e){toast(e.message)}}}
 function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>تهيئة CORVEX SPORT</h1><p>أنشئ أول حساب مدير</p></div><div class="field"><label>الاسم الظاهر</label><input id="sd" class="input" value="Admin"></div><br><div class="field"><label>اسم المستخدم</label><input id="su" class="input" value="admin"></div><br><div class="field"><label>كلمة المرور</label><input id="sp" type="password" class="input"></div><button id="setupBtn" class="btn btn-accent" style="width:100%;margin-top:18px">إنشاء النظام</button></div></div>`;$('#setupBtn').onclick=async()=>{try{await api('/setup',{method:'POST',body:JSON.stringify({display_name:$('#sd').value,username:$('#su').value,password:$('#sp').value})});toast('تمت التهيئة');renderLogin()}catch(e){toast(e.message)}}}
-function renderShell(){app.innerHTML=`<div class="shell"><header class="topbar"><button id="mobileMenuBtn" class="mobile-menu-btn" aria-label="القائمة">☰</button><div class="logo"><div class="logo-mark">C</div><div>CORVEX SPORT<small>ORDER DESK</small></div></div><div class="top-actions"><span class="pill">${esc(state.user?.display_name||'')}</span><button id="logout" class="btn btn-soft">خروج</button></div></header><div class="layout"><aside class="sidebar"><nav class="nav"><button data-view="dashboard">⌂ لوحة التحكم</button><button data-view="new">＋ إضافة طلب</button><button data-view="orders">▤ الطلبات والبحث</button><button data-view="print">▣ جاهز للطباعة</button><button data-view="batches">↻ دفعات الطباعة</button><button data-view="reports">▦ الكشوفات وExcel</button>${state.user?.role==='admin'?'<button data-view="users">♟ المستخدمون</button>':''}</nav></aside><main id="content" class="content"></main><div id="sidebarOverlay" class="sidebar-overlay"></div></div></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
+function renderShell(){app.innerHTML=`<div class="shell"><header class="topbar"><button id="mobileMenuBtn" class="mobile-menu-btn" aria-label="القائمة">☰</button><div class="logo"><div class="logo-mark">C</div><div>CORVEX SPORT<small>ORDER DESK</small></div></div><div class="top-actions"><span class="pill">${esc(state.user?.display_name||'')}</span><button id="logout" class="btn btn-soft">خروج</button></div></header><div class="layout"><aside class="sidebar"><nav class="nav"><button data-view="dashboard">⌂ لوحة التحكم</button><button data-view="new">＋ إضافة طلب</button><button data-view="orders">▤ الطلبات والبحث</button><button data-view="print">▣ جاهز للطباعة</button><button data-view="batches">↻ دفعات الطباعة</button><button data-view="reports">▦ الكشوفات وExcel</button><button data-view="stores">▣ المتاجر</button>${state.user?.role==='admin'?'<button data-view="users">♟ المستخدمون</button>':''}</nav></aside><main id="content" class="content"></main><div id="sidebarOverlay" class="sidebar-overlay"></div></div></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
   show(b.dataset.view);
   document.querySelector('.sidebar')?.classList.remove('open');
   document.querySelector('#sidebarOverlay')?.classList.remove('show');
@@ -409,11 +409,71 @@ if(sidebarOverlay){
     sidebarOverlay.classList.remove('show');
   };
 }$('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'})}catch{}localStorage.removeItem('corvex_token');state.token='';state.user=null;renderLogin()}}
-async function show(v){state.view=v;document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));if(v==='dashboard')return dashboard();if(v==='new')return newOrder();if(v==='orders')return ordersView();if(v==='print')return printView();if(v==='batches')return batchesView();if(v==='reports')return reportsView();if(v==='users')return usersView()}
+async function show(v){state.view=v;document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));if(v==='dashboard')return dashboard();if(v==='new')return newOrder();if(v==='orders')return ordersView();if(v==='print')return printView();if(v==='batches')return batchesView();if(v==='reports')return reportsView();if(v==='stores')return storesView();if(v==='users')return usersView()}
 async function dashboard(){const c=$('#content');c.innerHTML='<div class="empty">جاري التحميل...</div>';try{state.stats=await api('/dashboard');c.innerHTML=`<div class="page-title"><div><h1>لوحة التحكم</h1><div class="sub">نظرة سريعة على حركة الطلبات</div></div><button class="btn btn-accent" onclick="show('new')">＋ طلب جديد</button></div><div class="grid stats"><div class="stat"><b>${state.stats.today||0}</b><span>طلبات اليوم</span></div><div class="stat"><b>${state.stats.unprinted||0}</b><span>غير مطبوعة</span></div><div class="stat"><b>${state.stats.total||0}</b><span>إجمالي الطلبات</span></div><div class="stat"><b>${state.stats.batches||0}</b><span>دفعات الطباعة</span></div></div><div class="card"><h3>مسار العمل</h3><p class="sub">الموظف يدخل الطلب ← يظهر ضمن غير المطبوع ← تنشئ دفعة طباعة ← 8 بوالص في كل A4.</p></div>`}catch(e){c.innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
-function newOrder(){const c=$('#content');c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">الصق الطلب كامل أو عبّئ الحقول يدويًا • Smart Parser V11</div></div></div><div class="card"><div class="smart-box"><div class="field"><label>الصق الطلب هنا</label><textarea id="raw" class="textarea" placeholder="0772207993\nعلجون عرجان\n3 بلايز ريبوك\nالوزن 100\n15 شامل التوصيل"></textarea></div><div class="smart-actions"><button id="parse" class="btn btn-accent">⚡ تعبئة تلقائية</button><button id="clearRaw" class="btn btn-outline">مسح</button></div></div><br><div class="grid form-grid"><div class="field"><label>اسم المستلم</label><input id="name" class="input" placeholder="اسم الزبون"></div><div class="field"><label>رقم الهاتف</label><input id="phone" class="input" inputmode="tel" placeholder="07xxxxxxxx"></div><div class="field"><label>المحافظة</label><input id="area" class="input" placeholder="عمان / إربد / عجلون..."></div><div class="field"><label>قيمة الطلب</label><input id="amount" class="input" inputmode="decimal" placeholder="0.00"></div><div class="field full"><label>العنوان التفصيلي</label><textarea id="address" class="textarea" placeholder="العنوان الكامل"></textarea></div><div class="field full"><label>ملاحظات الطلب / التجهيز</label><textarea id="notes" class="textarea" placeholder="الصنف، اللون، المقاس، الوزن، أي ملاحظات للموظف الذي يجهز الطلب"></textarea></div></div><div class="actions"><button id="saveOrder" class="btn btn-primary">حفظ الطلب</button><button id="saveNext" class="btn btn-accent">حفظ وإضافة طلب جديد</button></div></div>`;
-  $('#parse').onclick=()=>{const p=parseSmart($('#raw').value);$('#name').value=p.name||'مجهول';if(p.phone)$('#phone').value=p.phone;$('#amount').value=p.amount||'';$('#area').value=p.area||'';$('#address').value=p.address||'';$('#notes').value=p.notes||'';toast('تم الفرز V11، راجع الحقول قبل الحفظ')};
-  async function save(next){try{const d=await api('/orders',{method:'POST',body:JSON.stringify({recipient_name:$('#name').value,phone:$('#phone').value,area:$('#area').value,detailed_address:$('#address').value,amount:$('#amount').value,order_notes:$('#notes').value,raw_text:$('#raw').value})});toast(`تم حفظ الطلب رقم ${d.order.order_code}`);if(next)newOrder();else show('orders')}catch(e){toast(e.message)}}$('#saveOrder').onclick=()=>save(false);$('#saveNext').onclick=()=>save(true)
+async function newOrder(){
+  const c=$('#content');
+  let stores=[];
+  try{
+    const sd=await api('/stores');
+    stores=(sd.stores||[]).filter(s=>s.is_active);
+  }catch(e){}
+
+  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">الصق الطلب كامل أو عبّئ الحقول يدويًا • Smart Parser V11</div></div></div>
+  <div class="card">
+    <div class="store-picker-box">
+      <div class="field">
+        <label>المتجر صاحب الطلب</label>
+        <select id="store" class="select">
+          <option value="">اختر المتجر...</option>
+          ${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}
+        </select>
+      </div>
+      <button id="quickAddStore" class="btn btn-soft" type="button">＋ متجر جديد</button>
+    </div>
+
+    ${stores.length?'':'<div class="store-warning">لا يوجد متجر مضاف بعد. أضف متجر أولاً حتى تحفظ الطلب.</div>'}
+
+    <div class="smart-box">
+      <div class="field"><label>الصق الطلب هنا</label><textarea id="raw" class="textarea" placeholder="0772207993\nعلجون عرجان\n3 بلايز ريبوك\nالوزن 100\n15 شامل التوصيل"></textarea></div>
+      <div class="smart-actions"><button id="parse" class="btn btn-accent">⚡ تعبئة تلقائية</button><button id="clearRaw" class="btn btn-outline">مسح</button></div>
+    </div>
+    <br>
+    <div class="grid form-grid">
+      <div class="field"><label>اسم المستلم</label><input id="name" class="input" placeholder="اسم الزبون"></div>
+      <div class="field"><label>رقم الهاتف</label><input id="phone" class="input" inputmode="tel" placeholder="07xxxxxxxx"></div>
+      <div class="field"><label>المحافظة</label><input id="area" class="input" placeholder="عمان / إربد / عجلون..."></div>
+      <div class="field"><label>قيمة الطلب</label><input id="amount" class="input" inputmode="decimal" placeholder="0.00"></div>
+      <div class="field full"><label>العنوان التفصيلي</label><textarea id="address" class="textarea" placeholder="العنوان الكامل"></textarea></div>
+      <div class="field full"><label>ملاحظات الطلب / التجهيز</label><textarea id="notes" class="textarea" placeholder="الصنف، اللون، المقاس، الوزن، أي ملاحظات للموظف الذي يجهز الطلب"></textarea></div>
+    </div>
+    <div class="actions"><button id="saveOrder" class="btn btn-primary">حفظ الطلب</button><button id="saveNext" class="btn btn-accent">حفظ وإضافة طلب جديد</button></div>
+  </div>`;
+
+  $('#parse').onclick=()=>{const p=parseSmart($('#raw').value);$('#name').value=p.name||'مجهول';if(p.phone)$('#phone').value=p.phone;$('#amount').value=p.amount||'';$('#area').value=p.area||'';$('#address').value=p.address||'';$('#notes').value=p.notes||'';toast('تم الفرز، راجع الحقول قبل الحفظ')};
+  $('#clearRaw').onclick=()=>{$('#raw').value=''};
+  $('#quickAddStore').onclick=()=>show('stores');
+
+  async function save(next){
+    try{
+      if(!$('#store').value){toast('اختر المتجر صاحب الطلب');return}
+      const d=await api('/orders',{method:'POST',body:JSON.stringify({
+        store_id:$('#store').value,
+        recipient_name:$('#name').value,
+        phone:$('#phone').value,
+        area:$('#area').value,
+        detailed_address:$('#address').value,
+        amount:$('#amount').value,
+        order_notes:$('#notes').value,
+        raw_text:$('#raw').value
+      })});
+      toast(`تم حفظ الطلب رقم ${d.order.order_code}`);
+      if(next)newOrder();else show('orders')
+    }catch(e){toast(e.message)}
+  }
+
+  $('#saveOrder').onclick=()=>save(false);
+  $('#saveNext').onclick=()=>save(true);
 }
 
 async function editOrder(id){
@@ -439,6 +499,13 @@ async function editOrder(id){
           </div>
 
           <div class="edit-section-title">بيانات الطلب</div>
+          <div class="edit-field">
+            <label>المتجر صاحب الطلب</label>
+            <select id="editStore" class="select">
+              <option value="">جاري تحميل المتاجر...</option>
+            </select>
+          </div>
+
 
           <div class="edit-field">
             <label>اسم المستلم</label>
@@ -531,6 +598,14 @@ async function editOrder(id){
     $('#backToOrders').onclick=back;
     $('#cancelEditOrder').onclick=back;
 
+    try{
+      const sd=await api('/stores');
+      const stores=(sd.stores||[]).filter(s=>s.is_active || s.id===o.store_id);
+      $('#editStore').innerHTML='<option value="">اختر المتجر...</option>'+stores.map(s=>`<option value="${s.id}" ${Number(s.id)===Number(o.store_id)?'selected':''}>${esc(s.name)}</option>`).join('');
+    }catch(e){
+      $('#editStore').innerHTML='<option value="">تعذر تحميل المتاجر</option>';
+    }
+
     const calcProfit=()=>{
       const cash=Number($('#editCash').value||0);
       const cost=Number($('#editCost').value||0);
@@ -561,6 +636,7 @@ async function editOrder(id){
         await api('/orders/'+id,{
           method:'PUT',
           body:JSON.stringify({
+            store_id:$('#editStore').value,
             recipient_name:$('#editName').value,
             phone:$('#editPhone').value,
             area:$('#editArea').value,
@@ -769,7 +845,7 @@ async function openOutcome(id){
   }
 }
 
-function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>النتيجة</th><th>الطباعة</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code"><button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}<br><span class="sub">${esc(o.detailed_address)}</span></td><td>${money(o.amount)}</td><td class="notes-cell"><div class="full-order-notes">${esc(o.order_notes||'')}</div></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><button class="btn btn-soft outcome-btn" data-order-id="${o.id}">تحديث النتيجة</button><div class="sub" style="margin-top:4px">كاش ${money(o.cash_collected||0)} • ربح ${money((o.cash_collected||0)-(o.cost_of_goods||0))}</div></td><td>${o.printed?'<span class="badge badge-ok">مطبوع</span>':'<span class="badge badge-warn">غير مطبوع</span>'}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
+function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>النتيجة</th><th>الطباعة</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code"><button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button></td><td><b>${esc(o.store_name||'—')}</b></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}<br><span class="sub">${esc(o.detailed_address)}</span></td><td>${money(o.amount)}</td><td class="notes-cell"><div class="full-order-notes">${esc(o.order_notes||'')}</div></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><button class="btn btn-soft outcome-btn" data-order-id="${o.id}">تحديث النتيجة</button><div class="sub" style="margin-top:4px">كاش ${money(o.cash_collected||0)} • ربح ${money((o.cash_collected||0)-(o.cost_of_goods||0))}</div></td><td>${o.printed?'<span class="badge badge-ok">مطبوع</span>':'<span class="badge badge-warn">غير مطبوع</span>'}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
   document.querySelectorAll('.outcome-btn').forEach(btn=>{btn.onclick=()=>openOutcome(Number(btn.dataset.orderId));});
   if(selectable){$('#allcheck').onchange=e=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=e.target.checked)}}
 async function printView(){const c=$('#content');const d=await api('/unprinted');state.orders=d.orders;c.innerHTML=`<div class="page-title"><div><h1>جاهز للطباعة</h1><div class="sub">كل الطلبات التي لم تدخل أي دفعة طباعة حتى الآن</div></div><div><span class="pill" style="background:#e9eff4;color:#102a43">${state.orders.length} طلب</span></div></div><div class="card"><div class="actions no-print" style="margin-top:0;margin-bottom:14px"><button id="selAll" class="btn btn-soft">تحديد الكل</button><button id="makeBatch" class="btn btn-accent">إنشاء دفعة وطباعة المحدد</button></div><div id="printTable"></div></div>`;renderOrdersTable('#printTable',state.orders,true);$('#selAll').onclick=()=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=true);$('#makeBatch').onclick=async()=>{const ids=[...document.querySelectorAll('.rowcheck:checked')].map(x=>Number(x.dataset.id));if(!ids.length)return toast('حدد طلباً واحداً على الأقل');try{const r=await api('/print-batches',{method:'POST',body:JSON.stringify({order_ids:ids})});openPrintWindow(r.orders,`دفعة ${r.batch.batch_code}`);toast(`تم إنشاء دفعة ${r.batch.order_count} طلب`);setTimeout(()=>printView(),600)}catch(e){toast(e.message)}}}
@@ -779,5 +855,85 @@ async function batchesView(){const c=$('#content');const d=await api('/print-bat
 async function reportsView(){const c=$('#content');c.innerHTML=`<div class="page-title"><div><h1>الكشوفات وExcel</h1><div class="sub">حدد فترة ثم اطبع كشف أو نزّل ملف للشركة</div></div></div><div class="card"><div class="toolbar"><input id="fd" type="date" class="input"><input id="td" type="date" class="input"><button id="rr" class="btn btn-primary">عرض</button><button id="rp" class="btn btn-outline">طباعة كشف</button><button id="rx" class="btn btn-accent">تنزيل Excel/CSV</button></div><div id="reportTable"></div></div>`;const today=new Date().toISOString().slice(0,10);$('#fd').value=today;$('#td').value=today;async function load(){const p=new URLSearchParams({from_date:$('#fd').value,to_date:$('#td').value});const d=await api('/orders?'+p);state.orders=d.orders;renderOrdersTable('#reportTable',state.orders,false)}$('#rr').onclick=load;$('#rp').onclick=()=>printReport(state.orders);$('#rx').onclick=()=>downloadCsv(state.orders);await load()}
 function printReport(orders){const w=window.open('','_blank');w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>كشف CORVEX SPORT</title><style>@page{size:A4 landscape;margin:8mm}body{font-family:Tahoma,Arial}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aaa;padding:5px;text-align:right}h2{margin:0 0 10px}</style></head><body><h2>كشف طلبات CORVEX SPORT</h2><table><thead><tr><th>الكود</th><th>الاسم</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr><td>${o.order_code}</td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}</td><td>${esc(o.detailed_address)}</td><td>${money(o.amount)}</td><td>${esc(o.order_notes)}</td><td>${esc(o.created_by_name||'')}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()}
 function downloadCsv(orders){const rows=[['رقم البوليصة','اسم المستلم','رقم الهاتف','المحافظة','العنوان التفصيلي','قيمة الطرد','ملاحظات الطلب','الموظف','تاريخ الإدخال'],...orders.map(o=>[o.order_code,o.recipient_name,o.phone,o.area,o.detailed_address,o.amount,o.order_notes,o.created_by_name||'',o.created_at])];const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`corvex-orders-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(a.href)}
+
+async function storesView(){
+  const c=$('#content');
+  let d;
+  try{d=await api('/stores')}catch(e){toast(e.message);return}
+
+  c.innerHTML=`
+    <div class="page-title">
+      <div>
+        <h1>المتاجر / العملاء</h1>
+        <div class="sub">كل طلب يتم ربطه بالمتجر صاحب الطلب</div>
+      </div>
+    </div>
+
+    <div class="stores-layout">
+      <div class="card store-add-card">
+        <h3>إضافة متجر جديد</h3>
+
+        <div class="field">
+          <label>اسم المتجر</label>
+          <input id="storeName" class="input" placeholder="مثال: G&M">
+        </div>
+
+        <div class="field">
+          <label>اسم صاحب المتجر / المسؤول</label>
+          <input id="storeContact" class="input" placeholder="اختياري">
+        </div>
+
+        <div class="field">
+          <label>رقم الهاتف</label>
+          <input id="storePhone" class="input" inputmode="tel" placeholder="اختياري">
+        </div>
+
+        <div class="field">
+          <label>ملاحظات</label>
+          <textarea id="storeNotes" class="textarea" placeholder="أي ملاحظات عن المتجر"></textarea>
+        </div>
+
+        <button id="addStore" class="btn btn-primary">إضافة المتجر</button>
+      </div>
+
+      <div class="card">
+        <h3>قائمة المتاجر</h3>
+        <div class="stores-list">
+          ${(d.stores||[]).length ? d.stores.map(s=>`
+            <div class="store-row">
+              <div class="store-row-main">
+                <b>${esc(s.name)}</b>
+                <div class="sub">${s.contact_name?esc(s.contact_name)+' • ':''}${s.phone?esc(s.phone)+' • ':''}${Number(s.orders_count||0)} طلب</div>
+                ${s.notes?`<div class="store-note">${esc(s.notes)}</div>`:''}
+              </div>
+              <span class="badge ${s.is_active?'badge-ok':'badge-warn'}">${s.is_active?'فعال':'موقوف'}</span>
+            </div>
+          `).join('') : '<div class="empty-state">لا يوجد متاجر حتى الآن</div>'}
+        </div>
+      </div>
+    </div>
+  `;
+
+  $('#addStore').onclick=async()=>{
+    const btn=$('#addStore');
+    btn.disabled=true;
+    btn.textContent='جاري الإضافة...';
+    try{
+      await api('/stores',{method:'POST',body:JSON.stringify({
+        name:$('#storeName').value,
+        contact_name:$('#storeContact').value,
+        phone:$('#storePhone').value,
+        notes:$('#storeNotes').value
+      })});
+      toast('تمت إضافة المتجر');
+      storesView();
+    }catch(e){
+      btn.disabled=false;
+      btn.textContent='إضافة المتجر';
+      toast(e.message);
+    }
+  };
+}
+
 async function usersView(){const c=$('#content');const d=await api('/users');c.innerHTML=`<div class="page-title"><div><h1>المستخدمون</h1><div class="sub">كل موظف يدخل بحسابه ويُحفظ اسمه مع الطلب</div></div></div><div class="grid" style="grid-template-columns:1fr 1fr"><div class="card"><h3>إضافة مستخدم</h3><div class="field"><label>الاسم الظاهر</label><input id="ud" class="input"></div><br><div class="field"><label>اسم المستخدم</label><input id="uu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="up" type="password" class="input"></div><br><div class="field"><label>الصلاحية</label><select id="ur" class="select"><option value="staff">موظف</option><option value="admin">مدير</option></select></div><button id="addUser" class="btn btn-primary" style="margin-top:15px">إضافة</button></div><div class="card"><h3>الحسابات</h3>${d.users.map(u=>`<div class="batch-card"><div><b>${esc(u.display_name)}</b><div class="batch-meta">@${esc(u.username)} • ${u.role==='admin'?'مدير':'موظف'}</div></div><span class="badge ${u.is_active?'badge-ok':'badge-warn'}">${u.is_active?'فعال':'موقوف'}</span></div>`).join('')}</div></div>`;$('#addUser').onclick=async()=>{try{await api('/users',{method:'POST',body:JSON.stringify({display_name:$('#ud').value,username:$('#uu').value,password:$('#up').value,role:$('#ur').value})});toast('تمت إضافة المستخدم');usersView()}catch(e){toast(e.message)}}}
 boot();
