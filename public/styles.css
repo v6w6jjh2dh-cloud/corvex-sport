@@ -74,3 +74,87 @@ button,input,textarea,select{font:inherit}.hidden{display:none!important}
   .finance-stats{grid-template-columns:repeat(2,1fr)}
   .modal-card .form-grid{grid-template-columns:1fr}
 }
+
+
+/* MOBILE MENU HOTFIX */
+@media(max-width:900px){
+  .mobile-menu-btn{
+    display:grid !important;
+    place-items:center !important;
+    flex:0 0 46px;
+    width:46px !important;
+    height:46px !important;
+    border:none !important;
+    border-radius:14px !important;
+    background:#ffffff !important;
+    color:#102a43 !important;
+    font-size:26px !important;
+    font-weight:900 !important;
+    line-height:1 !important;
+    box-shadow:0 6px 16px rgba(0,0,0,.14);
+    order:3;
+  }
+
+  .topbar{
+    display:flex !important;
+    align-items:center !important;
+    min-height:72px !important;
+    padding:0 14px !important;
+    gap:10px !important;
+  }
+
+  .topbar .logo{
+    margin:0 auto !important;
+    order:2;
+  }
+
+  .top-actions{
+    order:1;
+    gap:8px !important;
+  }
+
+  .sidebar{
+    display:block !important;
+    position:fixed !important;
+    top:72px !important;
+    right:-290px !important;
+    width:280px !important;
+    height:calc(100dvh - 72px) !important;
+    background:#102a43 !important;
+    z-index:999 !important;
+    transition:right .22s ease !important;
+    overflow-y:auto !important;
+    padding:14px !important;
+    box-shadow:-12px 0 30px rgba(0,0,0,.3) !important;
+  }
+
+  .sidebar.open{
+    right:0 !important;
+  }
+
+  .sidebar .nav{
+    display:flex !important;
+    flex-direction:column !important;
+    gap:8px !important;
+  }
+
+  .sidebar .nav button{
+    display:block !important;
+    width:100% !important;
+    text-align:right !important;
+    font-size:17px !important;
+    padding:15px 14px !important;
+  }
+
+  .sidebar-overlay{
+    display:none !important;
+    position:fixed !important;
+    inset:72px 0 0 0 !important;
+    background:rgba(0,0,0,.4) !important;
+    z-index:998 !important;
+  }
+
+  .sidebar-overlay.show{
+    display:block !important;
+  }
+}
