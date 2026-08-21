@@ -94,6 +94,22 @@ async function ensureBusinessSchema(env) {
     await env.DB.prepare(`ALTER TABLE print_batches ADD COLUMN store_id INTEGER`).run();
   }
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_print_batches_store_id ON print_batches(store_id)').run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS couriers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,username TEXT DEFAULT '',phone TEXT DEFAULT '',address TEXT DEFAULT '',
+    delivered_commission REAL NOT NULL DEFAULT 0,returned_commission REAL NOT NULL DEFAULT 0,areas TEXT DEFAULT '',notes TEXT DEFAULT '',
+    is_active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS courier_settlements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,settlement_code TEXT NOT NULL UNIQUE,courier_id INTEGER NOT NULL,orders_count INTEGER DEFAULT 0,
+    delivered_count INTEGER DEFAULT 0,returned_count INTEGER DEFAULT 0,total_due REAL DEFAULT 0,created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS courier_settlement_orders (
+    settlement_id INTEGER NOT NULL,order_id INTEGER NOT NULL,commission REAL DEFAULT 0,PRIMARY KEY(settlement_id,order_id)
+  )`).run();
+  const ci=await env.DB.prepare("PRAGMA table_info(orders)").all(),cc=new Set((ci.results||[]).map(r=>r.name));
+  if(!cc.has('courier_id'))await env.DB.prepare('ALTER TABLE orders ADD COLUMN courier_id INTEGER').run();
+  if(!cc.has('courier_settled'))await env.DB.prepare('ALTER TABLE orders ADD COLUMN courier_settled INTEGER NOT NULL DEFAULT 0').run();
 }
 
 const STATUS_LABELS = {
@@ -216,6 +232,37 @@ export async function onRequest(context) {
     }
 
 
+
+    if(path==='/couriers'&&method==='GET'){
+      const r=await env.DB.prepare(`SELECT c.*,
+      (SELECT COUNT(*) FROM orders o WHERE o.courier_id=c.id) assigned_count,
+      (SELECT COUNT(*) FROM orders o WHERE o.courier_id=c.id AND o.delivery_status IN ('delivered','delivered_adjusted')) delivered_count,
+      (SELECT COUNT(*) FROM orders o WHERE o.courier_id=c.id AND o.delivery_status IN ('refused_fee_paid','refused_no_fee','canceled_before_arrival')) returned_count
+      FROM couriers c ORDER BY c.is_active DESC,c.name`).all();
+      return json({couriers:(r.results||[]).map(x=>({...x,delivery_rate:Number(x.assigned_count||0)?Math.round(Number(x.delivered_count||0)*100/Number(x.assigned_count||0)):0}))});
+    }
+    if(path==='/couriers'&&method==='POST'){
+      const b=await readBody(request);if(!String(b.name||'').trim())return json({error:'اسم المندوب مطلوب'},400);
+      await env.DB.prepare('INSERT INTO couriers(name,username,phone,address,delivered_commission,returned_commission,areas,notes) VALUES(?,?,?,?,?,?,?,?)')
+      .bind(String(b.name).trim(),String(b.username||''),String(b.phone||''),String(b.address||''),Number(b.delivered_commission||0),Number(b.returned_commission||0),String(b.areas||''),String(b.notes||'')).run();
+      return json({ok:true},201);
+    }
+    if(path==='/courier-eligible-orders'&&method==='GET'){
+      const cid=Number(url.searchParams.get('courier_id')||0);
+      const r=await env.DB.prepare(`${orderSelectSql("WHERE o.courier_id=? AND o.courier_settled=0 AND o.delivery_status!='pending'")} ORDER BY o.id DESC`).bind(cid).all();
+      return json({orders:r.results||[]});
+    }
+    if(path==='/courier-settlements'&&method==='POST'){
+      const b=await readBody(request),cid=Number(b.courier_id||0),ids=(b.order_ids||[]).map(Number).filter(Boolean);
+      if(!cid||!ids.length)return json({error:'اختر الطلبات'},400);
+      const c=await env.DB.prepare('SELECT * FROM couriers WHERE id=?').bind(cid).first(),ph=ids.map(()=>'?').join(',');
+      const r=await env.DB.prepare(`${orderSelectSql(`WHERE o.id IN (${ph}) AND o.courier_id=? AND o.courier_settled=0`)} ORDER BY o.id`).bind(...ids,cid).all();
+      let dc=0,rc=0,total=0,vals=[];
+      for(const o of (r.results||[])){let v=0;if(['delivered','delivered_adjusted'].includes(o.delivery_status)){dc++;v=Number(c.delivered_commission||0)}else{rc++;v=Number(c.returned_commission||0)}vals.push([o.id,v]);total+=v}
+      const code='CS-'+Date.now(),s=await env.DB.prepare('INSERT INTO courier_settlements(settlement_code,courier_id,orders_count,delivered_count,returned_count,total_due,created_by) VALUES(?,?,?,?,?,?,?)').bind(code,cid,vals.length,dc,rc,total,me.id).run();
+      for(const [oid,v] of vals){await env.DB.prepare('INSERT INTO courier_settlement_orders(settlement_id,order_id,commission) VALUES(?,?,?)').bind(s.meta.last_row_id,oid,v).run();await env.DB.prepare('UPDATE orders SET courier_settled=1 WHERE id=?').bind(oid).run()}
+      return json({settlement:{settlement_code:code,total_due:total}});
+    }
     if (path === '/stores' && method === 'GET') {
       const rows = await env.DB.prepare(`SELECT s.*,
         (SELECT COUNT(*) FROM orders o WHERE o.store_id=s.id) AS orders_count
