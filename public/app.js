@@ -1,7 +1,26 @@
-const state={token:localStorage.getItem('corvex_token')||'',user:null,view:'dashboard',orders:[],selected:new Set(),stats:{},batches:[]};
+const state={token:localStorage.getItem('corvex_token')||'',user:null,view:'dashboard',orders:[],selected:new Set(),stats:{},batches:[],regionGroups:[],dynamicPlaceToGov:new Map(),dynamicPlaces:[]};
 const $=s=>document.querySelector(s);const app=$('#app');
 function toast(msg){const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2400)}
 async function api(path,opts={}){const headers={'content-type':'application/json',...(opts.headers||{})};if(state.token)headers.authorization=`Bearer ${state.token}`;const r=await fetch('/api'+path,{...opts,headers});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'حدث خطأ');return d}
+
+function can(p){
+  return state.user?.role==='admin'||(state.user?.permissions||[]).includes(p);
+}
+async function loadRegionIndex(){
+  try{
+    const d=await api('/regions');
+    state.regionGroups=d.groups||[];
+    const map=new Map();
+    for(const g of state.regionGroups){
+      for(const r of (g.regions||[])){
+        for(const alias of placeAliases(r.name))map.set(alias,g.governorate||g.name);
+      }
+      for(const alias of placeAliases(g.name))map.set(alias,g.governorate||g.name);
+    }
+    state.dynamicPlaceToGov=map;
+    state.dynamicPlaces=[...map.keys()].sort((a,b)=>b.length-a.length);
+  }catch(e){}
+}
 function esc(v=''){return String(v).replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]))}
 function fmtDate(v){if(!v)return'';return new Date(v+'Z').toLocaleString('ar-JO',{dateStyle:'short',timeStyle:'short'})}
 function money(v){return Number(v||0).toFixed(2)}
@@ -128,37 +147,27 @@ function priceFrom(line){
 }
 
 function findBestPlace(line){
-  const n = normalizeArabic(line);
-  const matches = [];
-
-  for(const p of JORDAN_PLACES){
-    // V10: نسمح بالمطابقة حتى لو الزبون لزق الكلمات:
-    // الطفيلةالقادسية / عمانالجاردنز / اربدالرمثا
+  const n=normalizeArabic(line);
+  const matches=[];
+  const dyn=state.dynamicPlaces||[];
+  for(const p of dyn){
     if(n.includes(p)){
-      const gov = PLACE_TO_GOV.get(p) || '';
-      const govNorm = normalizeArabic(gov);
-
-      matches.push({
-        place:p,
-        governorate:gov,
-        words:p.split(/\s+/).length,
-        chars:p.length,
-        // نعطي أولوية للمنطقة/البلدة على اسم المحافظة نفسها
-        isGovernorateName: p === govNorm
-      });
+      const gov=state.dynamicPlaceToGov.get(p)||'';
+      matches.push({place:p,governorate:gov,words:p.split(/\s+/).length,chars:p.length,isGovernorateName:p===normalizeArabic(gov)});
     }
   }
-
-  if(!matches.length) return null;
-
-  matches.sort((a,b)=>{
-    if(a.isGovernorateName !== b.isGovernorateName){
-      return a.isGovernorateName ? 1 : -1;
+  for(const p of JORDAN_PLACES){
+    if(n.includes(p)){
+      const gov=PLACE_TO_GOV.get(p)||'';
+      matches.push({place:p,governorate:gov,words:p.split(/\s+/).length,chars:p.length,isGovernorateName:p===normalizeArabic(gov)});
     }
-    if(b.words !== a.words) return b.words - a.words;
-    return b.chars - a.chars;
+  }
+  if(!matches.length)return null;
+  matches.sort((a,b)=>{
+    if(a.isGovernorateName!==b.isGovernorateName)return a.isGovernorateName?1:-1;
+    if(b.words!==a.words)return b.words-a.words;
+    return b.chars-a.chars;
   });
-
   return matches[0];
 }
 
@@ -385,11 +394,11 @@ function parseSmart(text){
 async function boot(){
   try{const setup=await api('/setup');if(setup.needs_setup){renderSetup();return}}catch{}
   if(!state.token){renderLogin();return}
-  try{const me=await api('/me');state.user=me.user;renderShell();await show('dashboard')}catch{localStorage.removeItem('corvex_token');state.token='';renderLogin()}
+  try{const me=await api('/me');state.user=me.user;await loadRegionIndex();renderShell();await show('dashboard')}catch{localStorage.removeItem('corvex_token');state.token='';renderLogin()}
 }
-function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);renderShell();show('dashboard')}catch(e){toast(e.message)}}}
+function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);await loadRegionIndex();renderShell();show('dashboard')}catch(e){toast(e.message)}}}
 function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>تهيئة CORVEX SPORT</h1><p>أنشئ أول حساب مدير</p></div><div class="field"><label>الاسم الظاهر</label><input id="sd" class="input" value="Admin"></div><br><div class="field"><label>اسم المستخدم</label><input id="su" class="input" value="admin"></div><br><div class="field"><label>كلمة المرور</label><input id="sp" type="password" class="input"></div><button id="setupBtn" class="btn btn-accent" style="width:100%;margin-top:18px">إنشاء النظام</button></div></div>`;$('#setupBtn').onclick=async()=>{try{await api('/setup',{method:'POST',body:JSON.stringify({display_name:$('#sd').value,username:$('#su').value,password:$('#sp').value})});toast('تمت التهيئة');renderLogin()}catch(e){toast(e.message)}}}
-function renderShell(){app.innerHTML=`<div class="shell"><header class="topbar"><button id="mobileMenuBtn" class="mobile-menu-btn" aria-label="القائمة">☰</button><div class="logo"><div class="logo-mark">C</div><div>CORVEX SPORT<small>ORDER DESK</small></div></div><div class="top-actions"><span class="pill">${esc(state.user?.display_name||'')}</span><button id="logout" class="btn btn-soft">خروج</button></div></header><div class="layout"><aside class="sidebar"><nav class="nav"><button data-view="stores">▣ المتاجر</button><button data-view="couriers">🚚 مندوبي التوصيل</button><button data-view="dashboard">⌂ لوحة التحكم</button><button data-view="new">＋ إضافة طلب</button><button data-view="orders">▤ الطلبات والبحث</button><button data-view="print">▣ جاهز للطباعة</button><button data-view="batches">↻ دفعات الطباعة</button><button data-view="reports">▦ الكشوفات وExcel</button>${state.user?.role==='admin'?'<button data-view="users">♟ المستخدمون</button>':''}</nav></aside><main id="content" class="content"></main><div id="sidebarOverlay" class="sidebar-overlay"></div></div></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
+function renderShell(){app.innerHTML=`<div class="shell"><header class="topbar"><button id="mobileMenuBtn" class="mobile-menu-btn" aria-label="القائمة">☰</button><div class="logo"><div class="logo-mark">C</div><div>CORVEX SPORT<small>ORDER DESK</small></div></div><div class="top-actions"><span class="pill">${esc(state.user?.display_name||'')}</span><button id="logout" class="btn btn-soft">خروج</button></div></header><div class="layout"><aside class="sidebar"><nav class="nav">${can('dashboard')?'<button data-view="dashboard">⌂ لوحة التحكم</button>':''}${can('stores')?'<button data-view="stores">▣ المتاجر</button>':''}${can('orders_view')?'<button data-view="orders">▤ الطلبات والبحث</button>':''}${can('couriers')?'<button data-view="couriers">🚚 مندوبي التوصيل</button>':''}${can('orders_add')?'<button data-view="new">＋ إضافة طلب</button>':''}${can('print')?'<button data-view="print">▣ جاهز للطباعة</button>':''}${can('batches')?'<button data-view="batches">↻ دفعات الطباعة</button>':''}${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}${can('users')?'<button data-view="users">♟ المستخدمون</button>':''}${can('permissions')?'<button data-view="permissions">⚙ الصلاحيات</button>':''}</nav></aside><main id="content" class="content"></main><div id="sidebarOverlay" class="sidebar-overlay"></div></div></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
   show(b.dataset.view);
   document.querySelector('.sidebar')?.classList.remove('open');
   document.querySelector('#sidebarOverlay')?.classList.remove('show');
@@ -409,7 +418,7 @@ if(sidebarOverlay){
     sidebarOverlay.classList.remove('show');
   };
 }$('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'})}catch{}localStorage.removeItem('corvex_token');state.token='';state.user=null;renderLogin()}}
-async function show(v){state.view=v;document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));if(v==='dashboard')return dashboard();if(v==='new')return newOrder();if(v==='orders')return ordersView();if(v==='print')return printView();if(v==='batches')return batchesView();if(v==='reports')return reportsView();if(v==='stores')return storesView();if(v==='couriers')return couriersView();if(v==='users')return usersView()}
+async function show(v){state.view=v;document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));if(v==='dashboard')return dashboard();if(v==='new')return newOrder();if(v==='orders')return ordersView();if(v==='print')return printView();if(v==='batches')return batchesView();if(v==='reports')return reportsView();if(v==='stores')return storesView();if(v==='couriers')return couriersView();if(v==='regions')return regionsView();if(v==='permissions')return permissionsView();if(v==='users')return usersView()}
 async function dashboard(){const c=$('#content');c.innerHTML='<div class="empty">جاري التحميل...</div>';try{state.stats=await api('/dashboard');c.innerHTML=`<div class="page-title"><div><h1>لوحة التحكم</h1><div class="sub">نظرة سريعة على حركة الطلبات</div></div><button class="btn btn-accent" onclick="show('new')">＋ طلب جديد</button></div><div class="grid stats"><div class="stat"><b>${state.stats.today||0}</b><span>طلبات اليوم</span></div><div class="stat"><b>${state.stats.unprinted||0}</b><span>غير مطبوعة</span></div><div class="stat"><b>${state.stats.total||0}</b><span>إجمالي الطلبات</span></div><div class="stat"><b>${state.stats.batches||0}</b><span>دفعات الطباعة</span></div></div><div class="card"><h3>مسار العمل</h3><p class="sub">الموظف يدخل الطلب ← يظهر ضمن غير المطبوع ← تنشئ دفعة طباعة ← 8 بوالص في كل A4.</p></div>`}catch(e){c.innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
 async function newOrder(){
   const c=$('#content');
@@ -537,7 +546,7 @@ async function editOrder(id){
             <input id="editAmount" class="input" inputmode="decimal" value="${Number(o.amount||0)}">
           </div>
 
-          <div class="edit-section-title">نتيجة التوصيل</div>
+          <div class="edit-section-title">نتيجة التوصيل</div><div class="edit-field"><label>مندوب التوصيل</label><select id="editCourier" class="select"><option value="">بدون مندوب</option></select></div>
 
           <div class="edit-field">
             <label>الحالة</label>
@@ -606,6 +615,12 @@ async function editOrder(id){
       $('#editStore').innerHTML='<option value="">تعذر تحميل المتاجر</option>';
     }
 
+    
+    try{
+      const cd=await api('/couriers');
+      $('#editCourier').innerHTML='<option value="">بدون مندوب</option>'+(cd.couriers||[]).filter(x=>x.is_active||Number(x.id)===Number(o.courier_id)).map(x=>`<option value="${x.id}" ${Number(x.id)===Number(o.courier_id)?'selected':''}>${esc(x.name)}</option>`).join('');
+    }catch(e){}
+
     const calcProfit=()=>{
       const cash=Number($('#editCash').value||0);
       const cost=Number($('#editCost').value||0);
@@ -637,6 +652,7 @@ async function editOrder(id){
           method:'PUT',
           body:JSON.stringify({
             store_id:$('#editStore').value,
+            courier_id:$('#editCourier').value,
             recipient_name:$('#editName').value,
             phone:$('#editPhone').value,
             area:$('#editArea').value,
@@ -1026,21 +1042,102 @@ function downloadCsv(orders){const rows=[['رقم البوليصة','المتج�
 
 
 async function couriersView(){
- const c=$('#content'),d=await api('/couriers'),cs=d.couriers||[];
- c.innerHTML=`<div class="page-title"><div><h1>مندوبي التوصيل</h1><div class="sub">إضافة مندوب • نسبة التسليم • تسكير الحساب</div></div></div>
- <div class="courier-layout"><div class="card"><h3>إضافة مندوب</h3>
- ${[['cn','اسم المندوب'],['cu','اسم المستخدم'],['ca','العنوان'],['cp','الهاتف'],['cd','عمولة الطلب المستلم'],['cr','عمولة الرفض / المرتجع']].map(x=>`<div class="field"><label>${x[1]}</label><input id="${x[0]}" class="input"></div>`).join('')}
- <div class="field"><label>مناطق المندوب</label><textarea id="car" class="textarea"></textarea></div><div class="field"><label>ملاحظات</label><textarea id="cno" class="textarea"></textarea></div>
- <button id="addCourier" class="btn btn-primary">إضافة المندوب</button></div>
- <div class="card"><h3>قائمة المناديب</h3>${cs.length?cs.map(x=>`<div class="courier-card"><div><b>${esc(x.name)}</b> <span class="delivery-rate">${x.delivery_rate}% تسليم</span><div class="sub">الشحنات ${x.assigned_count||0} • تم الاستلام ${x.delivered_count||0} • رفض/رجوع ${x.returned_count||0}</div></div><button class="btn btn-accent settle-courier" data-id="${x.id}">تسكير الحساب</button></div>`).join(''):'<div class="empty">لا يوجد مناديب</div>'}</div></div><div id="settlementArea"></div>`;
- $('#addCourier').onclick=async()=>{try{await api('/couriers',{method:'POST',body:JSON.stringify({name:$('#cn').value,username:$('#cu').value,address:$('#ca').value,phone:$('#cp').value,delivered_commission:$('#cd').value,returned_commission:$('#cr').value,areas:$('#car').value,notes:$('#cno').value})});couriersView()}catch(e){toast(e.message)}};
- document.querySelectorAll('.settle-courier').forEach(b=>b.onclick=()=>openCourierSettlement(Number(b.dataset.id),cs.find(x=>Number(x.id)===Number(b.dataset.id))));
+  const c=$('#content'),d=await api('/couriers'),cs=d.couriers||[];
+  c.innerHTML=`<div class="page-title"><div><h1>مندوبي التوصيل</h1><div class="sub">إضافة • تعديل • حذف • نسبة التسليم • تسكير الحساب</div></div></div>
+  <div class="courier-layout">
+    <div class="card"><h3 id="courierFormTitle">إضافة مندوب</h3>
+      <input type="hidden" id="courierEditId">
+      ${[['cn','اسم المندوب'],['cu','اسم المستخدم'],['ca','العنوان'],['cp','الهاتف'],['cd','عمولة الطلب المستلم'],['cr','عمولة الرفض / المرتجع']].map(x=>`<div class="field"><label>${x[1]}</label><input id="${x[0]}" class="input"></div>`).join('')}
+      <div class="field"><label>مناطق المندوب</label><select id="car" class="select" multiple size="7">${state.regionGroups.map(g=>`<optgroup label="${esc(g.name)}">${(g.regions||[]).map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('')}</optgroup>`).join('')}</select></div>
+      <div class="field"><label>ملاحظات</label><textarea id="cno" class="textarea"></textarea></div>
+      <div class="actions"><button id="saveCourier" class="btn btn-primary">إضافة المندوب</button><button id="cancelCourierEdit" class="btn btn-soft" style="display:none">إلغاء التعديل</button></div>
+    </div>
+    <div class="card"><h3>قائمة المناديب</h3>${cs.length?cs.map(x=>`
+      <div class="courier-card">
+        <div><b>${esc(x.name)}</b> <span class="delivery-rate">${x.delivery_rate}% تسليم</span>
+        <div class="sub">الشحنات ${x.assigned_count||0} • تم الاستلام ${x.delivered_count||0} • رفض/رجوع ${x.returned_count||0}</div></div>
+        <div class="courier-actions">
+          <button class="btn btn-soft edit-courier" data-id="${x.id}">تعديل</button>
+          <button class="btn btn-danger delete-courier" data-id="${x.id}">حذف</button>
+          <button class="btn btn-accent settle-courier" data-id="${x.id}">تسكير الحساب</button>
+        </div>
+      </div>`).join(''):'<div class="empty">لا يوجد مناديب</div>'}</div>
+  </div><div id="settlementArea"></div>`;
+
+  const reset=()=>{['courierEditId','cn','cu','ca','cp','cd','cr','cno'].forEach(id=>{const e=$('#'+id);if(e)e.value=''});[...$('#car').options].forEach(o=>o.selected=false);$('#courierFormTitle').textContent='إضافة مندوب';$('#saveCourier').textContent='إضافة المندوب';$('#cancelCourierEdit').style.display='none'};
+  $('#cancelCourierEdit').onclick=reset;
+
+  $('#saveCourier').onclick=async()=>{
+    const id=Number($('#courierEditId').value||0);
+    const payload={name:$('#cn').value,username:$('#cu').value,address:$('#ca').value,phone:$('#cp').value,delivered_commission:$('#cd').value,returned_commission:$('#cr').value,areas:[...$('#car').selectedOptions].map(o=>o.value).join('، '),notes:$('#cno').value};
+    try{await api(id?'/couriers/'+id:'/couriers',{method:id?'PUT':'POST',body:JSON.stringify(payload)});toast(id?'تم تعديل المندوب':'تمت إضافة المندوب');couriersView()}catch(e){toast(e.message)}
+  };
+
+  document.querySelectorAll('.edit-courier').forEach(b=>b.onclick=()=>{
+    const x=cs.find(v=>Number(v.id)===Number(b.dataset.id));if(!x)return;
+    $('#courierEditId').value=x.id;$('#cn').value=x.name||'';$('#cu').value=x.username||'';$('#ca').value=x.address||'';$('#cp').value=x.phone||'';$('#cd').value=x.delivered_commission||0;$('#cr').value=x.returned_commission||0;$('#cno').value=x.notes||'';
+    const selected=new Set(String(x.areas||'').split(/[،,]/).map(s=>s.trim()).filter(Boolean));[...$('#car').options].forEach(o=>o.selected=selected.has(o.value));
+    $('#courierFormTitle').textContent='تعديل المندوب';$('#saveCourier').textContent='حفظ التعديل';$('#cancelCourierEdit').style.display='inline-flex';window.scrollTo({top:0,behavior:'smooth'});
+  });
+  document.querySelectorAll('.delete-courier').forEach(b=>b.onclick=async()=>{
+    if(!confirm('حذف المندوب؟ إذا كان لديه طلبات سيتم إيقافه بدل حذف تاريخه.'))return;
+    try{await api('/couriers/'+b.dataset.id,{method:'DELETE'});toast('تم');couriersView()}catch(e){toast(e.message)}
+  });
+  document.querySelectorAll('.settle-courier').forEach(b=>b.onclick=()=>openCourierSettlement(Number(b.dataset.id),cs.find(x=>Number(x.id)===Number(b.dataset.id))));
 }
 async function openCourierSettlement(cid,courier){
  const d=await api('/courier-eligible-orders?courier_id='+cid),os=d.orders||[],box=$('#settlementArea');
  box.innerHTML=`<div class="card courier-settlement"><h2>تسكير حساب ${esc(courier.name)}</h2>${os.length?`<div class="table-wrap"><table class="table"><thead><tr><th>✓</th><th>الكود</th><th>المتجر</th><th>العميل</th><th>الحالة</th><th>العمولة</th></tr></thead><tbody>${os.map(o=>{const ret=!['delivered','delivered_adjusted'].includes(o.delivery_status),v=ret?Number(courier.returned_commission||0):Number(courier.delivered_commission||0);return `<tr><td><input type="checkbox" class="co" data-id="${o.id}" data-v="${v}" checked></td><td>${o.order_code}</td><td>${esc(o.store_name||'—')}</td><td>${esc(o.recipient_name)}</td><td>${deliveryBadge(o)}</td><td>${money(v)}</td></tr>`}).join('')}</tbody></table></div><div class="courier-total">حق المندوب: <b id="due">0.00</b> د.أ</div><button id="doneSettle" class="btn btn-accent">✓ تم</button>`:'<div class="empty">لا توجد طلبات غير محاسبة</div>'}</div>`;
  if(!os.length)return;const calc=()=>$('#due').textContent=money([...document.querySelectorAll('.co:checked')].reduce((s,x)=>s+Number(x.dataset.v||0),0));document.querySelectorAll('.co').forEach(x=>x.onchange=calc);calc();
  $('#doneSettle').onclick=async()=>{const ids=[...document.querySelectorAll('.co:checked')].map(x=>Number(x.dataset.id));if(!ids.length)return toast('حدد طلبات');try{const r=await api('/courier-settlements',{method:'POST',body:JSON.stringify({courier_id:cid,order_ids:ids})});toast('حق المندوب '+money(r.settlement.total_due)+' د.أ');couriersView()}catch(e){toast(e.message)}};
+}
+
+
+async function regionsView(){
+  const c=$('#content');await loadRegionIndex();
+  c.innerHTML=`<div class="page-title"><div><h1>المناطق</h1><div class="sub">كل مناطق المملكة — ويمكن الإضافة والتعديل والحذف</div></div></div>
+  <div class="card region-add-bar">
+    <input id="newGroupName" class="input" placeholder="اسم مجموعة جديدة">
+    <input id="newGroupGov" class="input" placeholder="المحافظة التي تُسجل على الطلب">
+    <button id="addRegionGroup" class="btn btn-primary">إضافة مجموعة</button>
+  </div>
+  <div class="region-grid">${state.regionGroups.map(g=>`
+    <div class="region-card" data-group="${g.id}">
+      <div class="region-card-head"><div><h3>${esc(g.name)}</h3><span>${esc(g.governorate||'')}</span></div><div><button class="btn btn-soft edit-group" data-id="${g.id}">تعديل</button><button class="btn btn-danger del-group" data-id="${g.id}">حذف</button></div></div>
+      <div class="region-items">${(g.regions||[]).map(r=>`<div class="region-item"><span>${esc(r.name)}</span><div><button class="mini-btn edit-region" data-id="${r.id}" data-name="${encodeURIComponent(r.name)}">✎</button><button class="mini-btn danger del-region" data-id="${r.id}">×</button></div></div>`).join('')}</div>
+      <div class="region-add"><input class="input region-new-name" placeholder="إضافة منطقة"><button class="btn btn-accent add-region" data-group="${g.id}">＋</button></div>
+    </div>`).join('')}</div>`;
+
+  $('#addRegionGroup').onclick=async()=>{try{await api('/region-groups',{method:'POST',body:JSON.stringify({name:$('#newGroupName').value,governorate:$('#newGroupGov').value})});await loadRegionIndex();regionsView()}catch(e){toast(e.message)}};
+  document.querySelectorAll('.add-region').forEach(b=>b.onclick=async()=>{const card=b.closest('.region-card'),inp=card.querySelector('.region-new-name');if(!inp.value.trim())return;try{await api('/regions',{method:'POST',body:JSON.stringify({group_id:b.dataset.group,name:inp.value})});await loadRegionIndex();regionsView()}catch(e){toast(e.message)}});
+  document.querySelectorAll('.edit-region').forEach(b=>b.onclick=async()=>{const old=decodeURIComponent(b.dataset.name),name=prompt('اسم المنطقة',old);if(!name||name===old)return;try{await api('/regions/'+b.dataset.id,{method:'PUT',body:JSON.stringify({name})});await loadRegionIndex();regionsView()}catch(e){toast(e.message)}});
+  document.querySelectorAll('.del-region').forEach(b=>b.onclick=async()=>{if(!confirm('حذف المنطقة؟'))return;await api('/regions/'+b.dataset.id,{method:'DELETE'});await loadRegionIndex();regionsView()});
+  document.querySelectorAll('.edit-group').forEach(b=>b.onclick=async()=>{const g=state.regionGroups.find(x=>Number(x.id)===Number(b.dataset.id));const name=prompt('اسم المجموعة',g.name);if(!name)return;const governorate=prompt('المحافظة التي تسجل على الطلب',g.governorate||g.name);if(governorate===null)return;await api('/region-groups/'+g.id,{method:'PUT',body:JSON.stringify({name,governorate})});await loadRegionIndex();regionsView()});
+  document.querySelectorAll('.del-group').forEach(b=>b.onclick=async()=>{if(!confirm('حذف المجموعة وكل المناطق بداخلها؟'))return;await api('/region-groups/'+b.dataset.id,{method:'DELETE'});await loadRegionIndex();regionsView()});
+}
+
+const PERMISSION_LABELS={
+ dashboard:'لوحة التحكم',stores:'المتاجر',orders_add:'إضافة طلب',orders_view:'عرض الطلبات',orders_edit:'تعديل الطلب',
+ orders_status:'تغيير حالة الطلب',couriers:'عرض المناديب',couriers_add:'إضافة مندوب',couriers_edit:'تعديل مندوب',
+ couriers_delete:'حذف مندوب',couriers_accounting:'محاسبة / تسكير حساب المناديب',print:'جاهز للطباعة',batches:'دفعات الطباعة',
+ reports:'الكشوفات والتقارير',regions:'عرض المناطق',regions_edit:'تعديل المناطق',users:'المستخدمون',permissions:'الصلاحيات'
+};
+async function permissionsView(){
+  const c=$('#content'),d=await api('/permissions');
+  c.innerHTML=`<div class="page-title"><div><h1>الصلاحيات</h1><div class="sub">صلاحيات المستخدمين والمناديب</div></div></div>
+  <div class="permission-layout">
+    <div class="card">
+      <div class="field"><label>نوع الحساب</label><select id="permType" class="select"><option value="user">مستخدم</option><option value="courier">مندوب</option></select></div>
+      <div class="field"><label>الحساب</label><select id="permActor" class="select"></select></div>
+      <div id="permChecks" class="permission-grid">${d.all_permissions.map(p=>`<label class="perm-check"><input type="checkbox" value="${p}"><span>${PERMISSION_LABELS[p]||p}</span></label>`).join('')}</div>
+      <button id="savePermissions" class="btn btn-primary">حفظ الصلاحيات</button>
+    </div>
+  </div>`;
+  const saved=(type,id)=>{const r=(d.permissions||[]).find(x=>x.actor_type===type&&Number(x.actor_id)===Number(id));try{return r?JSON.parse(r.permissions_json||'[]'):[]}catch{return []}};
+  const fillActors=()=>{const type=$('#permType').value,list=type==='user'?d.users:d.couriers;$('#permActor').innerHTML=list.map(x=>`<option value="${x.id}">${esc(x.name||x.display_name||x.username)}</option>`).join('');loadChecks()};
+  const loadChecks=()=>{const set=new Set(saved($('#permType').value,$('#permActor').value));document.querySelectorAll('#permChecks input').forEach(x=>x.checked=set.has(x.value))};
+  $('#permType').onchange=fillActors;$('#permActor').onchange=loadChecks;fillActors();
+  $('#savePermissions').onclick=async()=>{const permissions=[...document.querySelectorAll('#permChecks input:checked')].map(x=>x.value);try{await api('/permissions',{method:'PUT',body:JSON.stringify({actor_type:$('#permType').value,actor_id:$('#permActor').value,permissions})});toast('تم حفظ الصلاحيات');permissionsView()}catch(e){toast(e.message)}};
 }
 
 async function storesView(){
