@@ -966,3 +966,49 @@ html,body,#app,.shell{width:100%!important;max-width:100%!important;overflow-x:h
 .perm-check{display:flex;gap:9px;align-items:center;padding:11px;border:1px solid #e0e7ed;border-radius:10px;background:#fafcfd}.perm-check input{width:20px;height:20px}
 @media(max-width:1000px){.region-grid{grid-template-columns:repeat(2,minmax(240px,1fr))}.permission-grid{grid-template-columns:repeat(2,minmax(160px,1fr))}}
 @media(max-width:650px){.region-add-bar,.region-grid,.permission-grid{grid-template-columns:1fr}.region-card-head{flex-direction:column}.courier-actions{width:100%}.courier-actions .btn{flex:1}}
+
+
+/* V23 nested menus */
+.nav-group{display:flex;flex-direction:column;gap:4px}
+.nav-parent{display:flex!important;align-items:center!important;justify-content:space-between!important}
+.nav-parent span{transition:transform .2s}
+.nav-parent.open span{transform:rotate(180deg)}
+.nav-sub{display:none;flex-direction:column;gap:4px;padding:3px 12px 8px 0}
+.nav-sub.open{display:flex}
+.nav-sub button{
+  font-size:14px!important;
+  padding:10px 13px!important;
+  background:#f4f7fa!important;
+  color:#31465a!important;
+  border-radius:9px!important;
+}
+.nav-sub button.active{background:#dfe9f1!important;color:#102a43!important;font-weight:900}
+
+/* Store browser */
+.store-browser{display:grid;grid-template-columns:repeat(3,minmax(230px,1fr));gap:14px}
+.store-browser-card{
+  appearance:none;
+  width:100%;
+  border:1px solid #dce5ec;
+  background:#fff;
+  border-radius:15px;
+  padding:18px;
+  text-align:right;
+  cursor:pointer;
+  box-shadow:0 5px 18px rgba(15,42,67,.06);
+}
+.store-browser-card:hover{box-shadow:0 9px 24px rgba(15,42,67,.11)}
+.store-browser-name{font-size:20px;font-weight:900;color:#102a43}
+.store-browser-meta,.store-browser-contact{margin-top:7px;color:#687789}
+.store-browser-arrow{margin-top:14px;font-weight:900;color:#659512}
+.standalone-form{max-width:620px;margin-inline:auto}
+.courier-actions{display:flex;gap:7px;flex-wrap:wrap}
+
+@media(max-width:900px){
+  .store-browser{grid-template-columns:repeat(2,minmax(210px,1fr))}
+}
+@media(max-width:600px){
+  .store-browser{grid-template-columns:1fr}
+  .courier-actions{width:100%}
+  .courier-actions .btn{flex:1}
+}

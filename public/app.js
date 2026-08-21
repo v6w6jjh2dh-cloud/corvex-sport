@@ -398,27 +398,113 @@ async function boot(){
 }
 function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);await loadRegionIndex();renderShell();show('dashboard')}catch(e){toast(e.message)}}}
 function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>تهيئة CORVEX SPORT</h1><p>أنشئ أول حساب مدير</p></div><div class="field"><label>الاسم الظاهر</label><input id="sd" class="input" value="Admin"></div><br><div class="field"><label>اسم المستخدم</label><input id="su" class="input" value="admin"></div><br><div class="field"><label>كلمة المرور</label><input id="sp" type="password" class="input"></div><button id="setupBtn" class="btn btn-accent" style="width:100%;margin-top:18px">إنشاء النظام</button></div></div>`;$('#setupBtn').onclick=async()=>{try{await api('/setup',{method:'POST',body:JSON.stringify({display_name:$('#sd').value,username:$('#su').value,password:$('#sp').value})});toast('تمت التهيئة');renderLogin()}catch(e){toast(e.message)}}}
-function renderShell(){app.innerHTML=`<div class="shell"><header class="topbar"><button id="mobileMenuBtn" class="mobile-menu-btn" aria-label="القائمة">☰</button><div class="logo"><div class="logo-mark">C</div><div>CORVEX SPORT<small>ORDER DESK</small></div></div><div class="top-actions"><span class="pill">${esc(state.user?.display_name||'')}</span><button id="logout" class="btn btn-soft">خروج</button></div></header><div class="layout"><aside class="sidebar"><nav class="nav">${can('dashboard')?'<button data-view="dashboard">⌂ لوحة التحكم</button>':''}${can('stores')?'<button data-view="stores">▣ المتاجر</button>':''}${can('orders_view')?'<button data-view="orders">▤ الطلبات والبحث</button>':''}${can('couriers')?'<button data-view="couriers">🚚 مندوبي التوصيل</button>':''}${can('orders_add')?'<button data-view="new">＋ إضافة طلب</button>':''}${can('print')?'<button data-view="print">▣ جاهز للطباعة</button>':''}${can('batches')?'<button data-view="batches">↻ دفعات الطباعة</button>':''}${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}${can('users')?'<button data-view="users">♟ المستخدمون</button>':''}${can('permissions')?'<button data-view="permissions">⚙ الصلاحيات</button>':''}</nav></aside><main id="content" class="content"></main><div id="sidebarOverlay" class="sidebar-overlay"></div></div></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
-  show(b.dataset.view);
-  document.querySelector('.sidebar')?.classList.remove('open');
-  document.querySelector('#sidebarOverlay')?.classList.remove('show');
-});
-const mobileMenuBtn=$('#mobileMenuBtn');
-const sidebar=$('.sidebar');
-const sidebarOverlay=$('#sidebarOverlay');
-if(mobileMenuBtn){
-  mobileMenuBtn.onclick=()=>{
-    sidebar?.classList.toggle('open');
-    sidebarOverlay?.classList.toggle('show');
+function renderShell(){
+  app.innerHTML=`<div class="shell">
+    <header class="topbar">
+      <button id="mobileMenuBtn" class="mobile-menu-btn" aria-label="القائمة">☰</button>
+      <div class="logo"><div class="logo-mark">C</div><div>CORVEX SPORT<small>ORDER DESK</small></div></div>
+      <div class="top-actions"><span class="pill">${esc(state.user?.display_name||'')}</span><button id="logout" class="btn btn-soft">خروج</button></div>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <nav class="nav">
+          ${can('dashboard')?'<button data-view="dashboard">⌂ لوحة التحكم</button>':''}
+
+          ${can('stores')?`
+          <div class="nav-group">
+            <button class="nav-parent" data-nav-toggle="storesMenu">▣ المتاجر <span>⌄</span></button>
+            <div id="storesMenu" class="nav-sub">
+              <button data-view="stores">المتاجر</button>
+              <button data-view="store-add">＋ إضافة متجر</button>
+            </div>
+          </div>`:''}
+
+          ${(can('orders_add')||can('orders_view'))?`
+          <div class="nav-group">
+            <button class="nav-parent" data-nav-toggle="ordersMenu">▤ الطلبات <span>⌄</span></button>
+            <div id="ordersMenu" class="nav-sub">
+              ${can('orders_add')?'<button data-view="new">＋ إضافة طلب</button>':''}
+              ${can('orders_view')?'<button data-view="store-orders">طلبات المتاجر</button>':''}
+            </div>
+          </div>`:''}
+
+          ${can('couriers')?`
+          <div class="nav-group">
+            <button class="nav-parent" data-nav-toggle="couriersMenu">🚚 المناديب <span>⌄</span></button>
+            <div id="couriersMenu" class="nav-sub">
+              <button data-view="couriers">المناديب</button>
+              ${can('couriers_add')?'<button data-view="courier-add">＋ إضافة مندوب</button>':''}
+            </div>
+          </div>`:''}
+
+          ${can('print')?'<button data-view="print">▣ جاهز للطباعة</button>':''}
+          ${can('batches')?'<button data-view="batches">↻ دفعات الطباعة</button>':''}
+          ${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}
+          ${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}
+          ${can('users')?'<button data-view="users">♟ المستخدمون</button>':''}
+          ${can('permissions')?'<button data-view="permissions">⚙ الصلاحيات</button>':''}
+        </nav>
+      </aside>
+      <main id="content" class="content"></main>
+      <div id="sidebarOverlay" class="sidebar-overlay"></div>
+    </div>
+  </div>`;
+
+  document.querySelectorAll('[data-nav-toggle]').forEach(b=>b.onclick=()=>{
+    const box=document.getElementById(b.dataset.navToggle);
+    box?.classList.toggle('open');
+    b.classList.toggle('open');
+  });
+
+  document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
+    show(b.dataset.view);
+    document.querySelector('.sidebar')?.classList.remove('open');
+    document.querySelector('#sidebarOverlay')?.classList.remove('show');
+  });
+
+  const mobileMenuBtn=$('#mobileMenuBtn');
+  const sidebar=$('.sidebar');
+  const sidebarOverlay=$('#sidebarOverlay');
+
+  if(mobileMenuBtn){
+    mobileMenuBtn.onclick=()=>{
+      sidebar?.classList.toggle('open');
+      sidebarOverlay?.classList.toggle('show');
+    };
+  }
+  if(sidebarOverlay){
+    sidebarOverlay.onclick=()=>{
+      sidebar?.classList.remove('open');
+      sidebarOverlay.classList.remove('show');
+    };
+  }
+
+  $('#logout').onclick=async()=>{
+    try{await api('/logout',{method:'POST'})}catch{}
+    localStorage.removeItem('corvex_token');
+    state.token='';
+    state.user=null;
+    renderLogin();
   };
 }
-if(sidebarOverlay){
-  sidebarOverlay.onclick=()=>{
-    sidebar?.classList.remove('open');
-    sidebarOverlay.classList.remove('show');
-  };
-}$('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'})}catch{}localStorage.removeItem('corvex_token');state.token='';state.user=null;renderLogin()}}
-async function show(v){state.view=v;document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));if(v==='dashboard')return dashboard();if(v==='new')return newOrder();if(v==='orders')return ordersView();if(v==='print')return printView();if(v==='batches')return batchesView();if(v==='reports')return reportsView();if(v==='stores')return storesView();if(v==='couriers')return couriersView();if(v==='regions')return regionsView();if(v==='permissions')return permissionsView();if(v==='users')return usersView()}
+async function show(v){
+  state.view=v;
+  document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
+  if(v==='dashboard')return dashboard();
+  if(v==='new')return newOrder();
+  if(v==='orders')return ordersView();
+  if(v==='store-orders')return storeOrdersHub();
+  if(v==='print')return printView();
+  if(v==='batches')return batchesView();
+  if(v==='reports')return reportsView();
+  if(v==='stores')return storesView();
+  if(v==='store-add')return storeAddView();
+  if(v==='couriers')return couriersView();
+  if(v==='courier-add')return courierAddView();
+  if(v==='regions')return regionsView();
+  if(v==='permissions')return permissionsView();
+  if(v==='users')return usersView();
+}
 async function dashboard(){const c=$('#content');c.innerHTML='<div class="empty">جاري التحميل...</div>';try{state.stats=await api('/dashboard');c.innerHTML=`<div class="page-title"><div><h1>لوحة التحكم</h1><div class="sub">نظرة سريعة على حركة الطلبات</div></div><button class="btn btn-accent" onclick="show('new')">＋ طلب جديد</button></div><div class="grid stats"><div class="stat"><b>${state.stats.today||0}</b><span>طلبات اليوم</span></div><div class="stat"><b>${state.stats.unprinted||0}</b><span>غير مطبوعة</span></div><div class="stat"><b>${state.stats.total||0}</b><span>إجمالي الطلبات</span></div><div class="stat"><b>${state.stats.batches||0}</b><span>دفعات الطباعة</span></div></div><div class="card"><h3>مسار العمل</h3><p class="sub">الموظف يدخل الطلب ← يظهر ضمن غير المطبوع ← تنشئ دفعة طباعة ← 8 بوالص في كل A4.</p></div>`}catch(e){c.innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
 async function newOrder(){
   const c=$('#content');
@@ -1043,47 +1129,110 @@ function downloadCsv(orders){const rows=[['رقم البوليصة','المتج�
 
 async function couriersView(){
   const c=$('#content'),d=await api('/couriers'),cs=d.couriers||[];
-  c.innerHTML=`<div class="page-title"><div><h1>مندوبي التوصيل</h1><div class="sub">إضافة • تعديل • حذف • نسبة التسليم • تسكير الحساب</div></div></div>
-  <div class="courier-layout">
-    <div class="card"><h3 id="courierFormTitle">إضافة مندوب</h3>
-      <input type="hidden" id="courierEditId">
-      ${[['cn','اسم المندوب'],['cu','اسم المستخدم'],['ca','العنوان'],['cp','الهاتف'],['cd','عمولة الطلب المستلم'],['cr','عمولة الرفض / المرتجع']].map(x=>`<div class="field"><label>${x[1]}</label><input id="${x[0]}" class="input"></div>`).join('')}
-      <div class="field"><label>مناطق المندوب</label><select id="car" class="select" multiple size="7">${state.regionGroups.map(g=>`<optgroup label="${esc(g.name)}">${(g.regions||[]).map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('')}</optgroup>`).join('')}</select></div>
-      <div class="field"><label>ملاحظات</label><textarea id="cno" class="textarea"></textarea></div>
-      <div class="actions"><button id="saveCourier" class="btn btn-primary">إضافة المندوب</button><button id="cancelCourierEdit" class="btn btn-soft" style="display:none">إلغاء التعديل</button></div>
+
+  c.innerHTML=`
+    <div class="page-title">
+      <div><h1>المناديب</h1><div class="sub">تعديل • حذف • نسبة التسليم • تسكير الحساب</div></div>
+      <button class="btn btn-accent" onclick="show('courier-add')">＋ إضافة مندوب</button>
     </div>
-    <div class="card"><h3>قائمة المناديب</h3>${cs.length?cs.map(x=>`
-      <div class="courier-card">
-        <div><b>${esc(x.name)}</b> <span class="delivery-rate">${x.delivery_rate}% تسليم</span>
-        <div class="sub">الشحنات ${x.assigned_count||0} • تم الاستلام ${x.delivered_count||0} • رفض/رجوع ${x.returned_count||0}</div></div>
-        <div class="courier-actions">
-          <button class="btn btn-soft edit-courier" data-id="${x.id}">تعديل</button>
-          <button class="btn btn-danger delete-courier" data-id="${x.id}">حذف</button>
-          <button class="btn btn-accent settle-courier" data-id="${x.id}">تسكير الحساب</button>
-        </div>
-      </div>`).join(''):'<div class="empty">لا يوجد مناديب</div>'}</div>
-  </div><div id="settlementArea"></div>`;
 
-  const reset=()=>{['courierEditId','cn','cu','ca','cp','cd','cr','cno'].forEach(id=>{const e=$('#'+id);if(e)e.value=''});[...$('#car').options].forEach(o=>o.selected=false);$('#courierFormTitle').textContent='إضافة مندوب';$('#saveCourier').textContent='إضافة المندوب';$('#cancelCourierEdit').style.display='none'};
-  $('#cancelCourierEdit').onclick=reset;
+    <div class="card">
+      <h3>قائمة المناديب</h3>
+      ${cs.length?cs.map(x=>`
+        <div class="courier-card">
+          <div>
+            <b>${esc(x.name)}</b>
+            <span class="delivery-rate">${x.delivery_rate}% تسليم</span>
+            <div class="sub">الشحنات ${x.assigned_count||0} • تم الاستلام ${x.delivered_count||0} • رفض/رجوع ${x.returned_count||0}</div>
+            ${x.phone?`<div class="sub">${esc(x.phone)}</div>`:''}
+          </div>
+          <div class="courier-actions">
+            <button class="btn btn-soft edit-courier" data-id="${x.id}">تعديل</button>
+            <button class="btn btn-danger delete-courier" data-id="${x.id}">حذف</button>
+            <button class="btn btn-accent settle-courier" data-id="${x.id}">تسكير الحساب</button>
+          </div>
+        </div>`).join(''):'<div class="empty">لا يوجد مناديب</div>'}
+    </div>
+    <div id="settlementArea"></div>`;
 
-  $('#saveCourier').onclick=async()=>{
-    const id=Number($('#courierEditId').value||0);
-    const payload={name:$('#cn').value,username:$('#cu').value,address:$('#ca').value,phone:$('#cp').value,delivered_commission:$('#cd').value,returned_commission:$('#cr').value,areas:[...$('#car').selectedOptions].map(o=>o.value).join('، '),notes:$('#cno').value};
-    try{await api(id?'/couriers/'+id:'/couriers',{method:id?'PUT':'POST',body:JSON.stringify(payload)});toast(id?'تم تعديل المندوب':'تمت إضافة المندوب');couriersView()}catch(e){toast(e.message)}
-  };
+  document.querySelectorAll('.edit-courier').forEach(b=>b.onclick=()=>courierAddView(Number(b.dataset.id)));
 
-  document.querySelectorAll('.edit-courier').forEach(b=>b.onclick=()=>{
-    const x=cs.find(v=>Number(v.id)===Number(b.dataset.id));if(!x)return;
-    $('#courierEditId').value=x.id;$('#cn').value=x.name||'';$('#cu').value=x.username||'';$('#ca').value=x.address||'';$('#cp').value=x.phone||'';$('#cd').value=x.delivered_commission||0;$('#cr').value=x.returned_commission||0;$('#cno').value=x.notes||'';
-    const selected=new Set(String(x.areas||'').split(/[،,]/).map(s=>s.trim()).filter(Boolean));[...$('#car').options].forEach(o=>o.selected=selected.has(o.value));
-    $('#courierFormTitle').textContent='تعديل المندوب';$('#saveCourier').textContent='حفظ التعديل';$('#cancelCourierEdit').style.display='inline-flex';window.scrollTo({top:0,behavior:'smooth'});
-  });
   document.querySelectorAll('.delete-courier').forEach(b=>b.onclick=async()=>{
     if(!confirm('حذف المندوب؟ إذا كان لديه طلبات سيتم إيقافه بدل حذف تاريخه.'))return;
-    try{await api('/couriers/'+b.dataset.id,{method:'DELETE'});toast('تم');couriersView()}catch(e){toast(e.message)}
+    try{
+      await api('/couriers/'+b.dataset.id,{method:'DELETE'});
+      toast('تم');
+      couriersView();
+    }catch(e){toast(e.message)}
   });
-  document.querySelectorAll('.settle-courier').forEach(b=>b.onclick=()=>openCourierSettlement(Number(b.dataset.id),cs.find(x=>Number(x.id)===Number(b.dataset.id))));
+
+  document.querySelectorAll('.settle-courier').forEach(b=>b.onclick=()=>{
+    openCourierSettlement(Number(b.dataset.id),cs.find(x=>Number(x.id)===Number(b.dataset.id)));
+  });
+}
+
+async function courierAddView(editId=0){
+  const c=$('#content');
+  let x=null;
+
+  if(editId){
+    try{x=(await api('/couriers/'+editId)).courier}catch(e){toast(e.message);return}
+  }
+
+  c.innerHTML=`
+    <div class="page-title">
+      <div><h1>${editId?'تعديل مندوب':'إضافة مندوب'}</h1><div class="sub">${editId?'تعديل معلومات المندوب':'إضافة مندوب توصيل جديد'}</div></div>
+      <button class="btn btn-soft" onclick="show('couriers')">العودة للمناديب</button>
+    </div>
+
+    <div class="card standalone-form">
+      ${[['cn','اسم المندوب'],['cu','اسم المستخدم'],['ca','العنوان'],['cp','الهاتف'],['cd','عمولة الطلب المستلم'],['cr','عمولة الرفض / المرتجع']].map(a=>`<div class="field"><label>${a[1]}</label><input id="${a[0]}" class="input"></div>`).join('')}
+
+      <div class="field">
+        <label>مناطق المندوب</label>
+        <select id="car" class="select" multiple size="8">
+          ${state.regionGroups.map(g=>`<optgroup label="${esc(g.name)}">${(g.regions||[]).map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('')}</optgroup>`).join('')}
+        </select>
+      </div>
+
+      <div class="field"><label>ملاحظات</label><textarea id="cno" class="textarea"></textarea></div>
+      <button id="saveCourier" class="btn btn-primary">${editId?'حفظ التعديل':'إضافة المندوب'}</button>
+    </div>`;
+
+  if(x){
+    $('#cn').value=x.name||'';
+    $('#cu').value=x.username||'';
+    $('#ca').value=x.address||'';
+    $('#cp').value=x.phone||'';
+    $('#cd').value=x.delivered_commission||0;
+    $('#cr').value=x.returned_commission||0;
+    $('#cno').value=x.notes||'';
+
+    const selected=new Set(String(x.areas||'').split(/[،,]/).map(s=>s.trim()).filter(Boolean));
+    [...$('#car').options].forEach(o=>o.selected=selected.has(o.value));
+  }
+
+  $('#saveCourier').onclick=async()=>{
+    const payload={
+      name:$('#cn').value,
+      username:$('#cu').value,
+      address:$('#ca').value,
+      phone:$('#cp').value,
+      delivered_commission:$('#cd').value,
+      returned_commission:$('#cr').value,
+      areas:[...$('#car').selectedOptions].map(o=>o.value).join('، '),
+      notes:$('#cno').value
+    };
+
+    try{
+      await api(editId?'/couriers/'+editId:'/couriers',{
+        method:editId?'PUT':'POST',
+        body:JSON.stringify(payload)
+      });
+      toast(editId?'تم تعديل المندوب':'تمت إضافة المندوب');
+      show('couriers');
+    }catch(e){toast(e.message)}
+  };
 }
 async function openCourierSettlement(cid,courier){
  const d=await api('/courier-eligible-orders?courier_id='+cid),os=d.orders||[],box=$('#settlementArea');
@@ -1147,61 +1296,38 @@ async function storesView(){
 
   c.innerHTML=`
     <div class="page-title">
-      <div>
-        <h1>المتاجر / العملاء</h1>
-        <div class="sub">كل طلب يتم ربطه بالمتجر صاحب الطلب</div>
-      </div>
+      <div><h1>المتاجر</h1><div class="sub">اضغط على المتجر لعرض شحناته فقط</div></div>
+      <button class="btn btn-accent" onclick="show('store-add')">＋ إضافة متجر</button>
     </div>
+    <div class="store-browser">
+      ${(d.stores||[]).length?(d.stores||[]).map(s=>`
+        <button class="store-browser-card" data-store-open="${s.id}">
+          <div class="store-browser-name">${esc(s.name)}</div>
+          <div class="store-browser-meta">${Number(s.orders_count||0)} شحنة${s.phone?' • '+esc(s.phone):''}</div>
+          ${s.contact_name?`<div class="store-browser-contact">${esc(s.contact_name)}</div>`:''}
+          <div class="store-browser-arrow">عرض الشحنات ←</div>
+        </button>`).join(''):'<div class="empty">لا يوجد متاجر</div>'}
+    </div>`;
 
-    <div class="stores-layout">
-      <div class="card store-add-card">
-        <h3>إضافة متجر جديد</h3>
+  document.querySelectorAll('[data-store-open]').forEach(b=>b.onclick=()=>storeShipmentsView(Number(b.dataset.storeOpen)));
+}
 
-        <div class="field">
-          <label>اسم المتجر</label>
-          <input id="storeName" class="input" placeholder="مثال: G&M">
-        </div>
-
-        <div class="field">
-          <label>اسم صاحب المتجر / المسؤول</label>
-          <input id="storeContact" class="input" placeholder="اختياري">
-        </div>
-
-        <div class="field">
-          <label>رقم الهاتف</label>
-          <input id="storePhone" class="input" inputmode="tel" placeholder="اختياري">
-        </div>
-
-        <div class="field">
-          <label>ملاحظات</label>
-          <textarea id="storeNotes" class="textarea" placeholder="أي ملاحظات عن المتجر"></textarea>
-        </div>
-
-        <button id="addStore" class="btn btn-primary">إضافة المتجر</button>
-      </div>
-
-      <div class="card">
-        <h3>قائمة المتاجر</h3>
-        <div class="stores-list">
-          ${(d.stores||[]).length ? d.stores.map(s=>`
-            <div class="store-row">
-              <div class="store-row-main">
-                <b>${esc(s.name)}</b>
-                <div class="sub">${s.contact_name?esc(s.contact_name)+' • ':''}${s.phone?esc(s.phone)+' • ':''}${Number(s.orders_count||0)} طلب</div>
-                ${s.notes?`<div class="store-note">${esc(s.notes)}</div>`:''}
-              </div>
-              <span class="badge ${s.is_active?'badge-ok':'badge-warn'}">${s.is_active?'فعال':'موقوف'}</span>
-            </div>
-          `).join('') : '<div class="empty-state">لا يوجد متاجر حتى الآن</div>'}
-        </div>
-      </div>
+async function storeAddView(){
+  const c=$('#content');
+  c.innerHTML=`
+    <div class="page-title">
+      <div><h1>إضافة متجر</h1><div class="sub">إضافة متجر / عميل جديد</div></div>
+      <button class="btn btn-soft" onclick="show('stores')">العودة للمتاجر</button>
     </div>
-  `;
+    <div class="card standalone-form">
+      <div class="field"><label>اسم المتجر</label><input id="storeName" class="input"></div>
+      <div class="field"><label>اسم صاحب المتجر / المسؤول</label><input id="storeContact" class="input"></div>
+      <div class="field"><label>رقم الهاتف</label><input id="storePhone" class="input" inputmode="tel"></div>
+      <div class="field"><label>ملاحظات</label><textarea id="storeNotes" class="textarea"></textarea></div>
+      <button id="addStore" class="btn btn-primary">إضافة المتجر</button>
+    </div>`;
 
   $('#addStore').onclick=async()=>{
-    const btn=$('#addStore');
-    btn.disabled=true;
-    btn.textContent='جاري الإضافة...';
     try{
       await api('/stores',{method:'POST',body:JSON.stringify({
         name:$('#storeName').value,
@@ -1210,14 +1336,65 @@ async function storesView(){
         notes:$('#storeNotes').value
       })});
       toast('تمت إضافة المتجر');
-      storesView();
-    }catch(e){
-      btn.disabled=false;
-      btn.textContent='إضافة المتجر';
-      toast(e.message);
-    }
+      show('stores');
+    }catch(e){toast(e.message)}
   };
 }
 
+async function storeShipmentsView(storeId){
+  const c=$('#content');
+  const sd=await api('/stores');
+  const store=(sd.stores||[]).find(s=>Number(s.id)===Number(storeId))||{name:'المتجر'};
+
+  c.innerHTML=`
+    <div class="page-title">
+      <div><h1>شحنات ${esc(store.name)}</h1><div class="sub">كل شحنات هذا المتجر فقط</div></div>
+      <button class="btn btn-soft" onclick="show('stores')">العودة للمتاجر</button>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <input id="storeShipmentQ" class="input" placeholder="كود / هاتف / اسم">
+        <select id="storeShipmentStatus" class="select">
+          <option value="">كل الحالات</option>
+          <option value="pending">قيد التوصيل</option>
+          <option value="delivered">تم الاستلام</option>
+          <option value="refused_fee_paid">رفض ودفع أجور</option>
+          <option value="refused_no_fee">رفض وعدم دفع أجور</option>
+          <option value="canceled_before_arrival">ملغي قبل الوصول</option>
+          <option value="partial">استلام جزئي</option>
+        </select>
+        <button id="storeShipmentSearch" class="btn btn-primary">بحث</button>
+      </div>
+      <div id="storeShipmentsTable"></div>
+    </div>`;
+
+  const load=async()=>{
+    const p=new URLSearchParams({store_id:String(storeId)});
+    if($('#storeShipmentQ').value)p.set('q',$('#storeShipmentQ').value);
+    if($('#storeShipmentStatus').value)p.set('status',$('#storeShipmentStatus').value);
+    const d=await api('/orders?'+p.toString());
+    renderOrdersTable('#storeShipmentsTable',d.orders||[],false);
+  };
+
+  $('#storeShipmentSearch').onclick=load;
+  await load();
+}
+
+async function storeOrdersHub(){
+  const c=$('#content');
+  const d=await api('/stores');
+  c.innerHTML=`
+    <div class="page-title"><div><h1>طلبات المتاجر</h1><div class="sub">اختر المتجر لفتح طلباته</div></div></div>
+    <div class="store-browser">
+      ${(d.stores||[]).length?(d.stores||[]).map(s=>`
+        <button class="store-browser-card" data-store-orders="${s.id}">
+          <div class="store-browser-name">${esc(s.name)}</div>
+          <div class="store-browser-meta">${Number(s.orders_count||0)} طلب</div>
+          <div class="store-browser-arrow">فتح الطلبات ←</div>
+        </button>`).join(''):'<div class="empty">لا يوجد متاجر</div>'}
+    </div>`;
+
+  document.querySelectorAll('[data-store-orders]').forEach(b=>b.onclick=()=>storeShipmentsView(Number(b.dataset.storeOrders)));
+}
 async function usersView(){const c=$('#content');const d=await api('/users');c.innerHTML=`<div class="page-title"><div><h1>المستخدمون</h1><div class="sub">كل موظف يدخل بحسابه ويُحفظ اسمه مع الطلب</div></div></div><div class="grid" style="grid-template-columns:1fr 1fr"><div class="card"><h3>إضافة مستخدم</h3><div class="field"><label>الاسم الظاهر</label><input id="ud" class="input"></div><br><div class="field"><label>اسم المستخدم</label><input id="uu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="up" type="password" class="input"></div><br><div class="field"><label>الصلاحية</label><select id="ur" class="select"><option value="staff">موظف</option><option value="admin">مدير</option></select></div><button id="addUser" class="btn btn-primary" style="margin-top:15px">إضافة</button></div><div class="card"><h3>الحسابات</h3>${d.users.map(u=>`<div class="batch-card"><div><b>${esc(u.display_name)}</b><div class="batch-meta">@${esc(u.username)} • ${u.role==='admin'?'مدير':'موظف'}</div></div><span class="badge ${u.is_active?'badge-ok':'badge-warn'}">${u.is_active?'فعال':'موقوف'}</span></div>`).join('')}</div></div>`;$('#addUser').onclick=async()=>{try{await api('/users',{method:'POST',body:JSON.stringify({display_name:$('#ud').value,username:$('#uu').value,password:$('#up').value,role:$('#ur').value})});toast('تمت إضافة المستخدم');usersView()}catch(e){toast(e.message)}}}
 boot();
