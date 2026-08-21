@@ -469,3 +469,169 @@ body.modal-open{
     gap:13px !important;
   }
 }
+
+
+/* V15 — clickable order code + full notes */
+.order-code-link{
+  appearance:none;
+  -webkit-appearance:none;
+  border:0;
+  background:transparent;
+  color:#102a43;
+  font:inherit;
+  font-weight:900;
+  font-size:17px;
+  padding:3px 5px;
+  cursor:pointer;
+  text-decoration:underline;
+  text-decoration-thickness:2px;
+  text-underline-offset:4px;
+}
+.order-code-link:active,
+.order-code-link:hover{
+  color:#72a900;
+}
+.notes-cell{
+  min-width:260px;
+  max-width:420px;
+  vertical-align:top;
+}
+.full-order-notes{
+  white-space:pre-wrap !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+  word-break:break-word;
+  line-height:1.7;
+  max-height:none !important;
+  display:block !important;
+}
+.edit-notes{
+  min-height:190px !important;
+  white-space:pre-wrap;
+}
+@media(max-width:700px){
+  .notes-cell{
+    min-width:220px;
+    max-width:320px;
+  }
+}
+
+
+/* V16 — full order edit page inspired by old system */
+.edit-page-shell{
+  width:100%;
+  min-height:100%;
+  padding:22px 12px 40px;
+  display:flex;
+  justify-content:center;
+  align-items:flex-start;
+}
+.edit-page-card{
+  width:min(560px,100%);
+  background:#fff;
+  border:1px solid #dce4ea;
+  border-radius:14px;
+  box-shadow:0 8px 28px rgba(15,42,67,.10);
+  padding:18px;
+}
+.edit-page-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  padding-bottom:14px;
+  margin-bottom:8px;
+  border-bottom:1px solid #e8edf2;
+}
+.edit-page-head h1{
+  margin:0 0 4px;
+  font-size:24px;
+}
+.edit-section-title{
+  margin:20px 0 10px;
+  padding:9px 11px;
+  border-radius:8px;
+  background:#f4f7fa;
+  border:1px solid #e2e8ee;
+  font-weight:900;
+  color:#102a43;
+}
+.edit-field{
+  margin-bottom:14px;
+}
+.edit-field label{
+  display:block;
+  margin-bottom:7px;
+  font-size:15px;
+  font-weight:800;
+  color:#26384a;
+}
+.edit-field .input,
+.edit-field .select,
+.edit-field .textarea{
+  width:100%;
+  min-height:44px;
+  border-radius:6px;
+  font-size:16px;
+}
+.edit-field .textarea{
+  min-height:92px;
+  resize:vertical;
+}
+.edit-field .edit-notes{
+  min-height:150px;
+  white-space:pre-wrap;
+}
+.edit-profit-box{
+  margin:18px 0 14px;
+  padding:13px 14px;
+  border-radius:8px;
+  background:#f5f9fc;
+  border:1px solid #dce6ee;
+  font-size:16px;
+}
+.edit-profit-box b{
+  color:#1f7a45;
+  font-size:20px;
+}
+.edit-actions-sticky{
+  position:sticky;
+  bottom:8px;
+  display:flex;
+  justify-content:flex-start;
+  gap:8px;
+  padding-top:12px;
+  margin-top:16px;
+  background:linear-gradient(to top,#fff 78%,rgba(255,255,255,0));
+}
+.edit-actions-sticky .btn{
+  min-width:120px;
+}
+.edit-loading{
+  width:min(560px,100%);
+  background:#fff;
+  border-radius:12px;
+  padding:30px;
+  text-align:center;
+  border:1px solid #e2e8ee;
+}
+@media(max-width:700px){
+  .edit-page-shell{
+    padding:10px 8px 28px;
+  }
+  .edit-page-card{
+    width:100%;
+    border-radius:10px;
+    padding:14px;
+  }
+  .edit-page-head{
+    align-items:flex-start;
+  }
+  .edit-page-head h1{
+    font-size:20px;
+  }
+  .edit-actions-sticky{
+    bottom:0;
+    padding-bottom:8px;
+  }
+}

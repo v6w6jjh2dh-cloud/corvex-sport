@@ -415,6 +415,190 @@ function newOrder(){const c=$('#content');c.innerHTML=`<div class="page-title"><
   $('#parse').onclick=()=>{const p=parseSmart($('#raw').value);$('#name').value=p.name||'مجهول';if(p.phone)$('#phone').value=p.phone;$('#amount').value=p.amount||'';$('#area').value=p.area||'';$('#address').value=p.address||'';$('#notes').value=p.notes||'';toast('تم الفرز V11، راجع الحقول قبل الحفظ')};
   async function save(next){try{const d=await api('/orders',{method:'POST',body:JSON.stringify({recipient_name:$('#name').value,phone:$('#phone').value,area:$('#area').value,detailed_address:$('#address').value,amount:$('#amount').value,order_notes:$('#notes').value,raw_text:$('#raw').value})});toast(`تم حفظ الطلب رقم ${d.order.order_code}`);if(next)newOrder();else show('orders')}catch(e){toast(e.message)}}$('#saveOrder').onclick=()=>save(false);$('#saveNext').onclick=()=>save(true)
 }
+
+async function editOrder(id){
+  state.view='edit-order';
+  const c=$('#content');
+  c.innerHTML=`<div class="edit-page-shell"><div class="edit-loading">جاري تحميل بيانات الطلب...</div></div>`;
+
+  try{
+    const d=await api('/orders/'+id);
+    const o=d.order;
+    if(!o) throw new Error('الطلب غير موجود');
+
+    c.innerHTML=`
+      <div class="edit-page-shell">
+        <div class="edit-page-card">
+
+          <div class="edit-page-head">
+            <div>
+              <h1>تعديل الطلب #${esc(o.order_code)}</h1>
+              <div class="sub">تحديث بيانات الطلب ونتيجة التوصيل</div>
+            </div>
+            <button id="backToOrders" class="btn btn-soft">العودة للقائمة</button>
+          </div>
+
+          <div class="edit-section-title">بيانات الطلب</div>
+
+          <div class="edit-field">
+            <label>اسم المستلم</label>
+            <input id="editName" class="input" value="${esc(o.recipient_name||'مجهول')}">
+          </div>
+
+          <div class="edit-field">
+            <label>رقم الهاتف</label>
+            <input id="editPhone" class="input" inputmode="tel" value="${esc(o.phone||'')}">
+          </div>
+
+          <div class="edit-field">
+            <label>المحافظة</label>
+            <input id="editArea" class="input" value="${esc(o.area||'')}">
+          </div>
+
+          <div class="edit-field">
+            <label>العنوان التفصيلي</label>
+            <textarea id="editAddress" class="textarea">${esc(o.detailed_address||'')}</textarea>
+          </div>
+
+          <div class="edit-field">
+            <label>ملاحظات الطلب</label>
+            <textarea id="editNotes" class="textarea edit-notes">${esc(o.order_notes||'')}</textarea>
+          </div>
+
+          <div class="edit-field">
+            <label>قيمة الطلب</label>
+            <input id="editAmount" class="input" inputmode="decimal" value="${Number(o.amount||0)}">
+          </div>
+
+          <div class="edit-section-title">نتيجة التوصيل</div>
+
+          <div class="edit-field">
+            <label>الحالة</label>
+            <select id="editStatus" class="select">
+              ${Object.entries(DELIVERY_STATUS_LABELS).map(([k,v])=>`<option value="${k}" ${k===(o.delivery_status||'pending')?'selected':''}>${v}</option>`).join('')}
+            </select>
+          </div>
+
+          <div class="edit-field">
+            <label>القيمة المسلّمة فعليًا</label>
+            <input id="editDeliveredAmount" class="input" inputmode="decimal" value="${Number(o.delivered_amount||o.amount||0)}">
+          </div>
+
+          <div class="edit-field">
+            <label>أجور التوصيل</label>
+            <input id="editDeliveryFee" class="input fixed-fee" value="2" readonly>
+          </div>
+
+          <div class="edit-field">
+            <label>الكاش المستلم من شركة التوصيل</label>
+            <input id="editCash" class="input" inputmode="decimal" value="${Number(o.cash_collected||0)}">
+          </div>
+
+          <div class="edit-field">
+            <label>تكلفة البضاعة علينا</label>
+            <input id="editCost" class="input" inputmode="decimal" value="${Number(o.cost_of_goods||0)}">
+          </div>
+
+          <div class="edit-field">
+            <label>عدد القطع المسلّمة</label>
+            <input id="editDeliveredPieces" class="input" inputmode="numeric" value="${Number(o.delivered_pieces||0)}">
+          </div>
+
+          <div class="edit-field">
+            <label>عدد القطع المرتجعة</label>
+            <input id="editReturnedPieces" class="input" inputmode="numeric" value="${Number(o.returned_pieces||0)}">
+          </div>
+
+          <div class="edit-field">
+            <label>ملاحظة التسوية</label>
+            <textarea id="editSettlementNote" class="textarea">${esc(o.settlement_note||'')}</textarea>
+          </div>
+
+          <div class="edit-profit-box">
+            الربح المتوقع: <b id="editProfitPreview">0.00</b> د.أ
+          </div>
+
+          <div class="edit-actions-sticky">
+            <button id="saveEditOrder" class="btn btn-primary">تحديث</button>
+            <button id="cancelEditOrder" class="btn btn-soft">العودة للقائمة</button>
+          </div>
+
+        </div>
+      </div>
+    `;
+
+    const back=()=>show('orders');
+    $('#backToOrders').onclick=back;
+    $('#cancelEditOrder').onclick=back;
+
+    const calcProfit=()=>{
+      const cash=Number($('#editCash').value||0);
+      const cost=Number($('#editCost').value||0);
+      $('#editProfitPreview').textContent=money(cash-cost);
+    };
+
+    const syncCash=()=>{
+      const status=$('#editStatus').value;
+      const delivered=Number($('#editDeliveredAmount').value||0);
+      if(['delivered','delivered_adjusted'].includes(status) && Number(o.cash_collected||0)===0){
+        $('#editCash').value=Math.max(0,delivered-2);
+      }
+      calcProfit();
+    };
+
+    $('#editCash').oninput=calcProfit;
+    $('#editCost').oninput=calcProfit;
+    $('#editDeliveredAmount').oninput=syncCash;
+    $('#editStatus').onchange=syncCash;
+    calcProfit();
+
+    $('#saveEditOrder').onclick=async()=>{
+      const btn=$('#saveEditOrder');
+      btn.disabled=true;
+      btn.textContent='جاري التحديث...';
+
+      try{
+        await api('/orders/'+id,{
+          method:'PUT',
+          body:JSON.stringify({
+            recipient_name:$('#editName').value,
+            phone:$('#editPhone').value,
+            area:$('#editArea').value,
+            detailed_address:$('#editAddress').value,
+            amount:$('#editAmount').value,
+            order_notes:$('#editNotes').value
+          })
+        });
+
+        await api('/orders/'+id+'/outcome',{
+          method:'PUT',
+          body:JSON.stringify({
+            delivery_status:$('#editStatus').value,
+            delivered_amount:$('#editDeliveredAmount').value,
+            delivery_fee:2,
+            cash_collected:$('#editCash').value,
+            cost_of_goods:$('#editCost').value,
+            delivered_pieces:$('#editDeliveredPieces').value,
+            returned_pieces:$('#editReturnedPieces').value,
+            settlement_note:$('#editSettlementNote').value
+          })
+        });
+
+        toast('تم تحديث الطلب بنجاح');
+        show('orders');
+      }catch(e){
+        btn.disabled=false;
+        btn.textContent='تحديث';
+        toast(e.message);
+      }
+    };
+
+  }catch(e){
+    toast(e.message);
+    show('orders');
+  }
+}
+
 async function ordersView(){const c=$('#content');c.innerHTML=`<div class="page-title"><div><h1>الطلبات والبحث</h1><div class="sub">ابحث بالكود أو الهاتف أو الاسم أو حدّد نطاق أكواد</div></div></div><div class="card"><div class="toolbar"><input id="q" class="input" placeholder="بحث سريع"><input id="fc" class="input" inputmode="numeric" placeholder="من كود"><input id="tc" class="input" inputmode="numeric" placeholder="إلى كود"><select id="ps" class="select"><option value="">كل الطلبات</option><option value="0">غير مطبوعة</option><option value="1">مطبوعة</option></select><button id="searchBtn" class="btn btn-primary">بحث</button></div><div id="ordersTable"></div></div>`;$('#searchBtn').onclick=loadOrders;await loadOrders()}
 async function loadOrders(){const p=new URLSearchParams();if($('#q')?.value)p.set('q',$('#q').value);if($('#fc')?.value)p.set('from_code',$('#fc').value);if($('#tc')?.value)p.set('to_code',$('#tc').value);if($('#ps')?.value!=='')p.set('printed',$('#ps').value);const d=await api('/orders?'+p.toString());state.orders=d.orders;renderOrdersTable('#ordersTable',state.orders,false)}
 
@@ -585,7 +769,8 @@ async function openOutcome(id){
   }
 }
 
-function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>النتيجة</th><th>الطباعة</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code">${o.order_code}</td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}<br><span class="sub">${esc(o.detailed_address)}</span></td><td>${money(o.amount)}</td><td>${esc(o.order_notes)}</td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><button class="btn btn-soft outcome-btn" data-order-id="${o.id}">تحديث النتيجة</button><div class="sub" style="margin-top:4px">كاش ${money(o.cash_collected||0)} • ربح ${money((o.cash_collected||0)-(o.cost_of_goods||0))}</div></td><td>${o.printed?'<span class="badge badge-ok">مطبوع</span>':'<span class="badge badge-warn">غير مطبوع</span>'}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.outcome-btn').forEach(btn=>{btn.onclick=()=>openOutcome(Number(btn.dataset.orderId));});
+function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>النتيجة</th><th>الطباعة</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code"><button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}<br><span class="sub">${esc(o.detailed_address)}</span></td><td>${money(o.amount)}</td><td class="notes-cell"><div class="full-order-notes">${esc(o.order_notes||'')}</div></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><button class="btn btn-soft outcome-btn" data-order-id="${o.id}">تحديث النتيجة</button><div class="sub" style="margin-top:4px">كاش ${money(o.cash_collected||0)} • ربح ${money((o.cash_collected||0)-(o.cost_of_goods||0))}</div></td><td>${o.printed?'<span class="badge badge-ok">مطبوع</span>':'<span class="badge badge-warn">غير مطبوع</span>'}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
+  document.querySelectorAll('.outcome-btn').forEach(btn=>{btn.onclick=()=>openOutcome(Number(btn.dataset.orderId));});
   if(selectable){$('#allcheck').onchange=e=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=e.target.checked)}}
 async function printView(){const c=$('#content');const d=await api('/unprinted');state.orders=d.orders;c.innerHTML=`<div class="page-title"><div><h1>جاهز للطباعة</h1><div class="sub">كل الطلبات التي لم تدخل أي دفعة طباعة حتى الآن</div></div><div><span class="pill" style="background:#e9eff4;color:#102a43">${state.orders.length} طلب</span></div></div><div class="card"><div class="actions no-print" style="margin-top:0;margin-bottom:14px"><button id="selAll" class="btn btn-soft">تحديد الكل</button><button id="makeBatch" class="btn btn-accent">إنشاء دفعة وطباعة المحدد</button></div><div id="printTable"></div></div>`;renderOrdersTable('#printTable',state.orders,true);$('#selAll').onclick=()=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=true);$('#makeBatch').onclick=async()=>{const ids=[...document.querySelectorAll('.rowcheck:checked')].map(x=>Number(x.dataset.id));if(!ids.length)return toast('حدد طلباً واحداً على الأقل');try{const r=await api('/print-batches',{method:'POST',body:JSON.stringify({order_ids:ids})});openPrintWindow(r.orders,`دفعة ${r.batch.batch_code}`);toast(`تم إنشاء دفعة ${r.batch.order_count} طلب`);setTimeout(()=>printView(),600)}catch(e){toast(e.message)}}}
 function labelHtml(o){return `<div class="label"><div class="label-head"><b>CORVEX SPORT</b><span>#${o.order_code}</span></div><div><strong>المستلم:</strong> ${esc(o.recipient_name)}</div><div><strong>الهاتف:</strong> ${esc(o.phone)}</div><div><strong>العنوان:</strong> ${esc(o.area)} ${esc(o.detailed_address)}</div><div><strong>القيمة:</strong> ${money(o.amount)} د.أ</div><div class="note"><strong>ملاحظات الطلب:</strong><br>${esc(o.order_notes||'-')}</div></div>`}
