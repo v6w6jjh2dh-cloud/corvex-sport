@@ -362,3 +362,110 @@ button,input,textarea,select{font:inherit}.hidden{display:none!important}
     align-items:center;
   }
 }
+
+
+/* V14 RESULT WINDOW — wide + working scroll */
+html.modal-open,
+body.modal-open{
+  overflow:hidden !important;
+}
+
+.outcome-modal{
+  position:fixed !important;
+  inset:0 !important;
+  z-index:5000 !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  padding:18px !important;
+  overflow:hidden !important;
+  background:rgba(15,23,42,.55) !important;
+}
+
+.outcome-card{
+  width:min(1180px,96vw) !important;
+  max-width:1180px !important;
+  height:auto !important;
+  max-height:88dvh !important;
+  margin:0 auto !important;
+  padding:24px 28px !important;
+  border-radius:22px !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  -webkit-overflow-scrolling:touch !important;
+  overscroll-behavior:contain !important;
+  touch-action:pan-y !important;
+  background:#fff !important;
+}
+
+.outcome-form{
+  display:grid !important;
+  grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+  gap:18px 22px !important;
+}
+
+.fixed-fee-wrap{
+  display:block !important;
+}
+.fixed-fee{
+  width:100% !important;
+}
+
+@media (min-width:900px){
+  .outcome-card{
+    width:min(1180px,94vw) !important;
+  }
+  .outcome-form{
+    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+  }
+}
+
+/* Tablet landscape */
+@media (min-width:700px) and (max-width:1100px) and (orientation:landscape){
+  .outcome-modal{
+    align-items:center !important;
+    padding:10px !important;
+  }
+  .outcome-card{
+    width:96vw !important;
+    max-width:none !important;
+    max-height:90dvh !important;
+    padding:18px 22px !important;
+  }
+  .outcome-form{
+    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+    gap:14px 18px !important;
+  }
+  .outcome-card .input,
+  .outcome-card .select,
+  .outcome-card .textarea{
+    min-height:50px !important;
+    font-size:17px !important;
+  }
+  .outcome-card .textarea{
+    min-height:90px !important;
+  }
+}
+
+/* Phone portrait */
+@media (max-width:699px){
+  .outcome-modal{
+    align-items:flex-start !important;
+    padding:8px !important;
+    overflow:hidden !important;
+  }
+  .outcome-card{
+    width:100% !important;
+    max-width:none !important;
+    max-height:94dvh !important;
+    margin:0 !important;
+    padding:16px !important;
+    border-radius:18px !important;
+    overflow-y:auto !important;
+    -webkit-overflow-scrolling:touch !important;
+  }
+  .outcome-form{
+    grid-template-columns:1fr !important;
+    gap:13px !important;
+  }
+}

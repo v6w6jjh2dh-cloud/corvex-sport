@@ -446,8 +446,10 @@ async function openOutcome(id){
     </div>
   `;
   document.body.appendChild(overlay);
+  document.documentElement.classList.add('modal-open');
+  document.body.classList.add('modal-open');
 
-  const close=()=>overlay.remove();
+  const close=()=>{overlay.remove();document.documentElement.classList.remove('modal-open');document.body.classList.remove('modal-open');};
   overlay.onclick=e=>{if(e.target===overlay) close();};
 
   try{
@@ -479,7 +481,7 @@ async function openOutcome(id){
           <label>أجور التوصيل</label>
           <div class="fixed-fee-wrap">
             <input id="outDeliveryFee" class="input fixed-fee" value="2" readonly>
-            <span class="fee-unit">دينار ثابت</span>
+            
           </div>
         </div>
 
