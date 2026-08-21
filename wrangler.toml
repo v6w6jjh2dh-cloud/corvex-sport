@@ -5,4 +5,4 @@ pages_build_output_dir = "public"
 [[d1_databases]]
 binding = "DB"
 database_name = "corvex-sport-db"
-database_id = "89096744-5b34-4030-8b24-e29df006a20a"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
