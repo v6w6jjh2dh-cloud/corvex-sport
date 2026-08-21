@@ -435,19 +435,34 @@ function deliveryBadge(o){
 }
 
 async function openOutcome(id){
-  const d=await api('/orders/'+id);
-  const o=d.order;
+  const old=document.querySelector('.modal-backdrop');
+  if(old) old.remove();
 
   const overlay=document.createElement('div');
-  overlay.className='modal-backdrop';
+  overlay.className='modal-backdrop outcome-modal';
   overlay.innerHTML=`
-    <div class="modal-card">
+    <div class="modal-card outcome-card" dir="rtl">
+      <div class="outcome-loading">جاري تحميل بيانات الطلب...</div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close=()=>overlay.remove();
+  overlay.onclick=e=>{if(e.target===overlay) close();};
+
+  try{
+    const d=await api('/orders/'+id);
+    const o=d.order;
+    if(!o) throw new Error('لم يتم العثور على الطلب');
+
+    const card=overlay.querySelector('.outcome-card');
+    card.innerHTML=`
       <div class="modal-head">
-        <h3>نتيجة الطلب #${o.order_code}</h3>
-        <button class="btn btn-soft" data-close>✕</button>
+        <h3>نتيجة الطلب #${esc(o.order_code)}</h3>
+        <button type="button" class="btn btn-soft outcome-close">✕</button>
       </div>
 
-      <div class="grid form-grid">
+      <div class="outcome-form">
         <div class="field">
           <label>الحالة</label>
           <select id="outStatus" class="select">
@@ -457,35 +472,35 @@ async function openOutcome(id){
 
         <div class="field">
           <label>القيمة المسلّمة فعليًا</label>
-          <input id="outDeliveredAmount" class="input" inputmode="decimal" value="${o.delivered_amount||o.amount||0}">
+          <input id="outDeliveredAmount" class="input" inputmode="decimal" value="${Number(o.delivered_amount||o.amount||0)}">
         </div>
 
         <div class="field">
           <label>أجور التوصيل</label>
-          <input id="outDeliveryFee" class="input" inputmode="decimal" value="${o.delivery_fee||0}">
+          <input id="outDeliveryFee" class="input" inputmode="decimal" value="${Number(o.delivery_fee||0)}">
         </div>
 
         <div class="field">
           <label>الكاش المستلم من شركة التوصيل</label>
-          <input id="outCash" class="input" inputmode="decimal" value="${o.cash_collected||0}">
+          <input id="outCash" class="input" inputmode="decimal" value="${Number(o.cash_collected||0)}">
         </div>
 
         <div class="field">
           <label>تكلفة البضاعة علينا</label>
-          <input id="outCost" class="input" inputmode="decimal" value="${o.cost_of_goods||0}">
+          <input id="outCost" class="input" inputmode="decimal" value="${Number(o.cost_of_goods||0)}">
         </div>
 
         <div class="field">
           <label>عدد القطع المسلّمة</label>
-          <input id="outDeliveredPieces" class="input" inputmode="numeric" value="${o.delivered_pieces||0}">
+          <input id="outDeliveredPieces" class="input" inputmode="numeric" value="${Number(o.delivered_pieces||0)}">
         </div>
 
         <div class="field">
           <label>عدد القطع المرتجعة</label>
-          <input id="outReturnedPieces" class="input" inputmode="numeric" value="${o.returned_pieces||0}">
+          <input id="outReturnedPieces" class="input" inputmode="numeric" value="${Number(o.returned_pieces||0)}">
         </div>
 
-        <div class="field full">
+        <div class="field">
           <label>ملاحظة التسوية</label>
           <textarea id="outNote" class="textarea">${esc(o.settlement_note||'')}</textarea>
         </div>
@@ -495,50 +510,61 @@ async function openOutcome(id){
         الربح المتوقع: <b id="profitPreview">0.00</b> د.أ
       </div>
 
-      <div class="actions">
-        <button id="saveOutcome" class="btn btn-accent">حفظ النتيجة</button>
-        <button class="btn btn-soft" data-close>إلغاء</button>
+      <div class="actions outcome-actions">
+        <button type="button" id="saveOutcome" class="btn btn-accent">حفظ النتيجة</button>
+        <button type="button" class="btn btn-soft outcome-close">إلغاء</button>
       </div>
-    </div>
-  `;
+    `;
 
-  document.body.appendChild(overlay);
+    card.querySelectorAll('.outcome-close').forEach(x=>x.onclick=close);
 
-  const calc=()=>{
-    const cash=Number(overlay.querySelector('#outCash').value||0);
-    const cost=Number(overlay.querySelector('#outCost').value||0);
-    overlay.querySelector('#profitPreview').textContent=money(cash-cost);
-  };
+    const calc=()=>{
+      const cash=Number(card.querySelector('#outCash').value||0);
+      const cost=Number(card.querySelector('#outCost').value||0);
+      card.querySelector('#profitPreview').textContent=money(cash-cost);
+    };
+    card.querySelector('#outCash').oninput=calc;
+    card.querySelector('#outCost').oninput=calc;
+    calc();
 
-  overlay.querySelector('#outCash').oninput=calc;
-  overlay.querySelector('#outCost').oninput=calc;
-  calc();
-
-  overlay.querySelectorAll('[data-close]').forEach(x=>x.onclick=()=>overlay.remove());
-
-  overlay.querySelector('#saveOutcome').onclick=async()=>{
-    try{
-      await api('/orders/'+id+'/outcome',{
-        method:'PUT',
-        body:JSON.stringify({
-          delivery_status:overlay.querySelector('#outStatus').value,
-          delivered_amount:overlay.querySelector('#outDeliveredAmount').value,
-          delivery_fee:overlay.querySelector('#outDeliveryFee').value,
-          cash_collected:overlay.querySelector('#outCash').value,
-          cost_of_goods:overlay.querySelector('#outCost').value,
-          delivered_pieces:overlay.querySelector('#outDeliveredPieces').value,
-          returned_pieces:overlay.querySelector('#outReturnedPieces').value,
-          settlement_note:overlay.querySelector('#outNote').value
-        })
-      });
-      toast('تم حفظ نتيجة الطلب');
-      overlay.remove();
-      if(state.view==='orders') loadOrders();
-      if(state.view==='dashboard') dashboard();
-    }catch(e){
-      toast(e.message);
-    }
-  };
+    card.querySelector('#saveOutcome').onclick=async()=>{
+      const saveBtn=card.querySelector('#saveOutcome');
+      saveBtn.disabled=true;
+      saveBtn.textContent='جاري الحفظ...';
+      try{
+        await api('/orders/'+id+'/outcome',{
+          method:'PUT',
+          body:JSON.stringify({
+            delivery_status:card.querySelector('#outStatus').value,
+            delivered_amount:card.querySelector('#outDeliveredAmount').value,
+            delivery_fee:card.querySelector('#outDeliveryFee').value,
+            cash_collected:card.querySelector('#outCash').value,
+            cost_of_goods:card.querySelector('#outCost').value,
+            delivered_pieces:card.querySelector('#outDeliveredPieces').value,
+            returned_pieces:card.querySelector('#outReturnedPieces').value,
+            settlement_note:card.querySelector('#outNote').value
+          })
+        });
+        toast('تم حفظ نتيجة الطلب');
+        close();
+        if(state.view==='orders') loadOrders();
+        if(state.view==='dashboard') dashboard();
+      }catch(e){
+        saveBtn.disabled=false;
+        saveBtn.textContent='حفظ النتيجة';
+        toast(e.message);
+      }
+    };
+  }catch(e){
+    const card=overlay.querySelector('.outcome-card');
+    card.innerHTML=`
+      <div class="outcome-error">
+        <b>تعذر فتح نتيجة الطلب</b>
+        <div>${esc(e.message||'حدث خطأ')}</div>
+        <button type="button" class="btn btn-soft outcome-close">إغلاق</button>
+      </div>`;
+    card.querySelector('.outcome-close').onclick=close;
+  }
 }
 
 function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>النتيجة</th><th>الطباعة</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code">${o.order_code}</td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}<br><span class="sub">${esc(o.detailed_address)}</span></td><td>${money(o.amount)}</td><td>${esc(o.order_notes)}</td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><button class="btn btn-soft outcome-btn" data-order-id="${o.id}">تحديث النتيجة</button><div class="sub" style="margin-top:4px">كاش ${money(o.cash_collected||0)} • ربح ${money((o.cash_collected||0)-(o.cost_of_goods||0))}</div></td><td>${o.printed?'<span class="badge badge-ok">مطبوع</span>':'<span class="badge badge-warn">غير مطبوع</span>'}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.outcome-btn').forEach(btn=>{btn.onclick=()=>openOutcome(Number(btn.dataset.orderId));});
