@@ -14,3 +14,63 @@ button,input,textarea,select{font:inherit}.hidden{display:none!important}
 .toast{position:fixed;bottom:20px;left:20px;background:#111;color:white;padding:12px 16px;border-radius:12px;box-shadow:var(--shadow);z-index:99}.empty{text-align:center;color:var(--muted);padding:40px}.check{width:18px;height:18px}.batch-card{display:flex;justify-content:space-between;gap:14px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:10px}.batch-meta{color:var(--muted);font-size:12px}
 @media(max-width:900px){.layout{grid-template-columns:1fr}.sidebar{display:none}.stats{grid-template-columns:repeat(2,1fr)}.form-grid{grid-template-columns:1fr}.content{padding:14px}.topbar{padding:0 14px}.page-title{align-items:flex-start;gap:10px}.toolbar .input,.toolbar .select{width:100%}}
 @media print{body{background:white}.topbar,.sidebar,.no-print{display:none!important}.layout{display:block}.content{padding:0}.card{box-shadow:none;border:0;padding:0}}
+
+
+/* V11 mobile navigation */
+.mobile-menu-btn{
+  display:none;
+  border:0;
+  background:rgba(255,255,255,.12);
+  color:#fff;
+  width:42px;
+  height:42px;
+  border-radius:12px;
+  font-size:24px;
+  cursor:pointer;
+}
+.sidebar-overlay{display:none}
+
+.badge-danger{background:#feecec;color:#b42318}
+
+.modal-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.48);z-index:100;
+  display:grid;place-items:center;padding:16px;
+}
+.modal-card{
+  width:min(720px,96vw);max-height:92vh;overflow:auto;background:#fff;
+  border-radius:20px;padding:20px;box-shadow:0 30px 80px rgba(0,0,0,.28)
+}
+.modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.modal-head h3{margin:0}
+.settlement-preview{
+  margin-top:14px;padding:14px;border-radius:14px;background:#f4f8fb;
+  border:1px solid var(--line);font-size:16px
+}
+.settlement-preview b{color:var(--ok);font-size:22px}
+
+@media(max-width:900px){
+  .mobile-menu-btn{display:grid;place-items:center}
+  .topbar{gap:8px}
+  .topbar .logo{margin-inline-start:auto}
+  .sidebar{
+    display:block;
+    position:fixed;
+    top:72px;
+    right:-280px;
+    width:260px;
+    height:calc(100vh - 72px);
+    z-index:80;
+    transition:right .22s ease;
+    box-shadow:-14px 0 40px rgba(0,0,0,.25);
+    overflow:auto;
+  }
+  .sidebar.open{right:0}
+  .sidebar-overlay{
+    position:fixed;inset:72px 0 0 0;background:rgba(0,0,0,.35);
+    z-index:70;
+  }
+  .sidebar-overlay.show{display:block}
+  .nav button{font-size:16px;padding:15px}
+  .finance-stats{grid-template-columns:repeat(2,1fr)}
+  .modal-card .form-grid{grid-template-columns:1fr}
+}
