@@ -38,7 +38,7 @@ async function hashPassword(password, saltText = null) {
     {
       name: "PBKDF2",
       salt,
-      iterations: 120000,
+      iterations: 100000,
       hash: "SHA-256",
     },
     key,
@@ -53,9 +53,7 @@ async function hashPassword(password, saltText = null) {
 
 async function verifyPassword(password, stored) {
   const [salt] = String(stored || "").split(":");
-
   if (!salt) return false;
-
   return (await hashPassword(password, salt)) === stored;
 }
 
@@ -73,7 +71,6 @@ function requireDB(env) {
       "D1 binding DB is not available. Check Cloudflare Pages Settings > Bindings and redeploy."
     );
   }
-
   return env.DB;
 }
 
@@ -198,13 +195,6 @@ export async function onRequest(context) {
   const method = request.method.toUpperCase();
 
   try {
-    /*
-     * DEBUG
-     * افتح:
-     * /api/debug
-     *
-     * للتأكد أن Cloudflare يمرر Binding DB.
-     */
     if (path === "/debug" && method === "GET") {
       return json({
         ok: true,
@@ -216,9 +206,6 @@ export async function onRequest(context) {
 
     const DB = requireDB(env);
 
-    /*
-     * SETUP
-     */
     if (path === "/setup" && method === "GET") {
       const row = await DB.prepare(
         "SELECT COUNT(*) AS c FROM users"
@@ -279,9 +266,6 @@ export async function onRequest(context) {
       });
     }
 
-    /*
-     * LOGIN
-     */
     if (path === "/login" && method === "POST") {
       const body = await readBody(request);
 
@@ -337,9 +321,6 @@ export async function onRequest(context) {
       });
     }
 
-    /*
-     * كل المسارات التالية تحتاج Login.
-     */
     const me = await auth(request, env);
 
     if (!me) {
@@ -351,9 +332,6 @@ export async function onRequest(context) {
       );
     }
 
-    /*
-     * CURRENT USER
-     */
     if (path === "/me" && method === "GET") {
       return json({
         user: {
@@ -365,9 +343,6 @@ export async function onRequest(context) {
       });
     }
 
-    /*
-     * LOGOUT
-     */
     if (path === "/logout" && method === "POST") {
       const token = (
         request.headers.get("authorization") || ""
@@ -384,35 +359,18 @@ export async function onRequest(context) {
       });
     }
 
-    /*
-     * DASHBOARD
-     */
     if (path === "/dashboard" && method === "GET") {
       const stats = await DB.prepare(`
         SELECT
           COUNT(*) AS total,
-
-          SUM(
-            CASE
-              WHEN printed = 0 THEN 1
-              ELSE 0
-            END
-          ) AS unprinted,
-
-          SUM(
-            CASE
-              WHEN printed = 1 THEN 1
-              ELSE 0
-            END
-          ) AS printed,
-
+          SUM(CASE WHEN printed = 0 THEN 1 ELSE 0 END) AS unprinted,
+          SUM(CASE WHEN printed = 1 THEN 1 ELSE 0 END) AS printed,
           SUM(
             CASE
               WHEN date(created_at) = date('now') THEN 1
               ELSE 0
             END
           ) AS today
-
         FROM orders
       `).first();
 
@@ -430,9 +388,6 @@ export async function onRequest(context) {
       });
     }
 
-    /*
-     * ORDERS LIST
-     */
     if (path === "/orders" && method === "GET") {
       const result = await listOrders(url, env);
 
@@ -441,9 +396,6 @@ export async function onRequest(context) {
       });
     }
 
-    /*
-     * CREATE ORDER
-     */
     if (path === "/orders" && method === "POST") {
       const b = await readBody(request);
 
@@ -508,9 +460,6 @@ export async function onRequest(context) {
       );
     }
 
-    /*
-     * SINGLE ORDER
-     */
     const orderMatch = path.match(/^\/orders\/(\d+)$/);
 
     if (orderMatch && method === "GET") {
@@ -536,16 +485,12 @@ export async function onRequest(context) {
       });
     }
 
-    /*
-     * UPDATE ORDER
-     */
     if (orderMatch && method === "PUT") {
       const b = await readBody(request);
       const id = Number(orderMatch[1]);
 
       await DB.prepare(`
         UPDATE orders
-
         SET
           recipient_name = ?,
           phone = ?,
@@ -554,7 +499,6 @@ export async function onRequest(context) {
           amount = ?,
           order_notes = ?,
           updated_at = datetime('now')
-
         WHERE id = ?
       `)
         .bind(
@@ -579,9 +523,6 @@ export async function onRequest(context) {
       });
     }
 
-    /*
-     * USERS
-     */
     if (path === "/users" && method === "GET") {
       if (me.role !== "admin") {
         return json(
@@ -600,9 +541,7 @@ export async function onRequest(context) {
           role,
           is_active,
           created_at
-
         FROM users
-
         ORDER BY id DESC
       `).all();
 
@@ -665,9 +604,6 @@ export async function onRequest(context) {
       );
     }
 
-    /*
-     * CREATE PRINT BATCH
-     */
     if (
       path === "/print-batches" &&
       method === "POST"
@@ -723,9 +659,7 @@ export async function onRequest(context) {
           .toISOString()
           .replace(/\D/g, "")
           .slice(0, 14) +
-        `-${Math.floor(
-          Math.random() * 900 + 100
-        )}`;
+        `-${Math.floor(Math.random() * 900 + 100)}`;
 
       const batchRes = await DB.prepare(`
         INSERT INTO print_batches (
@@ -745,11 +679,7 @@ export async function onRequest(context) {
       const batchId =
         batchRes.meta.last_row_id;
 
-      for (
-        let i = 0;
-        i < orders.length;
-        i++
-      ) {
+      for (let i = 0; i < orders.length; i++) {
         await DB.prepare(`
           INSERT INTO print_batch_orders (
             batch_id,
@@ -767,7 +697,6 @@ export async function onRequest(context) {
 
         await DB.prepare(`
           UPDATE orders
-
           SET
             printed = 1,
             print_count = print_count + 1,
@@ -778,7 +707,6 @@ export async function onRequest(context) {
               ),
             last_printed_at =
               datetime('now')
-
           WHERE id = ?
         `)
           .bind(orders[i].id)
@@ -798,9 +726,6 @@ export async function onRequest(context) {
       );
     }
 
-    /*
-     * LIST PRINT BATCHES
-     */
     if (
       path === "/print-batches" &&
       method === "GET"
@@ -809,14 +734,10 @@ export async function onRequest(context) {
         SELECT
           b.*,
           u.display_name AS created_by_name
-
         FROM print_batches b
-
         LEFT JOIN users u
           ON u.id = b.created_by
-
         ORDER BY b.id DESC
-
         LIMIT 100
       `).all();
 
@@ -825,9 +746,6 @@ export async function onRequest(context) {
       });
     }
 
-    /*
-     * SINGLE PRINT BATCH
-     */
     const batchMatch = path.match(
       /^\/print-batches\/(\d+)$/
     );
@@ -844,12 +762,9 @@ export async function onRequest(context) {
         SELECT
           b.*,
           u.display_name AS created_by_name
-
         FROM print_batches b
-
         LEFT JOIN users u
           ON u.id = b.created_by
-
         WHERE b.id = ?
       `)
         .bind(batchId)
@@ -858,8 +773,7 @@ export async function onRequest(context) {
       if (!batch) {
         return json(
           {
-            error:
-              "دفعة الطباعة غير موجودة",
+            error: "دفعة الطباعة غير موجودة",
           },
           404
         );
@@ -869,10 +783,8 @@ export async function onRequest(context) {
         ${orderSelectSql(`
           JOIN print_batch_orders pbo
             ON pbo.order_id = o.id
-
           WHERE pbo.batch_id = ?
         `)}
-
         ORDER BY pbo.position ASC
       `)
         .bind(batchId)
@@ -884,9 +796,6 @@ export async function onRequest(context) {
       });
     }
 
-    /*
-     * UNPRINTED ORDERS
-     */
     if (
       path === "/unprinted" &&
       method === "GET"
@@ -895,7 +804,6 @@ export async function onRequest(context) {
         ${orderSelectSql(
           "WHERE o.printed = 0"
         )}
-
         ORDER BY o.order_code ASC
       `).all();
 
