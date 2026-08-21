@@ -50,10 +50,20 @@ function normalizePhone(value = '') {
 }
 
 function orderSelectSql(where = '') {
-  return `SELECT o.*, u.display_name AS created_by_name FROM orders o LEFT JOIN users u ON u.id=o.created_by ${where}`;
+  return `SELECT o.*, u.display_name AS created_by_name, s.name AS store_name, s.phone AS store_phone FROM orders o LEFT JOIN users u ON u.id=o.created_by LEFT JOIN stores s ON s.id=o.store_id ${where}`;
 }
 
 async function ensureBusinessSchema(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS stores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    contact_name TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`).run();
+
   const info = await env.DB.prepare("PRAGMA table_info(orders)").all();
   const cols = new Set((info.results || []).map(r => r.name));
 
@@ -66,7 +76,8 @@ async function ensureBusinessSchema(env) {
     ['delivered_pieces', "INTEGER NOT NULL DEFAULT 0"],
     ['returned_pieces', "INTEGER NOT NULL DEFAULT 0"],
     ['settlement_note', "TEXT NOT NULL DEFAULT ''"],
-    ['settled_at', "TEXT"]
+    ['settled_at', "TEXT"],
+    ['store_id', "INTEGER"]
   ];
 
   for (const [name, type] of wanted) {
@@ -74,6 +85,8 @@ async function ensureBusinessSchema(env) {
       await env.DB.prepare(`ALTER TABLE orders ADD COLUMN ${name} ${type}`).run();
     }
   }
+
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_orders_store_id ON orders(store_id)').run();
 }
 
 const STATUS_LABELS = {
@@ -179,6 +192,41 @@ export async function onRequest(context) {
       return json({ ...stats, batches:Number(batchCount?.c || 0), status_labels: STATUS_LABELS });
     }
 
+
+    if (path === '/stores' && method === 'GET') {
+      const rows = await env.DB.prepare(`SELECT s.*,
+        (SELECT COUNT(*) FROM orders o WHERE o.store_id=s.id) AS orders_count
+        FROM stores s ORDER BY s.is_active DESC, s.name COLLATE NOCASE ASC`).all();
+      return json({ stores: rows.results || [] });
+    }
+
+    if (path === '/stores' && method === 'POST') {
+      const b = await readBody(request);
+      const name = String(b.name || '').trim();
+      if (!name) return json({ error:'اسم المتجر مطلوب' },400);
+      try {
+        const r = await env.DB.prepare(`INSERT INTO stores(name,contact_name,phone,notes) VALUES(?,?,?,?)`)
+          .bind(name, String(b.contact_name||'').trim(), normalizePhone(b.phone)||String(b.phone||'').trim(), String(b.notes||'').trim()).run();
+        const store = await env.DB.prepare('SELECT * FROM stores WHERE id=?').bind(r.meta.last_row_id).first();
+        return json({ store },201);
+      } catch (e) {
+        if (String(e.message||'').toLowerCase().includes('unique')) return json({error:'اسم المتجر موجود مسبقاً'},409);
+        throw e;
+      }
+    }
+
+    const storeMatch = path.match(/^\/stores\/(\d+)$/);
+    if (storeMatch && method === 'PUT') {
+      const id = Number(storeMatch[1]);
+      const b = await readBody(request);
+      const name = String(b.name || '').trim();
+      if (!name) return json({error:'اسم المتجر مطلوب'},400);
+      await env.DB.prepare(`UPDATE stores SET name=?,contact_name=?,phone=?,notes=?,is_active=? WHERE id=?`)
+        .bind(name,String(b.contact_name||'').trim(),normalizePhone(b.phone)||String(b.phone||'').trim(),String(b.notes||'').trim(),b.is_active===0?0:1,id).run();
+      const store = await env.DB.prepare('SELECT * FROM stores WHERE id=?').bind(id).first();
+      return json({store});
+    }
+
     if (path === '/orders' && method === 'GET') {
       const result = await listOrders(url, env);
       return json({ orders: result.results || [] });
@@ -188,12 +236,17 @@ export async function onRequest(context) {
       const b = await readBody(request);
       const name = String(b.recipient_name || '').trim();
       const phone = normalizePhone(b.phone);
+      const storeId = Number(b.store_id || 0);
       if (!name || !phone) return json({ error:'الاسم ورقم الهاتف مطلوبان' }, 400);
+      if (!storeId) return json({ error:'اختر المتجر صاحب الطلب' }, 400);
+      const store = await env.DB.prepare('SELECT id FROM stores WHERE id=? AND is_active=1').bind(storeId).first();
+      if (!store) return json({error:'المتجر غير موجود أو موقوف'},400);
+
       const max = await env.DB.prepare('SELECT COALESCE(MAX(order_code), 4400) AS m FROM orders').first();
       const code = Number(max?.m || 4400) + 1;
-      const result = await env.DB.prepare(`INSERT INTO orders(order_code,recipient_name,phone,area,detailed_address,amount,order_notes,raw_text,created_by)
-        VALUES(?,?,?,?,?,?,?,?,?)`)
-        .bind(code, name, phone, String(b.area||'').trim(), String(b.detailed_address||'').trim(), Number(b.amount||0), String(b.order_notes||'').trim(), String(b.raw_text||''), me.id).run();
+      const result = await env.DB.prepare(`INSERT INTO orders(order_code,recipient_name,phone,area,detailed_address,amount,order_notes,raw_text,created_by,store_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?)`)
+        .bind(code, name, phone, String(b.area||'').trim(), String(b.detailed_address||'').trim(), Number(b.amount||0), String(b.order_notes||'').trim(), String(b.raw_text||''), me.id, storeId).run();
       const order = await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(result.meta.last_row_id).first();
       return json({ order }, 201);
     }
@@ -207,8 +260,13 @@ export async function onRequest(context) {
     if (orderMatch && method === 'PUT') {
       const b = await readBody(request);
       const id = Number(orderMatch[1]);
-      await env.DB.prepare(`UPDATE orders SET recipient_name=?,phone=?,area=?,detailed_address=?,amount=?,order_notes=?,updated_at=datetime('now') WHERE id=?`)
-        .bind(String(b.recipient_name||'').trim(), normalizePhone(b.phone), String(b.area||'').trim(), String(b.detailed_address||'').trim(), Number(b.amount||0), String(b.order_notes||'').trim(), id).run();
+      const storeId = Number(b.store_id || 0);
+      if (!storeId) return json({error:'اختر المتجر صاحب الطلب'},400);
+      const store = await env.DB.prepare('SELECT id FROM stores WHERE id=? AND is_active=1').bind(storeId).first();
+      if (!store) return json({error:'المتجر غير موجود أو موقوف'},400);
+
+      await env.DB.prepare(`UPDATE orders SET recipient_name=?,phone=?,area=?,detailed_address=?,amount=?,order_notes=?,store_id=?,updated_at=datetime('now') WHERE id=?`)
+        .bind(String(b.recipient_name||'').trim(), normalizePhone(b.phone), String(b.area||'').trim(), String(b.detailed_address||'').trim(), Number(b.amount||0), String(b.order_notes||'').trim(), storeId, id).run();
       const order = await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(id).first();
       return json({order});
     }
