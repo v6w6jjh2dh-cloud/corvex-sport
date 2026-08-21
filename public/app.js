@@ -5,8 +5,18 @@ async function api(path,opts={}){const headers={'content-type':'application/json
 function esc(v=''){return String(v).replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]))}
 function fmtDate(v){if(!v)return'';return new Date(v+'Z').toLocaleString('ar-JO',{dateStyle:'short',timeStyle:'short'})}
 function money(v){return Number(v||0).toFixed(2)}
+function normalizeDigits(v=''){
+  const map = {
+    '٠':'0','١':'1','٢':'2','٣':'3','٤':'4',
+    '٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
+    '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4',
+    '۵':'5','۶':'6','۷':'7','۸':'8','۹':'9'
+  };
+  return String(v).replace(/[٠-٩۰-۹]/g, d=>map[d]||d);
+}
+
 function normalizeArabic(v=''){
-  return String(v)
+  return normalizeDigits(v)
     .toLowerCase()
     .replace(/[إأآٱ]/g,'ا')
     .replace(/ى/g,'ي')
@@ -25,24 +35,40 @@ const COMMON_NAMES = new Set(`
 `.trim().split(/\s+/).map(normalizeArabic));
 
 const JORDAN_GOVERNORATES = {
-  "عمان": ["عمان", "طبربور", "ماركا", "ابو نصير", "شفا بدران", "تلاع العلي", "خلدا", "دابوق", "ام السماق", "الشميساني", "جبل الحسين", "جبل عمان", "جبل النصر", "العبدلي", "راس العين", "المقابلين", "الياسمين", "مرج الحمام", "البيادر", "وسط البلد", "الوحدات", "القويسمة", "الموقر", "الجويدة", "جاوا", "اليادودة", "خريبة السوق", "ناعور", "وادي السير", "صويلح", "الجبيهة", "الجيزة", "ام الرصاص", "حسبان", "نتل", "اللبن"],
-  "إربد": ["اربد", "الرمثا", "الحصن", "بني عبيد", "ايدون", "حوارة", "بني كنانة", "سما الروسان", "الشجرة", "الطرة", "المزار الشمالي", "الوسطية", "كفر اسد", "دير ابي سعيد", "الكورة", "الاغوار الشمالية", "الشونة الشمالية"],
-  "الزرقاء": ["الزرقاء", "الرصيفة", "الهاشمية", "الضليل", "بيرين", "الازرق", "حي معصوم", "الغويرية", "الزواهرة"],
-  "المفرق": ["المفرق", "رحاب", "بلعما", "منشية بني حسن", "ام الجمال"],
-  "عجلون": ["عجلون", "كفرنجة", "كفرنجه", "عنجرة", "صخرة", "عبين", "عبلين", "راسون", "الوهادنة", "اشتفينا", "عين جنا"],
-  "جرش": ["جرش", "سوف", "ساكب", "برما", "المصطبة", "الكته", "الكتة", "قفقفا", "ريمون", "مخيم جرش", "دبين"],
-  "البلقاء": ["البلقاء", "السلط", "عين الباشا", "البقعة", "الفحيص", "ماحص", "الشونة الجنوبية", "دير علا", "الكريمة", "الصبيحي"],
-  "مادبا": ["مادبا", "ذيبان", "مليح", "ماعين", "مكاور", "الفيصلية"],
-  "الكرك": ["الكرك", "مؤتة", "المزار الجنوبي", "الربة", "القصر", "فقوع", "غور الصافي", "الاغوار الجنوبية"],
-  "الطفيلة": ["الطفيلة", "بصيرا", "الحسا", "القادسية", "غرندل", "عين البيضاء", "عفرا"],
-  "معان": ["معان", "الشوبك", "وادي موسى", "البتراء", "الحسينية", "الجفر", "اذرح", "المريغة", "راس النقب"],
-  "العقبة": ["العقبة", "القويرة", "وادي رم", "الديسة", "الريشة", "الحميمة", "رحمة"]
+  "عمان": ["عمان", "الجاردنز", "جاردنز", "عبدون", "دير غبار", "الصويفية", "الرابية", "ام اذينة", "أم أذينة", "الكرسي", "تلاع العلي", "خلدا", "دابوق", "ام السماق", "أم السماق", "الشميساني", "جبل الحسين", "جبل عمان", "جبل النصر", "جبل التاج", "جبل الزهور", "جبل الاشرفية", "الأشرفية", "الاشرفية", "العبدلي", "راس العين", "رأس العين", "المقابلين", "الياسمين", "مرج الحمام", "البيادر", "بيادر وادي السير", "وسط البلد", "الوحدات", "القويسمة", "الموقر", "الجويدة", "جاوا", "اليادودة", "خريبة السوق", "ناعور", "وادي السير", "صويلح", "الجبيهة", "طبربور", "ماركا", "ماركا الشمالية", "ماركا الجنوبية", "ابو نصير", "أبو نصير", "شفا بدران", "شفا بدران", "ضاحية الرشيد", "ضاحية الامير راشد", "ضاحية الأمير راشد", "المدينة الرياضية", "شارع المدينة المنورة", "شارع مكة", "الدوار السابع", "السابع", "الدوار الثامن", "الثامن", "الدوار السادس", "السادس", "الدوار الخامس", "الخامس", "الدوار الرابع", "الرابع", "الدوار الثالث", "الثالث", "الدوار الثاني", "الثاني", "الدوار الاول", "الاول", "أبو علندا", "ابو علندا", "القسطل", "سحاب", "الجيزة", "اللبن", "نتل", "ام الرصاص", "أم الرصاص", "حسبان", "الطنيب", "المشتى", "اليادوده", "أم البساتين", "ام البساتين", "منجا", "ام العمد", "أم العمد", "الماضونة", "الرقيم", "خشافية الشوابكة", "خشافية الدبايبة", "الموقر", "الذهيبة الغربية", "الذهيبة الشرقية", "رجوم الشامي", "الفيصلية عمان", "الزميلات", "الطالبيه", "الطالبية", "الماضونة", "بدر الجديدة", "بدر نزال", "نزال", "حي نزال", "الهاشمي الشمالي", "الهاشمي الجنوبي", "الهاشمي", "المحطة", "النزهة", "طبربور طارق", "طارق", "ضاحية الاقصى", "ضاحية الأقصى", "ماركا طارق", "عرجان عمان", "خلدا ام السماق", "أبو السوس", "ابو السوس", "الكمالية", "الرباحية", "الرباحية الشمالية", "الرباحية الجنوبية", "الظهير", "النهارية", "حسبان الجديدة"],
+  "إربد": ["اربد", "إربد", "الرمثا", "الحصن", "ايدون", "إيدون", "حوارة", "بني عبيد", "بني كنانة", "سما الروسان", "الشجرة", "الطرة", "المزار الشمالي", "الوسطية", "كفر اسد", "كفر أسد", "دير ابي سعيد", "دير أبي سعيد", "الكورة", "الاغوار الشمالية", "الأغوار الشمالية", "الشونة الشمالية", "الطيبة اربد", "الطيبة", "النعيمة", "سال", "بشرى", "بيت راس", "بيت رأس", "حكما", "كفر يوبا", "كفر يوبا", "زحر", "حور", "كفر جايز", "مرو", "عالية", "ناتفة", "فوعرا", "كفر أسد", "سموع", "قفقفا اربد", "حريما", "سحم الكفارات", "ملكا", "ام قيس", "أم قيس", "خرجا", "حبراص", "حرثا", "يبلا", "الشونة الشمالية", "وقاص", "كريمة", "المنشية", "المشارع", "العدسية", "الشيخ حسين", "دير السعنة", "كفر راكب", "جديتا", "تبنة", "كفر عوان", "بيت ايدس", "بيت إيدس", "جنين الصفا", "ارحابا", "إرحابا", "زمال", "سموع الكورة", "كفر الماء", "كفر الماء", "حوفا الوسطية", "قم", "كفر سوم", "الرفيد", "سمر", "عقربا", "حرتا", "رحابا", "كفر ابيل", "كفر أبيل", "صمد", "مخيم اربد", "مخيم إربد"],
+  "الزرقاء": ["الزرقاء", "الرصيفة", "الهاشمية", "الضليل", "بيرين", "الازرق", "الأزرق", "حي معصوم", "الغويرية", "الزواهرة", "جبل طارق", "جبل الامير حسن", "جبل الأمير حسن", "جبل النصر الزرقاء", "حي رمزي", "حي الأمير محمد", "حي الامير محمد", "الزرقاء الجديدة", "الزرقاء القديمة", "السخنة", "عوجان", "المصانع", "الحلابات", "الحلابات الشرقية", "الحلابات الغربية", "ام رمانة", "أم رمانة", "خالدية الزرقاء", "الكمشة", "صروت", "عين الصفراء", "الغباوي", "جناعة", "وادي الحجر", "حي الحسين", "حي شاكر", "حي الجندي", "ماركا الزرقاء", "المدينة الصناعية الزرقاء", "مخيم حطين", "حطين", "مخيم الزرقاء"],
+  "المفرق": ["المفرق", "رحاب", "بلعما", "منشية بني حسن", "ام الجمال", "أم الجمال", "الرويشد", "الصفاوي", "الخالدية", "حوشا", "الباعج", "ام القطين", "أم القطين", "صبحا", "الدفيانة", "سما السرحان", "مغير السرحان", "رباع السرحان", "الزعتري", "منشية السلطة", "نايفة", "رحاب المفرق", "ثغرة الجب", "البويضة", "حويجة", "الحمرا", "الفحيلية", "دير الكهف", "الرويشد", "المنشية", "الرحبة", "الحرش", "الهاشمية المفرق", "بلعما الجديدة"],
+  "عجلون": ["عجلون", "كفرنجة", "كفرنجه", "عنجرة", "صخرة", "عبين", "عبلين", "راسون", "الوهادنة", "اشتفينا", "عين جنا", "عرجان", "باعون", "حلاوة", "الهاشمية عجلون", "الطيارة", "الشفا", "سامتا", "منطقة القلعة", "الصفصافة", "محنا", "خشيبة", "مخيم عجلون", "وادي الطواحين", "ام الينابيع", "أم الينابيع", "الحرث", "المرجم", "الوهادنة"],
+  "جرش": ["جرش", "سوف", "ساكب", "برما", "المصطبة", "الكتة", "الكته", "قفقفا", "ريمون", "مخيم جرش", "دبين", "جبة", "جبا", "الحدادة", "مقبلة", "نحلة", "مرصع", "الجزازة", "الكفير", "بليلا", "الكفرين جرش", "الرحمانية", "منشية جرش", "المشيرفة جرش", "الرشايدة جرش", "دير الليات", "ظهر السرو", "عين الديك", "ام الزيتون جرش", "أم الزيتون جرش"],
+  "البلقاء": ["السلط", "البلقاء", "عين الباشا", "البقعة", "الفحيص", "ماحص", "الشونة الجنوبية", "دير علا", "الكريمة", "الصبيحي", "زي", "علان", "يرقا", "ام جوزة", "أم جوزة", "العارضة", "سويمة", "الكرامة", "الرامة", "الروضة", "الشونة الجنوبية", "الشونة الوسطى", "معدي", "مثلث العارضة", "ابو عبيدة", "أبو عبيدة", "الطوال الجنوبي", "الطوال الشمالي", "الدامية", "ضرار", "دير علا", "خزما", "الشيخ حسين البلقاء", "العيرا", "وادي شعيب", "الصبيحي", "سلط القديمة", "السرو", "جلعد", "صافوط", "ابو نصير البلقاء", "أبو نصير البلقاء", "السلط الجديدة", "نقب الدبور"],
+  "مادبا": ["مادبا", "ذيبان", "مليح", "ماعين", "مكاور", "الفيصلية", "لب", "جرينة", "منشية ماعين", "المريجمات", "الفيحاء مادبا", "الفيصلية مادبا", "عيون موسى", "نيبو", "جبل نيبو", "حسبان مادبا", "حنينا", "العريض", "ام الرصاص مادبا", "أم الرصاص مادبا", "الهيدان", "دلاغة مادبا", "ذيبان الجديدة", "خريبة السوق مادبا"],
+  "الكرك": ["الكرك", "مؤتة", "المزار الجنوبي", "الربة", "القصر", "فقوع", "غور الصافي", "الاغوار الجنوبية", "الأغوار الجنوبية", "الثنية", "مرود", "ادر", "أدر", "بتير الكرك", "العدنانية", "القطرانة", "الحسينية الكرك", "عي", "كفر راكب الكرك", "الطيبة الكرك", "ذات راس", "ذات رأس", "الربة", "سماكية", "منشية ابو حمور", "منشية أبو حمور", "المرج", "المنشية الكرك", "غور المزرعة", "غور حديثة", "النقع", "صرفا", "الجدعا", "حمود", "الجدعة", "الوسية"],
+  "الطفيلة": ["الطفيلة", "بصيرا", "الحسا", "القادسية", "غرندل", "عين البيضاء", "عفرا", "ضانا", "الرشادية", "العيص", "الحسين", "ارويم", "أرويم", "صنفحة", "شيظم", "عيمة", "سلع", "ابو بنا", "أبو بنا", "البرنيس", "المسيرة", "عين البيضاء الطفيلة", "الحسا الطفيلة", "بصيرا الجديدة"],
+  "معان": ["معان", "الشوبك", "وادي موسى", "البتراء", "الحسينية", "الجفر", "اذرح", "أذرح", "المريغة", "راس النقب", "رأس النقب", "الطيبة معان", "الراجف", "الهيشة", "البيضا", "ام صيحون", "أم صيحون", "المنصورة معان", "دلاغة", "قرين", "بسطا", "ايل", "إيل", "الجربا", "المحمدية", "الشوبك الجديدة", "الفرذخ", "الحميمة معان", "الشراه", "الجعفرية معان"],
+  "العقبة": ["العقبة", "القويرة", "وادي رم", "الديسة", "الريشة", "الحميمة", "رحمة", "القريقرة", "وادي عربة", "بئر مذكور", "بير مذكور", "الريشة العقبة", "الحميمة العقبة", "الشامية", "القرية", "المنطقة الصناعية العقبة", "الشاطئ الجنوبي", "الرميلة العقبة", "الخامسة العقبة", "التاسعة العقبة", "العاشرة العقبة"]
 };
+
+
+function placeAliases(p){
+  const n = normalizeArabic(p);
+  const out = new Set([n]);
+
+  if(n.startsWith('ال') && n.length > 3){
+    out.add(n.slice(2));
+  }else{
+    out.add('ال' + n);
+  }
+
+  return [...out];
+}
 
 const PLACE_TO_GOV = new Map();
 for(const [gov, places] of Object.entries(JORDAN_GOVERNORATES)){
   for(const p of places){
-    PLACE_TO_GOV.set(normalizeArabic(p), gov);
+    for(const alias of placeAliases(p)){
+      PLACE_TO_GOV.set(alias, gov);
+    }
   }
 }
 
@@ -80,7 +106,7 @@ function containsAny(n, words){
 }
 
 function phonesFrom(line){
-  const c = String(line).replace(/[\s-]/g,'');
+  const c = normalizeDigits(line).replace(/[\s-]/g,'');
   const matches = c.match(/(?:\+?962|0)?7[789]\d{7}/g) || [];
   return [...new Set(matches)];
 }
@@ -90,13 +116,14 @@ function phoneFrom(line){
 }
 
 function isPriceLine(line){
-  const n = normalizeArabic(line);
-  return /\d/.test(n) && containsAny(n, PRICE_WORDS);
+  const raw = normalizeDigits(line);
+  const n = normalizeArabic(raw);
+  return /\d/.test(raw) && containsAny(n, PRICE_WORDS);
 }
 
 function priceFrom(line){
   if(!isPriceLine(line)) return '';
-  const nums = String(line).match(/\d+(?:\.\d+)?/g) || [];
+  const nums = normalizeDigits(line).match(/\d+(?:\.\d+)?/g) || [];
   return nums.length ? nums[nums.length - 1] : '';
 }
 
@@ -149,7 +176,7 @@ function isLikelyProductOrDetail(line){
 
 function isLikelyName(line, index){
   if(!/[\u0600-\u06FF]/.test(String(line))) return false;
-  if(/\d/.test(String(line))) return false;
+  if(/\d/.test(normalizeDigits(line))) return false;
   if(phoneFrom(line)) return false;
   if(isPriceLine(line)) return false;
   if(isLikelyProductOrDetail(line)) return false;
@@ -356,8 +383,8 @@ function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-
 function renderShell(){app.innerHTML=`<div class="shell"><header class="topbar"><div class="logo"><div class="logo-mark">C</div><div>CORVEX SPORT<small>ORDER DESK</small></div></div><div class="top-actions"><span class="pill">${esc(state.user?.display_name||'')}</span><button id="logout" class="btn btn-soft">خروج</button></div></header><div class="layout"><aside class="sidebar"><nav class="nav"><button data-view="dashboard">⌂ لوحة التحكم</button><button data-view="new">＋ إضافة طلب</button><button data-view="orders">▤ الطلبات والبحث</button><button data-view="print">▣ جاهز للطباعة</button><button data-view="batches">↻ دفعات الطباعة</button><button data-view="reports">▦ الكشوفات وExcel</button>${state.user?.role==='admin'?'<button data-view="users">♟ المستخدمون</button>':''}</nav></aside><main id="content" class="content"></main></div></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>show(b.dataset.view));$('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'})}catch{}localStorage.removeItem('corvex_token');state.token='';state.user=null;renderLogin()}}
 async function show(v){state.view=v;document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));if(v==='dashboard')return dashboard();if(v==='new')return newOrder();if(v==='orders')return ordersView();if(v==='print')return printView();if(v==='batches')return batchesView();if(v==='reports')return reportsView();if(v==='users')return usersView()}
 async function dashboard(){const c=$('#content');c.innerHTML='<div class="empty">جاري التحميل...</div>';try{state.stats=await api('/dashboard');c.innerHTML=`<div class="page-title"><div><h1>لوحة التحكم</h1><div class="sub">نظرة سريعة على حركة الطلبات</div></div><button class="btn btn-accent" onclick="show('new')">＋ طلب جديد</button></div><div class="grid stats"><div class="stat"><b>${state.stats.today||0}</b><span>طلبات اليوم</span></div><div class="stat"><b>${state.stats.unprinted||0}</b><span>غير مطبوعة</span></div><div class="stat"><b>${state.stats.total||0}</b><span>إجمالي الطلبات</span></div><div class="stat"><b>${state.stats.batches||0}</b><span>دفعات الطباعة</span></div></div><div class="card"><h3>مسار العمل</h3><p class="sub">الموظف يدخل الطلب ← يظهر ضمن غير المطبوع ← تنشئ دفعة طباعة ← 8 بوالص في كل A4.</p></div>`}catch(e){c.innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
-function newOrder(){const c=$('#content');c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">الصق الطلب كامل أو عبّئ الحقول يدويًا • Smart Parser V7</div></div></div><div class="card"><div class="smart-box"><div class="field"><label>الصق الطلب هنا</label><textarea id="raw" class="textarea" placeholder="0772207993\nعلجون عرجان\n3 بلايز ريبوك\nالوزن 100\n15 شامل التوصيل"></textarea></div><div class="smart-actions"><button id="parse" class="btn btn-accent">⚡ تعبئة تلقائية</button><button id="clearRaw" class="btn btn-outline">مسح</button></div></div><br><div class="grid form-grid"><div class="field"><label>اسم المستلم</label><input id="name" class="input" placeholder="اسم الزبون"></div><div class="field"><label>رقم الهاتف</label><input id="phone" class="input" inputmode="tel" placeholder="07xxxxxxxx"></div><div class="field"><label>المنطقة</label><input id="area" class="input" placeholder="عمان / إربد / عجلون..."></div><div class="field"><label>قيمة الطلب</label><input id="amount" class="input" inputmode="decimal" placeholder="0.00"></div><div class="field full"><label>العنوان التفصيلي</label><textarea id="address" class="textarea" placeholder="العنوان الكامل"></textarea></div><div class="field full"><label>ملاحظات الطلب / التجهيز</label><textarea id="notes" class="textarea" placeholder="الصنف، اللون، المقاس، الوزن، أي ملاحظات للموظف الذي يجهز الطلب"></textarea></div></div><div class="actions"><button id="saveOrder" class="btn btn-primary">حفظ الطلب</button><button id="saveNext" class="btn btn-accent">حفظ وإضافة طلب جديد</button></div></div>`;
-  $('#parse').onclick=()=>{const p=parseSmart($('#raw').value);$('#name').value=p.name||'مجهول';if(p.phone)$('#phone').value=p.phone;$('#amount').value=p.amount||'';$('#area').value=p.area||'';$('#address').value=p.address||'';$('#notes').value=p.notes||'';toast('تم الفرز V7، راجع الحقول قبل الحفظ')};
+function newOrder(){const c=$('#content');c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">الصق الطلب كامل أو عبّئ الحقول يدويًا • Smart Parser V9</div></div></div><div class="card"><div class="smart-box"><div class="field"><label>الصق الطلب هنا</label><textarea id="raw" class="textarea" placeholder="0772207993\nعلجون عرجان\n3 بلايز ريبوك\nالوزن 100\n15 شامل التوصيل"></textarea></div><div class="smart-actions"><button id="parse" class="btn btn-accent">⚡ تعبئة تلقائية</button><button id="clearRaw" class="btn btn-outline">مسح</button></div></div><br><div class="grid form-grid"><div class="field"><label>اسم المستلم</label><input id="name" class="input" placeholder="اسم الزبون"></div><div class="field"><label>رقم الهاتف</label><input id="phone" class="input" inputmode="tel" placeholder="07xxxxxxxx"></div><div class="field"><label>المحافظة</label><input id="area" class="input" placeholder="عمان / إربد / عجلون..."></div><div class="field"><label>قيمة الطلب</label><input id="amount" class="input" inputmode="decimal" placeholder="0.00"></div><div class="field full"><label>العنوان التفصيلي</label><textarea id="address" class="textarea" placeholder="العنوان الكامل"></textarea></div><div class="field full"><label>ملاحظات الطلب / التجهيز</label><textarea id="notes" class="textarea" placeholder="الصنف، اللون، المقاس، الوزن، أي ملاحظات للموظف الذي يجهز الطلب"></textarea></div></div><div class="actions"><button id="saveOrder" class="btn btn-primary">حفظ الطلب</button><button id="saveNext" class="btn btn-accent">حفظ وإضافة طلب جديد</button></div></div>`;
+  $('#parse').onclick=()=>{const p=parseSmart($('#raw').value);$('#name').value=p.name||'مجهول';if(p.phone)$('#phone').value=p.phone;$('#amount').value=p.amount||'';$('#area').value=p.area||'';$('#address').value=p.address||'';$('#notes').value=p.notes||'';toast('تم الفرز V9، راجع الحقول قبل الحفظ')};
   async function save(next){try{const d=await api('/orders',{method:'POST',body:JSON.stringify({recipient_name:$('#name').value,phone:$('#phone').value,area:$('#area').value,detailed_address:$('#address').value,amount:$('#amount').value,order_notes:$('#notes').value,raw_text:$('#raw').value})});toast(`تم حفظ الطلب رقم ${d.order.order_code}`);if(next)newOrder();else show('orders')}catch(e){toast(e.message)}}$('#saveOrder').onclick=()=>save(false);$('#saveNext').onclick=()=>save(true)
 }
 async function ordersView(){const c=$('#content');c.innerHTML=`<div class="page-title"><div><h1>الطلبات والبحث</h1><div class="sub">ابحث بالكود أو الهاتف أو الاسم أو حدّد نطاق أكواد</div></div></div><div class="card"><div class="toolbar"><input id="q" class="input" placeholder="بحث سريع"><input id="fc" class="input" inputmode="numeric" placeholder="من كود"><input id="tc" class="input" inputmode="numeric" placeholder="إلى كود"><select id="ps" class="select"><option value="">كل الطلبات</option><option value="0">غير مطبوعة</option><option value="1">مطبوعة</option></select><button id="searchBtn" class="btn btn-primary">بحث</button></div><div id="ordersTable"></div></div>`;$('#searchBtn').onclick=loadOrders;await loadOrders()}
@@ -369,6 +396,6 @@ function openPrintWindow(orders,title='طباعة'){const w=window.open('','_bla
 async function batchesView(){const c=$('#content');const d=await api('/print-batches');state.batches=d.batches;c.innerHTML=`<div class="page-title"><div><h1>دفعات الطباعة</h1><div class="sub">إعادة طباعة دفعة كاملة أو صفحة معينة منها</div></div></div><div class="card">${state.batches.length?state.batches.map(b=>`<div class="batch-card"><div><b>${esc(b.batch_code)}</b><div class="batch-meta">${b.order_count} طلب • ${esc(b.created_by_name||'')} • ${fmtDate(b.created_at)}</div></div><div class="actions" style="margin:0"><button class="btn btn-outline" data-batch="${b.id}" data-mode="all">إعادة الدفعة</button><button class="btn btn-soft" data-batch="${b.id}" data-mode="page">إعادة صفحة</button></div></div>`).join(''):'<div class="empty">لا توجد دفعات بعد</div>'}</div>`;document.querySelectorAll('[data-batch]').forEach(btn=>btn.onclick=async()=>{const d=await api('/print-batches/'+btn.dataset.batch);if(btn.dataset.mode==='all')openPrintWindow(d.orders,`إعادة ${d.batch.batch_code}`);else{const max=Math.ceil(d.orders.length/8);const p=Number(prompt(`رقم الصفحة من 1 إلى ${max}`,'1'));if(p>=1&&p<=max)openPrintWindow(d.orders.slice((p-1)*8,p*8),`صفحة ${p} - ${d.batch.batch_code}`)}})}
 async function reportsView(){const c=$('#content');c.innerHTML=`<div class="page-title"><div><h1>الكشوفات وExcel</h1><div class="sub">حدد فترة ثم اطبع كشف أو نزّل ملف للشركة</div></div></div><div class="card"><div class="toolbar"><input id="fd" type="date" class="input"><input id="td" type="date" class="input"><button id="rr" class="btn btn-primary">عرض</button><button id="rp" class="btn btn-outline">طباعة كشف</button><button id="rx" class="btn btn-accent">تنزيل Excel/CSV</button></div><div id="reportTable"></div></div>`;const today=new Date().toISOString().slice(0,10);$('#fd').value=today;$('#td').value=today;async function load(){const p=new URLSearchParams({from_date:$('#fd').value,to_date:$('#td').value});const d=await api('/orders?'+p);state.orders=d.orders;renderOrdersTable('#reportTable',state.orders,false)}$('#rr').onclick=load;$('#rp').onclick=()=>printReport(state.orders);$('#rx').onclick=()=>downloadCsv(state.orders);await load()}
 function printReport(orders){const w=window.open('','_blank');w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>كشف CORVEX SPORT</title><style>@page{size:A4 landscape;margin:8mm}body{font-family:Tahoma,Arial}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aaa;padding:5px;text-align:right}h2{margin:0 0 10px}</style></head><body><h2>كشف طلبات CORVEX SPORT</h2><table><thead><tr><th>الكود</th><th>الاسم</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr><td>${o.order_code}</td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}</td><td>${esc(o.detailed_address)}</td><td>${money(o.amount)}</td><td>${esc(o.order_notes)}</td><td>${esc(o.created_by_name||'')}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()}
-function downloadCsv(orders){const rows=[['رقم البوليصة','اسم المستلم','رقم الهاتف','المنطقة','العنوان التفصيلي','قيمة الطرد','ملاحظات الطلب','الموظف','تاريخ الإدخال'],...orders.map(o=>[o.order_code,o.recipient_name,o.phone,o.area,o.detailed_address,o.amount,o.order_notes,o.created_by_name||'',o.created_at])];const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`corvex-orders-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(a.href)}
+function downloadCsv(orders){const rows=[['رقم البوليصة','اسم المستلم','رقم الهاتف','المحافظة','العنوان التفصيلي','قيمة الطرد','ملاحظات الطلب','الموظف','تاريخ الإدخال'],...orders.map(o=>[o.order_code,o.recipient_name,o.phone,o.area,o.detailed_address,o.amount,o.order_notes,o.created_by_name||'',o.created_at])];const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`corvex-orders-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(a.href)}
 async function usersView(){const c=$('#content');const d=await api('/users');c.innerHTML=`<div class="page-title"><div><h1>المستخدمون</h1><div class="sub">كل موظف يدخل بحسابه ويُحفظ اسمه مع الطلب</div></div></div><div class="grid" style="grid-template-columns:1fr 1fr"><div class="card"><h3>إضافة مستخدم</h3><div class="field"><label>الاسم الظاهر</label><input id="ud" class="input"></div><br><div class="field"><label>اسم المستخدم</label><input id="uu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="up" type="password" class="input"></div><br><div class="field"><label>الصلاحية</label><select id="ur" class="select"><option value="staff">موظف</option><option value="admin">مدير</option></select></div><button id="addUser" class="btn btn-primary" style="margin-top:15px">إضافة</button></div><div class="card"><h3>الحسابات</h3>${d.users.map(u=>`<div class="batch-card"><div><b>${esc(u.display_name)}</b><div class="batch-meta">@${esc(u.username)} • ${u.role==='admin'?'مدير':'موظف'}</div></div><span class="badge ${u.is_active?'badge-ok':'badge-warn'}">${u.is_active?'فعال':'موقوف'}</span></div>`).join('')}</div></div>`;$('#addUser').onclick=async()=>{try{await api('/users',{method:'POST',body:JSON.stringify({display_name:$('#ud').value,username:$('#uu').value,password:$('#up').value,role:$('#ur').value})});toast('تمت إضافة المستخدم');usersView()}catch(e){toast(e.message)}}}
 boot();
