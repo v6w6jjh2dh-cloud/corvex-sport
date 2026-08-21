@@ -389,7 +389,7 @@ async function boot(){
 }
 function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);renderShell();show('dashboard')}catch(e){toast(e.message)}}}
 function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>تهيئة CORVEX SPORT</h1><p>أنشئ أول حساب مدير</p></div><div class="field"><label>الاسم الظاهر</label><input id="sd" class="input" value="Admin"></div><br><div class="field"><label>اسم المستخدم</label><input id="su" class="input" value="admin"></div><br><div class="field"><label>كلمة المرور</label><input id="sp" type="password" class="input"></div><button id="setupBtn" class="btn btn-accent" style="width:100%;margin-top:18px">إنشاء النظام</button></div></div>`;$('#setupBtn').onclick=async()=>{try{await api('/setup',{method:'POST',body:JSON.stringify({display_name:$('#sd').value,username:$('#su').value,password:$('#sp').value})});toast('تمت التهيئة');renderLogin()}catch(e){toast(e.message)}}}
-function renderShell(){app.innerHTML=`<div class="shell"><header class="topbar"><button id="mobileMenuBtn" class="mobile-menu-btn" aria-label="القائمة">☰</button><div class="logo"><div class="logo-mark">C</div><div>CORVEX SPORT<small>ORDER DESK</small></div></div><div class="top-actions"><span class="pill">${esc(state.user?.display_name||'')}</span><button id="logout" class="btn btn-soft">خروج</button></div></header><div class="layout"><aside class="sidebar"><nav class="nav"><button data-view="dashboard">⌂ لوحة التحكم</button><button data-view="new">＋ إضافة طلب</button><button data-view="orders">▤ الطلبات والبحث</button><button data-view="print">▣ جاهز للطباعة</button><button data-view="batches">↻ دفعات الطباعة</button><button data-view="reports">▦ الكشوفات وExcel</button><button data-view="stores">▣ المتاجر</button>${state.user?.role==='admin'?'<button data-view="users">♟ المستخدمون</button>':''}</nav></aside><main id="content" class="content"></main><div id="sidebarOverlay" class="sidebar-overlay"></div></div></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
+function renderShell(){app.innerHTML=`<div class="shell"><header class="topbar"><button id="mobileMenuBtn" class="mobile-menu-btn" aria-label="القائمة">☰</button><div class="logo"><div class="logo-mark">C</div><div>CORVEX SPORT<small>ORDER DESK</small></div></div><div class="top-actions"><span class="pill">${esc(state.user?.display_name||'')}</span><button id="logout" class="btn btn-soft">خروج</button></div></header><div class="layout"><aside class="sidebar"><nav class="nav"><button data-view="stores">▣ المتاجر</button><button data-view="dashboard">⌂ لوحة التحكم</button><button data-view="new">＋ إضافة طلب</button><button data-view="orders">▤ الطلبات والبحث</button><button data-view="print">▣ جاهز للطباعة</button><button data-view="batches">↻ دفعات الطباعة</button><button data-view="reports">▦ الكشوفات وExcel</button>${state.user?.role==='admin'?'<button data-view="users">♟ المستخدمون</button>':''}</nav></aside><main id="content" class="content"></main><div id="sidebarOverlay" class="sidebar-overlay"></div></div></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
   show(b.dataset.view);
   document.querySelector('.sidebar')?.classList.remove('open');
   document.querySelector('#sidebarOverlay')?.classList.remove('show');
@@ -845,59 +845,64 @@ async function openOutcome(id){
   }
 }
 
-function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>النتيجة</th><th>الطباعة</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code"><button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button></td><td><b>${esc(o.store_name||'—')}</b></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}<br><span class="sub">${esc(o.detailed_address)}</span></td><td>${money(o.amount)}</td><td class="notes-cell"><button type="button" class="notes-preview" data-notes="${encodeURIComponent(o.order_notes||'')}" aria-label="عرض الملاحظات كاملة">${esc((o.order_notes||'').replace(/\s+/g,' ').trim()||'—')}</button></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><button class="btn btn-soft outcome-btn" data-order-id="${o.id}">تحديث النتيجة</button><div class="sub" style="margin-top:4px">كاش ${money(o.cash_collected||0)} • ربح ${money((o.cash_collected||0)-(o.cost_of_goods||0))}</div></td><td>${o.printed?'<span class="badge badge-ok">مطبوع</span>':'<span class="badge badge-warn">غير مطبوع</span>'}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
+function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>النتيجة</th><th>الطباعة</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code"><button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button></td><td><b>${esc(o.store_name||'—')}</b></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td class="address-cell"><button type="button" class="address-preview" data-address="${encodeURIComponent([o.area,o.detailed_address].filter(Boolean).join(' - '))}" aria-label="عرض العنوان كامل">${esc(o.area||'—')}<span class="address-short">${o.detailed_address?` • ${esc(String(o.detailed_address).replace(/\s+/g,' ').trim())}`:''}</span></button></td><td>${money(o.amount)}</td><td class="notes-cell"><button type="button" class="notes-preview" data-notes="${encodeURIComponent(o.order_notes||'')}" aria-label="عرض الملاحظات كاملة">${esc((o.order_notes||'').replace(/\s+/g,' ').trim()||'—')}</button></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><button class="btn btn-soft outcome-btn" data-order-id="${o.id}">تحديث النتيجة</button><div class="sub" style="margin-top:4px">كاش ${money(o.cash_collected||0)} • ربح ${money((o.cash_collected||0)-(o.cost_of_goods||0))}</div></td><td>${o.printed?'<span class="badge badge-ok">مطبوع</span>':'<span class="badge badge-warn">غير مطبوع</span>'}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
   document.querySelectorAll('.outcome-btn').forEach(btn=>{btn.onclick=()=>openOutcome(Number(btn.dataset.orderId));});
 
-  let notesPopover=document.querySelector('#notesPopover');
-  if(!notesPopover){
-    notesPopover=document.createElement('div');
-    notesPopover.id='notesPopover';
-    notesPopover.className='notes-popover';
-    document.body.appendChild(notesPopover);
+  let infoPopover=document.querySelector('#infoPopover');
+  if(!infoPopover){
+    infoPopover=document.createElement('div');
+    infoPopover.id='infoPopover';
+    infoPopover.className='notes-popover';
+    document.body.appendChild(infoPopover);
   }
 
-  const hideNotesPopover=()=>{
-    notesPopover.classList.remove('show');
-    document.querySelectorAll('.notes-preview.open').forEach(x=>x.classList.remove('open'));
+  const hideInfoPopover=()=>{
+    infoPopover.classList.remove('show');
+    document.querySelectorAll('.notes-preview.open,.address-preview.open').forEach(x=>x.classList.remove('open'));
   };
 
-  document.querySelectorAll('.notes-preview').forEach(btn=>{
-    const showNotes=()=>{
-      const text=decodeURIComponent(btn.dataset.notes||'')||'لا توجد ملاحظات';
-      notesPopover.textContent=text;
-      const r=btn.getBoundingClientRect();
-      const maxW=Math.min(420,window.innerWidth-24);
-      notesPopover.style.maxWidth=maxW+'px';
-      notesPopover.classList.add('show');
-      btn.classList.add('open');
+  const bindInfoPreview=(selector,dataKey)=>{
+    document.querySelectorAll(selector).forEach(btn=>{
+      const showInfo=()=>{
+        const text=decodeURIComponent(btn.dataset[dataKey]||'')||'لا توجد معلومات';
+        infoPopover.textContent=text;
+        const r=btn.getBoundingClientRect();
+        const maxW=Math.min(420,window.innerWidth-24);
+        infoPopover.style.maxWidth=maxW+'px';
+        infoPopover.classList.add('show');
+        btn.classList.add('open');
 
-      const pw=notesPopover.offsetWidth;
-      const ph=notesPopover.offsetHeight;
-      let left=Math.max(12,Math.min(window.innerWidth-pw-12,r.left+r.width/2-pw/2));
-      let top=r.bottom+8;
-      if(top+ph>window.innerHeight-12) top=Math.max(12,r.top-ph-8);
+        const pw=infoPopover.offsetWidth;
+        const ph=infoPopover.offsetHeight;
+        let left=Math.max(12,Math.min(window.innerWidth-pw-12,r.left+r.width/2-pw/2));
+        let top=r.bottom+8;
+        if(top+ph>window.innerHeight-12) top=Math.max(12,r.top-ph-8);
 
-      notesPopover.style.left=left+'px';
-      notesPopover.style.top=top+'px';
-    };
+        infoPopover.style.left=left+'px';
+        infoPopover.style.top=top+'px';
+      };
 
-    btn.addEventListener('mouseenter',showNotes);
-    btn.addEventListener('mouseleave',()=>{if(!btn.classList.contains('open')) hideNotesPopover()});
-    btn.addEventListener('click',e=>{
-      e.stopPropagation();
-      const wasOpen=btn.classList.contains('open');
-      hideNotesPopover();
-      if(!wasOpen) showNotes();
+      btn.addEventListener('mouseenter',showInfo);
+      btn.addEventListener('mouseleave',()=>{if(!btn.classList.contains('open')) hideInfoPopover()});
+      btn.addEventListener('click',e=>{
+        e.stopPropagation();
+        const wasOpen=btn.classList.contains('open');
+        hideInfoPopover();
+        if(!wasOpen) showInfo();
+      });
     });
-  });
+  };
 
-  if(!window.__corvexNotesBound){
+  bindInfoPreview('.notes-preview','notes');
+  bindInfoPreview('.address-preview','address');
+
+  if(!window.__corvexInfoBound){
     document.addEventListener('click',e=>{
-      if(!e.target.closest('.notes-preview') && !e.target.closest('#notesPopover')) hideNotesPopover();
+      if(!e.target.closest('.notes-preview') && !e.target.closest('.address-preview') && !e.target.closest('#infoPopover')) hideInfoPopover();
     });
-    window.addEventListener('scroll',hideNotesPopover,true);
-    window.addEventListener('resize',hideNotesPopover);
-    window.__corvexNotesBound=true;
+    window.addEventListener('scroll',hideInfoPopover,true);
+    window.addEventListener('resize',hideInfoPopover);
+    window.__corvexInfoBound=true;
   }
   if(selectable){$('#allcheck').onchange=e=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=e.target.checked)}}
 async function printView(){const c=$('#content');const d=await api('/unprinted');state.orders=d.orders;c.innerHTML=`<div class="page-title"><div><h1>جاهز للطباعة</h1><div class="sub">كل الطلبات التي لم تدخل أي دفعة طباعة حتى الآن</div></div><div><span class="pill" style="background:#e9eff4;color:#102a43">${state.orders.length} طلب</span></div></div><div class="card"><div class="actions no-print" style="margin-top:0;margin-bottom:14px"><button id="selAll" class="btn btn-soft">تحديد الكل</button><button id="makeBatch" class="btn btn-accent">إنشاء دفعة وطباعة المحدد</button></div><div id="printTable"></div></div>`;renderOrdersTable('#printTable',state.orders,true);$('#selAll').onclick=()=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=true);$('#makeBatch').onclick=async()=>{const ids=[...document.querySelectorAll('.rowcheck:checked')].map(x=>Number(x.dataset.id));if(!ids.length)return toast('حدد طلباً واحداً على الأقل');try{const r=await api('/print-batches',{method:'POST',body:JSON.stringify({order_ids:ids})});openPrintWindow(r.orders,`دفعة ${r.batch.batch_code}`);toast(`تم إنشاء دفعة ${r.batch.order_count} طلب`);setTimeout(()=>printView(),600)}catch(e){toast(e.message)}}}
