@@ -87,35 +87,58 @@ async function ensureBusinessSchema(env) {
   }
 
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_orders_store_id ON orders(store_id)').run();
+
+  const batchInfo = await env.DB.prepare("PRAGMA table_info(print_batches)").all();
+  const batchCols = new Set((batchInfo.results || []).map(r => r.name));
+  if (!batchCols.has('store_id')) {
+    await env.DB.prepare(`ALTER TABLE print_batches ADD COLUMN store_id INTEGER`).run();
+  }
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_print_batches_store_id ON print_batches(store_id)').run();
 }
 
 const STATUS_LABELS = {
-  pending: 'قيد التنفيذ',
-  delivered: 'تم التسليم',
-  delivered_adjusted: 'تم التسليم وتعديل قيمة',
-  refused_fee_paid: 'رفض مع دفع أجور',
-  refused_no_fee: 'رفض مع عدم دفع أجور',
+  pending: 'قيد التوصيل',
+  delivered: 'تم الاستلام',
+  delivered_adjusted: 'تم الاستلام وتعديل قيمة',
+  refused_fee_paid: 'رفض ودفع أجور',
+  refused_no_fee: 'رفض وعدم دفع أجور',
+  canceled_before_arrival: 'ملغي قبل الوصول',
   partial: 'استلام جزئي'
 };
 
 async function listOrders(url, env) {
   const q = (url.searchParams.get('q') || '').trim();
   const printed = url.searchParams.get('printed');
+  const status = (url.searchParams.get('status') || '').trim();
+  const storeId = url.searchParams.get('store_id');
   const fromCode = url.searchParams.get('from_code');
   const toCode = url.searchParams.get('to_code');
   const fromDate = url.searchParams.get('from_date');
   const toDate = url.searchParams.get('to_date');
   const params = [];
   const where = [];
+
   if (q) {
     where.push('(CAST(o.order_code AS TEXT) LIKE ? OR o.phone LIKE ? OR o.recipient_name LIKE ? OR o.detailed_address LIKE ?)');
     params.push(`%${q}%`,`%${q}%`,`%${q}%`,`%${q}%`);
   }
   if (printed === '0' || printed === '1') { where.push('o.printed = ?'); params.push(Number(printed)); }
+  if (storeId) { where.push('o.store_id = ?'); params.push(Number(storeId)); }
+
+  if (status) {
+    if (status === 'delivered') {
+      where.push("o.delivery_status IN ('delivered','delivered_adjusted')");
+    } else {
+      where.push('o.delivery_status = ?');
+      params.push(status);
+    }
+  }
+
   if (fromCode) { where.push('o.order_code >= ?'); params.push(Number(fromCode)); }
   if (toCode) { where.push('o.order_code <= ?'); params.push(Number(toCode)); }
   if (fromDate) { where.push("date(o.created_at) >= date(?)"); params.push(fromDate); }
   if (toDate) { where.push("date(o.created_at) <= date(?)"); params.push(toDate); }
+
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const stmt = env.DB.prepare(`${orderSelectSql(clause)} ORDER BY o.id DESC LIMIT 1000`).bind(...params);
   return await stmt.all();
@@ -328,36 +351,60 @@ export async function onRequest(context) {
       const rows = await env.DB.prepare(`${orderSelectSql(`WHERE o.id IN (${placeholders})`)} ORDER BY o.order_code ASC`).bind(...ids).all();
       const orders = rows.results || [];
       if (!orders.length) return json({error:'لا توجد طلبات صالحة'},400);
+
+      const storeIds=[...new Set(orders.map(o=>Number(o.store_id||0)))];
+      if(storeIds.length!==1 || !storeIds[0]) return json({error:'دفعة الطباعة يجب أن تكون لمتجر واحد فقط'},400);
+      const storeId=storeIds[0];
+
       const batchCode = `PB-${new Date().toISOString().replace(/\D/g,'').slice(0,14)}-${Math.floor(Math.random()*900+100)}`;
-      const batchRes = await env.DB.prepare('INSERT INTO print_batches(batch_code,created_by,order_count) VALUES(?,?,?)').bind(batchCode,me.id,orders.length).run();
+      const batchRes = await env.DB.prepare('INSERT INTO print_batches(batch_code,created_by,order_count,store_id) VALUES(?,?,?,?)')
+        .bind(batchCode,me.id,orders.length,storeId).run();
       const batchId = batchRes.meta.last_row_id;
+
       for (let i=0;i<orders.length;i++) {
         await env.DB.prepare('INSERT INTO print_batch_orders(batch_id,order_id,position) VALUES(?,?,?)').bind(batchId,orders[i].id,i+1).run();
         await env.DB.prepare(`UPDATE orders SET printed=1, print_count=print_count+1,
           first_printed_at=COALESCE(first_printed_at,datetime('now')), last_printed_at=datetime('now') WHERE id=?`).bind(orders[i].id).run();
       }
-      return json({batch:{id:batchId,batch_code:batchCode,order_count:orders.length},orders},201);
+
+      const batch=await env.DB.prepare(`SELECT b.*,u.display_name created_by_name,s.name store_name
+        FROM print_batches b
+        LEFT JOIN users u ON u.id=b.created_by
+        LEFT JOIN stores s ON s.id=b.store_id
+        WHERE b.id=?`).bind(batchId).first();
+
+      return json({batch,orders},201);
     }
 
-    if (path === '/print-batches' && method === 'GET') {
-      const rows = await env.DB.prepare(`SELECT b.*,u.display_name created_by_name FROM print_batches b LEFT JOIN users u ON u.id=b.created_by ORDER BY b.id DESC LIMIT 100`).all();
+        if (path === '/print-batches' && method === 'GET') {
+      const storeId=Number(url.searchParams.get('store_id')||0);
+      const where=storeId?'WHERE b.store_id=?':'';
+      const sql=`SELECT b.*,u.display_name created_by_name,s.name store_name
+        FROM print_batches b
+        LEFT JOIN users u ON u.id=b.created_by
+        LEFT JOIN stores s ON s.id=b.store_id
+        ${where}
+        ORDER BY b.id DESC LIMIT 100`;
+      const rows=storeId?await env.DB.prepare(sql).bind(storeId).all():await env.DB.prepare(sql).all();
       return json({batches:rows.results||[]});
     }
 
-    const batchMatch = path.match(/^\/print-batches\/(\d+)$/);
+        const batchMatch = path.match(/^\/print-batches\/(\d+)$/);
     if (batchMatch && method === 'GET') {
-      const batch = await env.DB.prepare(`SELECT b.*,u.display_name created_by_name FROM print_batches b LEFT JOIN users u ON u.id=b.created_by WHERE b.id=?`).bind(Number(batchMatch[1])).first();
+      const batch = await env.DB.prepare(`SELECT b.*,u.display_name created_by_name,s.name store_name FROM print_batches b LEFT JOIN users u ON u.id=b.created_by LEFT JOIN stores s ON s.id=b.store_id WHERE b.id=?`).bind(Number(batchMatch[1])).first();
       if (!batch) return json({error:'دفعة الطباعة غير موجودة'},404);
       const rows = await env.DB.prepare(`${orderSelectSql('JOIN print_batch_orders pbo ON pbo.order_id=o.id WHERE pbo.batch_id=?')} ORDER BY pbo.position ASC`).bind(Number(batchMatch[1])).all();
       return json({batch,orders:rows.results||[]});
     }
 
     if (path === '/unprinted' && method === 'GET') {
-      const rows = await env.DB.prepare(`${orderSelectSql('WHERE o.printed=0')} ORDER BY o.order_code ASC`).all();
+      const storeId=Number(url.searchParams.get('store_id')||0);
+      if(!storeId) return json({orders:[]});
+      const rows = await env.DB.prepare(`${orderSelectSql('WHERE o.printed=0 AND o.store_id=?')} ORDER BY o.order_code ASC`).bind(storeId).all();
       return json({orders:rows.results||[]});
     }
 
-    return json({ error:'المسار غير موجود' }, 404);
+        return json({ error:'المسار غير موجود' }, 404);
   } catch (e) {
     return json({ error: e?.message || 'حدث خطأ غير متوقع' }, 500);
   }
