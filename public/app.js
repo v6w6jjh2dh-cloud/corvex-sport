@@ -129,16 +129,22 @@ function priceFrom(line){
 
 function findBestPlace(line){
   const n = normalizeArabic(line);
-  const padded = ' ' + n + ' ';
   const matches = [];
 
   for(const p of JORDAN_PLACES){
-    if(padded.includes(' ' + p + ' ')){
+    // V10: نسمح بالمطابقة حتى لو الزبون لزق الكلمات:
+    // الطفيلةالقادسية / عمانالجاردنز / اربدالرمثا
+    if(n.includes(p)){
+      const gov = PLACE_TO_GOV.get(p) || '';
+      const govNorm = normalizeArabic(gov);
+
       matches.push({
         place:p,
-        governorate:PLACE_TO_GOV.get(p) || '',
+        governorate:gov,
         words:p.split(/\s+/).length,
-        chars:p.length
+        chars:p.length,
+        // نعطي أولوية للمنطقة/البلدة على اسم المحافظة نفسها
+        isGovernorateName: p === govNorm
       });
     }
   }
@@ -146,8 +152,11 @@ function findBestPlace(line){
   if(!matches.length) return null;
 
   matches.sort((a,b)=>{
-    if(b.words !== a.words) return b.words-a.words;
-    return b.chars-a.chars;
+    if(a.isGovernorateName !== b.isGovernorateName){
+      return a.isGovernorateName ? 1 : -1;
+    }
+    if(b.words !== a.words) return b.words - a.words;
+    return b.chars - a.chars;
   });
 
   return matches[0];
@@ -383,8 +392,8 @@ function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-
 function renderShell(){app.innerHTML=`<div class="shell"><header class="topbar"><div class="logo"><div class="logo-mark">C</div><div>CORVEX SPORT<small>ORDER DESK</small></div></div><div class="top-actions"><span class="pill">${esc(state.user?.display_name||'')}</span><button id="logout" class="btn btn-soft">خروج</button></div></header><div class="layout"><aside class="sidebar"><nav class="nav"><button data-view="dashboard">⌂ لوحة التحكم</button><button data-view="new">＋ إضافة طلب</button><button data-view="orders">▤ الطلبات والبحث</button><button data-view="print">▣ جاهز للطباعة</button><button data-view="batches">↻ دفعات الطباعة</button><button data-view="reports">▦ الكشوفات وExcel</button>${state.user?.role==='admin'?'<button data-view="users">♟ المستخدمون</button>':''}</nav></aside><main id="content" class="content"></main></div></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>show(b.dataset.view));$('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'})}catch{}localStorage.removeItem('corvex_token');state.token='';state.user=null;renderLogin()}}
 async function show(v){state.view=v;document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));if(v==='dashboard')return dashboard();if(v==='new')return newOrder();if(v==='orders')return ordersView();if(v==='print')return printView();if(v==='batches')return batchesView();if(v==='reports')return reportsView();if(v==='users')return usersView()}
 async function dashboard(){const c=$('#content');c.innerHTML='<div class="empty">جاري التحميل...</div>';try{state.stats=await api('/dashboard');c.innerHTML=`<div class="page-title"><div><h1>لوحة التحكم</h1><div class="sub">نظرة سريعة على حركة الطلبات</div></div><button class="btn btn-accent" onclick="show('new')">＋ طلب جديد</button></div><div class="grid stats"><div class="stat"><b>${state.stats.today||0}</b><span>طلبات اليوم</span></div><div class="stat"><b>${state.stats.unprinted||0}</b><span>غير مطبوعة</span></div><div class="stat"><b>${state.stats.total||0}</b><span>إجمالي الطلبات</span></div><div class="stat"><b>${state.stats.batches||0}</b><span>دفعات الطباعة</span></div></div><div class="card"><h3>مسار العمل</h3><p class="sub">الموظف يدخل الطلب ← يظهر ضمن غير المطبوع ← تنشئ دفعة طباعة ← 8 بوالص في كل A4.</p></div>`}catch(e){c.innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
-function newOrder(){const c=$('#content');c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">الصق الطلب كامل أو عبّئ الحقول يدويًا • Smart Parser V9</div></div></div><div class="card"><div class="smart-box"><div class="field"><label>الصق الطلب هنا</label><textarea id="raw" class="textarea" placeholder="0772207993\nعلجون عرجان\n3 بلايز ريبوك\nالوزن 100\n15 شامل التوصيل"></textarea></div><div class="smart-actions"><button id="parse" class="btn btn-accent">⚡ تعبئة تلقائية</button><button id="clearRaw" class="btn btn-outline">مسح</button></div></div><br><div class="grid form-grid"><div class="field"><label>اسم المستلم</label><input id="name" class="input" placeholder="اسم الزبون"></div><div class="field"><label>رقم الهاتف</label><input id="phone" class="input" inputmode="tel" placeholder="07xxxxxxxx"></div><div class="field"><label>المحافظة</label><input id="area" class="input" placeholder="عمان / إربد / عجلون..."></div><div class="field"><label>قيمة الطلب</label><input id="amount" class="input" inputmode="decimal" placeholder="0.00"></div><div class="field full"><label>العنوان التفصيلي</label><textarea id="address" class="textarea" placeholder="العنوان الكامل"></textarea></div><div class="field full"><label>ملاحظات الطلب / التجهيز</label><textarea id="notes" class="textarea" placeholder="الصنف، اللون، المقاس، الوزن، أي ملاحظات للموظف الذي يجهز الطلب"></textarea></div></div><div class="actions"><button id="saveOrder" class="btn btn-primary">حفظ الطلب</button><button id="saveNext" class="btn btn-accent">حفظ وإضافة طلب جديد</button></div></div>`;
-  $('#parse').onclick=()=>{const p=parseSmart($('#raw').value);$('#name').value=p.name||'مجهول';if(p.phone)$('#phone').value=p.phone;$('#amount').value=p.amount||'';$('#area').value=p.area||'';$('#address').value=p.address||'';$('#notes').value=p.notes||'';toast('تم الفرز V9، راجع الحقول قبل الحفظ')};
+function newOrder(){const c=$('#content');c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">الصق الطلب كامل أو عبّئ الحقول يدويًا • Smart Parser V10</div></div></div><div class="card"><div class="smart-box"><div class="field"><label>الصق الطلب هنا</label><textarea id="raw" class="textarea" placeholder="0772207993\nعلجون عرجان\n3 بلايز ريبوك\nالوزن 100\n15 شامل التوصيل"></textarea></div><div class="smart-actions"><button id="parse" class="btn btn-accent">⚡ تعبئة تلقائية</button><button id="clearRaw" class="btn btn-outline">مسح</button></div></div><br><div class="grid form-grid"><div class="field"><label>اسم المستلم</label><input id="name" class="input" placeholder="اسم الزبون"></div><div class="field"><label>رقم الهاتف</label><input id="phone" class="input" inputmode="tel" placeholder="07xxxxxxxx"></div><div class="field"><label>المحافظة</label><input id="area" class="input" placeholder="عمان / إربد / عجلون..."></div><div class="field"><label>قيمة الطلب</label><input id="amount" class="input" inputmode="decimal" placeholder="0.00"></div><div class="field full"><label>العنوان التفصيلي</label><textarea id="address" class="textarea" placeholder="العنوان الكامل"></textarea></div><div class="field full"><label>ملاحظات الطلب / التجهيز</label><textarea id="notes" class="textarea" placeholder="الصنف، اللون، المقاس، الوزن، أي ملاحظات للموظف الذي يجهز الطلب"></textarea></div></div><div class="actions"><button id="saveOrder" class="btn btn-primary">حفظ الطلب</button><button id="saveNext" class="btn btn-accent">حفظ وإضافة طلب جديد</button></div></div>`;
+  $('#parse').onclick=()=>{const p=parseSmart($('#raw').value);$('#name').value=p.name||'مجهول';if(p.phone)$('#phone').value=p.phone;$('#amount').value=p.amount||'';$('#area').value=p.area||'';$('#address').value=p.address||'';$('#notes').value=p.notes||'';toast('تم الفرز V10، راجع الحقول قبل الحفظ')};
   async function save(next){try{const d=await api('/orders',{method:'POST',body:JSON.stringify({recipient_name:$('#name').value,phone:$('#phone').value,area:$('#area').value,detailed_address:$('#address').value,amount:$('#amount').value,order_notes:$('#notes').value,raw_text:$('#raw').value})});toast(`تم حفظ الطلب رقم ${d.order.order_code}`);if(next)newOrder();else show('orders')}catch(e){toast(e.message)}}$('#saveOrder').onclick=()=>save(false);$('#saveNext').onclick=()=>save(true)
 }
 async function ordersView(){const c=$('#content');c.innerHTML=`<div class="page-title"><div><h1>الطلبات والبحث</h1><div class="sub">ابحث بالكود أو الهاتف أو الاسم أو حدّد نطاق أكواد</div></div></div><div class="card"><div class="toolbar"><input id="q" class="input" placeholder="بحث سريع"><input id="fc" class="input" inputmode="numeric" placeholder="من كود"><input id="tc" class="input" inputmode="numeric" placeholder="إلى كود"><select id="ps" class="select"><option value="">كل الطلبات</option><option value="0">غير مطبوعة</option><option value="1">مطبوعة</option></select><button id="searchBtn" class="btn btn-primary">بحث</button></div><div id="ordersTable"></div></div>`;$('#searchBtn').onclick=loadOrders;await loadOrders()}
