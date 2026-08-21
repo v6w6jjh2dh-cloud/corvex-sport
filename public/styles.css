@@ -702,3 +702,74 @@ body.modal-open{
     grid-template-columns:1fr;
   }
 }
+
+
+/* V18 — compact notes in search + hover/tap full preview */
+.notes-cell{
+  width:190px !important;
+  min-width:150px !important;
+  max-width:220px !important;
+  vertical-align:middle !important;
+}
+.notes-preview{
+  display:block !important;
+  width:100% !important;
+  max-width:210px !important;
+  padding:6px 8px !important;
+  border:0 !important;
+  background:transparent !important;
+  color:#334155 !important;
+  font:inherit !important;
+  text-align:right !important;
+  cursor:pointer !important;
+  white-space:nowrap !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  line-height:1.35 !important;
+}
+.notes-preview:hover,
+.notes-preview.open{
+  background:#f1f5f8 !important;
+  border-radius:8px !important;
+  color:#102a43 !important;
+}
+.notes-popover{
+  display:none;
+  position:fixed;
+  z-index:99999;
+  min-width:220px;
+  max-width:420px;
+  max-height:50vh;
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
+  padding:14px 16px;
+  border-radius:12px;
+  background:#102a43;
+  color:#fff;
+  box-shadow:0 14px 40px rgba(0,0,0,.28);
+  white-space:pre-wrap;
+  word-break:break-word;
+  line-height:1.75;
+  font-size:15px;
+  text-align:right;
+  direction:rtl;
+}
+.notes-popover.show{
+  display:block;
+}
+@media(max-width:700px){
+  .notes-cell{
+    width:150px !important;
+    min-width:130px !important;
+    max-width:170px !important;
+  }
+  .notes-preview{
+    max-width:160px !important;
+  }
+  .notes-popover{
+    min-width:260px;
+    max-width:calc(100vw - 24px);
+    max-height:60vh;
+    font-size:16px;
+  }
+}

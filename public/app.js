@@ -845,8 +845,60 @@ async function openOutcome(id){
   }
 }
 
-function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>النتيجة</th><th>الطباعة</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code"><button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button></td><td><b>${esc(o.store_name||'—')}</b></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}<br><span class="sub">${esc(o.detailed_address)}</span></td><td>${money(o.amount)}</td><td class="notes-cell"><div class="full-order-notes">${esc(o.order_notes||'')}</div></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><button class="btn btn-soft outcome-btn" data-order-id="${o.id}">تحديث النتيجة</button><div class="sub" style="margin-top:4px">كاش ${money(o.cash_collected||0)} • ربح ${money((o.cash_collected||0)-(o.cost_of_goods||0))}</div></td><td>${o.printed?'<span class="badge badge-ok">مطبوع</span>':'<span class="badge badge-warn">غير مطبوع</span>'}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
+function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>النتيجة</th><th>الطباعة</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code"><button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button></td><td><b>${esc(o.store_name||'—')}</b></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}<br><span class="sub">${esc(o.detailed_address)}</span></td><td>${money(o.amount)}</td><td class="notes-cell"><button type="button" class="notes-preview" data-notes="${encodeURIComponent(o.order_notes||'')}" aria-label="عرض الملاحظات كاملة">${esc((o.order_notes||'').replace(/\s+/g,' ').trim()||'—')}</button></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><button class="btn btn-soft outcome-btn" data-order-id="${o.id}">تحديث النتيجة</button><div class="sub" style="margin-top:4px">كاش ${money(o.cash_collected||0)} • ربح ${money((o.cash_collected||0)-(o.cost_of_goods||0))}</div></td><td>${o.printed?'<span class="badge badge-ok">مطبوع</span>':'<span class="badge badge-warn">غير مطبوع</span>'}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
   document.querySelectorAll('.outcome-btn').forEach(btn=>{btn.onclick=()=>openOutcome(Number(btn.dataset.orderId));});
+
+  let notesPopover=document.querySelector('#notesPopover');
+  if(!notesPopover){
+    notesPopover=document.createElement('div');
+    notesPopover.id='notesPopover';
+    notesPopover.className='notes-popover';
+    document.body.appendChild(notesPopover);
+  }
+
+  const hideNotesPopover=()=>{
+    notesPopover.classList.remove('show');
+    document.querySelectorAll('.notes-preview.open').forEach(x=>x.classList.remove('open'));
+  };
+
+  document.querySelectorAll('.notes-preview').forEach(btn=>{
+    const showNotes=()=>{
+      const text=decodeURIComponent(btn.dataset.notes||'')||'لا توجد ملاحظات';
+      notesPopover.textContent=text;
+      const r=btn.getBoundingClientRect();
+      const maxW=Math.min(420,window.innerWidth-24);
+      notesPopover.style.maxWidth=maxW+'px';
+      notesPopover.classList.add('show');
+      btn.classList.add('open');
+
+      const pw=notesPopover.offsetWidth;
+      const ph=notesPopover.offsetHeight;
+      let left=Math.max(12,Math.min(window.innerWidth-pw-12,r.left+r.width/2-pw/2));
+      let top=r.bottom+8;
+      if(top+ph>window.innerHeight-12) top=Math.max(12,r.top-ph-8);
+
+      notesPopover.style.left=left+'px';
+      notesPopover.style.top=top+'px';
+    };
+
+    btn.addEventListener('mouseenter',showNotes);
+    btn.addEventListener('mouseleave',()=>{if(!btn.classList.contains('open')) hideNotesPopover()});
+    btn.addEventListener('click',e=>{
+      e.stopPropagation();
+      const wasOpen=btn.classList.contains('open');
+      hideNotesPopover();
+      if(!wasOpen) showNotes();
+    });
+  });
+
+  if(!window.__corvexNotesBound){
+    document.addEventListener('click',e=>{
+      if(!e.target.closest('.notes-preview') && !e.target.closest('#notesPopover')) hideNotesPopover();
+    });
+    window.addEventListener('scroll',hideNotesPopover,true);
+    window.addEventListener('resize',hideNotesPopover);
+    window.__corvexNotesBound=true;
+  }
   if(selectable){$('#allcheck').onchange=e=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=e.target.checked)}}
 async function printView(){const c=$('#content');const d=await api('/unprinted');state.orders=d.orders;c.innerHTML=`<div class="page-title"><div><h1>جاهز للطباعة</h1><div class="sub">كل الطلبات التي لم تدخل أي دفعة طباعة حتى الآن</div></div><div><span class="pill" style="background:#e9eff4;color:#102a43">${state.orders.length} طلب</span></div></div><div class="card"><div class="actions no-print" style="margin-top:0;margin-bottom:14px"><button id="selAll" class="btn btn-soft">تحديد الكل</button><button id="makeBatch" class="btn btn-accent">إنشاء دفعة وطباعة المحدد</button></div><div id="printTable"></div></div>`;renderOrdersTable('#printTable',state.orders,true);$('#selAll').onclick=()=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=true);$('#makeBatch').onclick=async()=>{const ids=[...document.querySelectorAll('.rowcheck:checked')].map(x=>Number(x.dataset.id));if(!ids.length)return toast('حدد طلباً واحداً على الأقل');try{const r=await api('/print-batches',{method:'POST',body:JSON.stringify({order_ids:ids})});openPrintWindow(r.orders,`دفعة ${r.batch.batch_code}`);toast(`تم إنشاء دفعة ${r.batch.order_count} طلب`);setTimeout(()=>printView(),600)}catch(e){toast(e.message)}}}
 function labelHtml(o){return `<div class="label"><div class="label-head"><b>CORVEX SPORT</b><span>#${o.order_code}</span></div><div><strong>المستلم:</strong> ${esc(o.recipient_name)}</div><div><strong>الهاتف:</strong> ${esc(o.phone)}</div><div><strong>العنوان:</strong> ${esc(o.area)} ${esc(o.detailed_address)}</div><div><strong>القيمة:</strong> ${money(o.amount)} د.أ</div><div class="note"><strong>ملاحظات الطلب:</strong><br>${esc(o.order_notes||'-')}</div></div>`}
