@@ -250,6 +250,7 @@ export async function onRequest(context) {
       const passwordHash = await hashPassword(password);
       await env.DB.prepare('INSERT INTO users(username,display_name,password_hash,role) VALUES(?,?,?,?)')
         .bind(username, displayName, passwordHash, 'admin').run();
+      await ensureBusinessSchema(env);
       return json({ ok: true });
     }
 
@@ -264,7 +265,11 @@ export async function onRequest(context) {
 
     const me = await auth(request, env);
     if (!me) return json({ error: 'غير مصرح' }, 401);
-    await ensureBusinessSchema(env);
+    if (path === '/migrate' && method === 'POST') {
+      if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة'},403);
+      await ensureBusinessSchema(env);
+      return json({ok:true});
+    }
 
     if (path === '/me' && method === 'GET') {
       return json({ user: { id:me.id, username:me.username, display_name:me.display_name, role:me.role, permissions:await userPermissions(env,me) } });
