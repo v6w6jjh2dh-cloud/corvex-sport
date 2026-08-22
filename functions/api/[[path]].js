@@ -1084,6 +1084,61 @@ export async function onRequest(context) {
       return json({ order, status_label: STATUS_LABELS[status] || status });
     }
 
+
+    if (path === '/ai-parse-order' && method === 'POST') {
+      const b = await readBody(request);
+      const rawText = String(b.text || '').trim().slice(0, 6000);
+      if (!rawText) return json({error:'الصق نص الطلب أولاً'},400);
+      if (!env.OPENAI_API_KEY) return json({error:'التحليل الذكي غير مفعّل بعد: أضف OPENAI_API_KEY في Cloudflare Secrets',code:'AI_NOT_CONFIGURED'},503);
+
+      const schema = {
+        type:'object', additionalProperties:false,
+        required:['recipient_name','phone','governorate','detailed_address','amount','notes','items','cost_of_goods','confidence'],
+        properties:{
+          recipient_name:{type:'string'}, phone:{type:'string'}, governorate:{type:'string'},
+          detailed_address:{type:'string'}, amount:{type:'number'}, notes:{type:'string'},
+          items:{type:'array',items:{type:'object',additionalProperties:false,
+            required:['name','quantity','unit_cost','total_cost'],
+            properties:{name:{type:'string'},quantity:{type:'integer'},unit_cost:{type:'number'},total_cost:{type:'number'}}
+          }},
+          cost_of_goods:{type:'number'}, confidence:{type:'number'}
+        }
+      };
+
+      const instructions = `أنت محلل طلبات ملابس أردني لنظام CORVEX.
+استخرج فقط الاسم والهاتف والمحافظة من العنوان والعنوان وقيمة الطلب والأصناف والكميات والكوست.
+انسخ كل النص المتبقي في notes كما كُتب وبنفس ترتيبه بدون إضافة عناوين أو تفسير.
+إذا لا يوجد اسم اكتب "لا يوجد". طبّع هاتف الأردن إلى 07XXXXXXXX إن أمكن.
+أسعار الكوست الثابتة وترتيب المطابقة:
+بنطلون جيوب سحاب 2.30؛ بنطلون رياضة سحاب 2.70؛ بنطلون تركي 2.70؛ بنطلون زرار 2.20؛ بنطلون جيوب 2.20؛ تيشيرت سادة تريكو 2.50؛ بجامة جاكار أو ترينغ أو تريننغ 4.25؛ تيشيرت بولو تريكو أو بولو ترند أو تيشيرت بولو أو بولو 3.50.
+عبارة مثل "ثلاث الألوان" مع صنف واحد تعني غالبًا 3 قطع. "جيوب سحاب" تعني بنطلون جيوب سحاب.
+لا تخمّن كوست لصنف غير موجود في القائمة؛ اجعله صفرًا.`;
+
+      let aiResponse;
+      try {
+        aiResponse = await fetch('https://api.openai.com/v1/responses',{
+          method:'POST',
+          headers:{'authorization':`Bearer ${env.OPENAI_API_KEY}`,'content-type':'application/json'},
+          body:JSON.stringify({
+            model:env.OPENAI_MODEL || 'gpt-5-nano',
+            instructions, input:rawText,
+            reasoning:{effort:'minimal'},
+            text:{format:{type:'json_schema',name:'corvex_order',strict:true,schema}}
+          })
+        });
+      } catch {
+        return json({error:'تعذر الاتصال بخدمة التحليل الذكي'},502);
+      }
+      const data=await aiResponse.json().catch(()=>({}));
+      if(!aiResponse.ok)return json({error:data?.error?.message||'فشل التحليل الذكي'},502);
+      const outputText=data.output_text || (data.output||[]).flatMap(x=>x.content||[]).find(x=>x.type==='output_text')?.text || '';
+      let parsed;
+      try{parsed=JSON.parse(outputText)}catch{return json({error:'وصلت نتيجة غير مفهومة من التحليل الذكي'},502)}
+      parsed.cost_of_goods=Math.max(0,Number(parsed.cost_of_goods||0));
+      parsed.amount=Math.max(0,Number(parsed.amount||0));
+      return json({parsed,model:data.model||env.OPENAI_MODEL||'gpt-5-nano',usage:data.usage||null});
+    }
+
     if (path === '/deleted-orders' && method === 'GET') {
       if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة'},403);
       await env.DB.prepare("DELETE FROM deleted_orders WHERE deleted_at < datetime('now','-48 hours')").run();
