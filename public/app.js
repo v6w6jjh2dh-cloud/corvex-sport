@@ -2867,18 +2867,23 @@ async function usersView(){
       <div class="card">
         <h3>الحسابات</h3>
         ${d.users.map(u=>`
-          <div class="batch-card" style="gap:10px">
-            <div style="min-width:0;flex:1">
-              <b>${esc(u.display_name)}</b>
-              <div class="batch-meta">@${esc(u.username)} • ${u.role==='admin'?'مدير':'موظف'}</div>
+          <div class="batch-card" style="gap:10px;display:block">
+            <div>
+              <b style="display:block;font-size:19px;margin-bottom:7px">${esc(u.display_name)}</b>
+              <div class="batch-meta" style="white-space:normal;overflow-wrap:anywhere">
+                اسم المستخدم: <strong dir="ltr" style="display:inline-block;color:#102a43">@${esc(u.username)}</strong>
+              </div>
+              <div class="batch-meta" style="margin-top:4px">الصلاحية: ${u.role==='admin'?'مدير':'موظف'}</div>
             </div>
-            <span class="badge ${u.is_active?'badge-ok':'badge-warn'}">${u.is_active?'فعال':'موقوف'}</span>
-            <button type="button" class="btn btn-soft edit-user-btn"
-              data-user-id="${u.id}"
-              data-display-name="${encodeURIComponent(u.display_name||'')}"
-              data-username="${encodeURIComponent(u.username||'')}"
-              data-role="${u.role||'staff'}"
-              data-active="${Number(u.is_active||0)}">تعديل</button>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+              <span class="badge ${u.is_active?'badge-ok':'badge-warn'}">${u.is_active?'فعال':'موقوف'}</span>
+              <button type="button" class="btn btn-soft edit-user-btn"
+                data-user-id="${u.id}"
+                data-display-name="${encodeURIComponent(u.display_name||'')}"
+                data-username="${encodeURIComponent(u.username||'')}"
+                data-role="${u.role||'staff'}"
+                data-active="${Number(u.is_active||0)}">تعديل</button>
+            </div>
           </div>
         `).join('')}
       </div>
