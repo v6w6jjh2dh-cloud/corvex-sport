@@ -186,6 +186,45 @@ async function ensureBusinessSchema(env) {
     await env.DB.prepare('ALTER TABLE orders ADD COLUMN store_settled INTEGER NOT NULL DEFAULT 0').run();
   }
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_orders_store_settled ON orders(store_settled)').run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS delivery_company_settlements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    settlement_code TEXT NOT NULL UNIQUE,
+    store_id INTEGER NOT NULL,
+    source_name TEXT NOT NULL DEFAULT '',
+    matched_count INTEGER NOT NULL DEFAULT 0,
+    unmatched_count INTEGER NOT NULL DEFAULT 0,
+    duplicate_count INTEGER NOT NULL DEFAULT 0,
+    delivered_count INTEGER NOT NULL DEFAULT 0,
+    refused_count INTEGER NOT NULL DEFAULT 0,
+    pending_count INTEGER NOT NULL DEFAULT 0,
+    collected_amount REAL NOT NULL DEFAULT 0,
+    delivery_fees REAL NOT NULL DEFAULT 0,
+    net_due REAL NOT NULL DEFAULT 0,
+    created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`).run();
+
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS delivery_company_settlement_orders (
+    settlement_id INTEGER NOT NULL,
+    order_id INTEGER,
+    phone TEXT NOT NULL DEFAULT '',
+    imported_status TEXT NOT NULL DEFAULT '',
+    applied_status TEXT NOT NULL DEFAULT '',
+    imported_amount REAL NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT '',
+    match_type TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(settlement_id,phone,order_id)
+  )`).run();
+
+  const dci=await env.DB.prepare("PRAGMA table_info(orders)").all();
+  const dcc=new Set((dci.results||[]).map(r=>r.name));
+  if(!dcc.has('delivery_company_settled')){
+    await env.DB.prepare('ALTER TABLE orders ADD COLUMN delivery_company_settled INTEGER NOT NULL DEFAULT 0').run();
+  }
+  if(!dcc.has('delivery_company_settlement_id')){
+    await env.DB.prepare('ALTER TABLE orders ADD COLUMN delivery_company_settlement_id INTEGER').run();
+  }
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_orders_delivery_company_settled ON orders(delivery_company_settled)').run();
 }
 
 const DEFAULT_REGION_GROUPS = [{"name":"عمان الغربية","governorate":"عمان","regions":["تلاع العلي","خلدا","المدينة الرياضية","شارع الجامعة","الصويفية","عبدون","الجبيهة","شفا بدران","صويلح","الدوار الثامن","الدوار السابع","الدوار السادس","الدوار الخامس","الدوار الرابع","الدوار الثالث","الدوار الثاني","الدوار الأول","وادي صقرة","الرابية","الشميساني","جبل عمان","مرج الحمام","البيادر","المدينة الصناعية","طريق المطار","مكة مول","تاج مول","ناعور","ضاحية المفرق","ضاحية الرشيد","عرجان","ماحص","الفحيص","عين الباشا","البقعة","شارع الأردن","حي المنصور","أبو نصير","صافوط","شارع المدينة المنورة","عمان","أم السماق","المدينة الطبية","البنيات","الجندويل","شارع مكة","دابوق","أم أذينة","دير غبار","الجاردنز","دوار الداخليه","دوار الواحة","ضاحية الامير راشد","وادي الحداده"]},{"name":"عمان الشرقية","governorate":"عمان","regions":["طبربور","الهاشمي الشمالي","الهاشمي الجنوبي","ماركا الشمالية","ماركا الجنوبية","أم نوارة","المنارة","جبل النصر","أبو علندا","المقابلين","ضاحية الياسمين","اليادودة","خريبة السوق","سحاب","المستنده","الأشرفية","وسط البلد","رأس العين","جبل التاج","حي نزال","الذراع الغربي","جبل اللويبدة","شارع الإذاعة والتلفزيون","جبل الجوفة","القويسمة","منطقة مجهولة","جبل الحديد","الوحدات","النزهة","شارع الإستقلال","رغدان","المحطة","المصدار","جبل الحسين","ضاحية الأقصى","جبل المريخ","جبل القصور","الجبل الأخضر","جاوا","الجويدة","ضاحية الأمير حسن","العبدلي","جبل النظيف","جبل الزهور","وادي الرمم","شارع الحرية","ضاحية الحاج حسن","الموقر","طريق الحزام","صالحية العابد","جبل القلعة","مخيم الحسين","ضاحية الاستقلال","دوار الشرق الاوسط","دوار المشاغل","حي عدن","حي ام تينه","كلية حطين","دوار الجمرك","الرجم الشامي","اللبن","أم الحيران"]},{"name":"الزرقاء","governorate":"الزرقاء","regions":["حي حمزة","حي الأحمد","حي نصار","شومر","التطوير الحضري","القادسية","جريبا","الجبل الشمالي","مخيم شلنر","المشيرفة","البيبسي","إسكان هاشم","حي الحسين","العراتفة","حي الجندي","المنتزهات","عوجان","جبل الأمير حسن","جبل الأميرة رحمة","جبل الأبيض","ضاحية مكة","ضاحية الأميرة هيا","زواهرة","جبل طارق","الجامعة الهاشمية","الزرقاء الجديدة","الزرقاء وسط البلد","الرصيفة","وادي الحجر","جبل الأمير طلال","فندق الجوابرة","ضاحية المدينة المنورة","شارع 16","جبل الأمير فيصل","شارع الكرامة","شارع 36","مستشفى الزرقاء الحكومي","جبل المغير","الغويرية","مدينة الشرق","جناعة","حي رمزي","حي معصوم","جبل الزيتون","حي الرشيد","الزرقاء","العالوك"]},{"name":"إربد","governorate":"إربد","regions":["لواء الكورة","جديتا","الحصن","الحي الشرقي","الحي الجنوبي","كفريوبا","الخيرية","شارع فلسطين","البارحة","جامعة العلوم والتكنلوجيا","جامعة اليرموك","المزار الشمالي","إربد","كفر أسد","الوسطية","زحر","دوقرة","كفر عوان","كفر راكب","أشرفية إربد","كفرالما","دير أبو سعيد","دير السعنة","إربد كفريوبا","بيت يافا","حوفا الوسطية","كفر ابيل","خراج إربد","قم إربد","قميم","البلد إربد","شارع إيدون","شارع الرشيد","مستشفى بديعة","حي التركمان","شارع الهاشمي إربد","مجمع الغور القديم","مجمع الغور الجديد","المركزية","الأحداث","حي الطويل","حي القصيل","ضيضون","النعيمة","حوفا","حبكا","مخيم الحصن","الصريح","ايدون","دوار العيادات","قصر العيادات","قصر العوادين","إربد شارع الجامعة","إربد مول","حي الراهبات","دوار اللوازم","دوار اليوسفي","كلية غرناطة","مستشفى الراهبات","كارفور إربد","ضاحية الحسين إربد","علياء إربد","حي الأطباء","حي المهندسين","أربيلا مول","دوار القبة","مجمع عمان الجديد","دوار الثقافة","شارع البتراء إربد","حدائق الملك عبد الله إربد","المغير إربد","بشرى","حي المطلع","شارع القدس إربد","بيت رأس إربد","حي المطارق","حنينا إربد","بني كنانة","إم قيس","المنصورة إربد","ملكا","ابدر","حاتم إربد","سمر إربد","حب رأس إربد","كفر سوم","يوبلا","حرتا","حميمة إربد","كفر جايز","عالعال","حكما","حوارة","المدينة الصناعية إربد","شارع الثلاثين إربد","السنبلة إربد","بلاط الشهيد","حديقة الزهراء","فوعرا","مخيم إربد","إم الجدايل","حديقة تونس - تونس","بردا - إربد","ميدان الشهداء","دوار الدرة","المجمع الشمالي - إربد","حور - إربد","كتم","زبدة","صما - إربد","سال","دوار سال الصغير","دوار سال الكبير","سيتي سينتر - إربد","دوار البيضة - إربد","دوار الـ M.K - إربد","سحم إربد","مستشفى الأميرة بسمة"]},{"name":"جرش","governorate":"جرش","regions":["نادرة","ساكب","مخيم غزة","تل الرمان","المصطبة","سلحوب","جرش","الكتة","قفقفا","مستشفى الأميرة هيا","برما","بليلا","كفر خل","ريمون","إم بطيمة","جامعة جرش","دبين","سوق","فندق غصن الزيتون","جبة","حلاوة","هاشمية عجلون","خربة الوهدانة","سليخات","عنجرة","رأس منيف","الزراعة","راجب","بيرين"]},{"name":"عجلون","governorate":"عجلون","regions":["عبين","كفرنجة","عجلون"]},{"name":"المفرق","governorate":"المفرق","regions":["الضليل","مخيم الزعتري","إم الجمال","الدفيانة","المفرق","الهاشمية","بلعما","الازرق","الحلابات","المنطقة الحره","البادية الشمالية"]},{"name":"السلط","governorate":"البلقاء","regions":["السلط","الكماليه","السرو","ماحص","زي","العارضه","الفجيص","الرميمين","اليزيديه","علان","عيرا","وادي الحور","يرقا","ام الجوزه","بدر الجديدة"]},{"name":"الرمثا","governorate":"إربد","regions":["البويضه","الطرة","الشجرة","عمراوة","الذنيبه"]},{"name":"وادي رم","governorate":"العقبة","regions":["وادي رم","الديسي"]},{"name":"البترا","governorate":"معان","regions":["البترا"]},{"name":"وادي موسى","governorate":"معان","regions":["وادي موسى"]},{"name":"الأغوار الجنوبية","governorate":"الأغوار الجنوبية","regions":["الغور الصافي","لواء الجيزة","الأغوار الجنوبية","الكرامة","الرامة","ام الرصاص","وادي عربة","الاغوار الجنوبية"]},{"name":"الكرك","governorate":"الكرك","regions":["القصر","الكرك","الحسينية","المزار الجنوبي","الفج","المريغه","وادي ابن حماد","الزغيه","ام رمان","الوسيه","منشية ابو حمور","الصبيحات","زحوم","المامونيه","مدين","مرود","النجاصه","العدنانيه","المحموديه","عزرة","عيتون"]},{"name":"الطفيله","governorate":"الطفيلة","regions":["الطفيلة","القادسيه","الحسا","مخفر الشهداء","البربيطه","عفرا","اللعبان","ابو بنا","شيبظم","العيص","عابدر","الحرير","المعطن","ارحاب","مجادل","عيمه","العين البيضا","السلع"]},{"name":"العقبة","governorate":"العقبة","regions":["القويره","العقبة"]},{"name":"معان","governorate":"معان","regions":["الشوبك","معان"]},{"name":"مأدبا","governorate":"مأدبا","regions":["مأدبا","زيزياء","ذيبان","مليح","ماعين","ام العمد","ام البساتين"]},{"name":"الصحراوي","governorate":"الصحراوي","regions":["القطرانة","الحسينية","سد السلطاني","ارينبة الغربية","ارينبة الشرقية","الحسا","الصحراوي"]},{"name":"الاغوار الشمالية","governorate":"الأغوار الشمالية","regions":["ديرعلا","الشونة الشمالية","الشونة الجنوبية","الاغوار الشمالية","البحر الميت"]}];
@@ -536,6 +575,168 @@ export async function onRequest(context) {
       return json({ok:true});
     }
 
+
+
+    if(path==='/delivery-reconcile/preview'&&method==='POST'){
+      const b=await readBody(request);
+      const storeId=Number(b.store_id||0);
+      const rows=Array.isArray(b.rows)?b.rows.slice(0,3000):[];
+      if(!storeId)return json({error:'اختر المتجر أولاً'},400);
+      if(!rows.length)return json({error:'الكشف فارغ'},400);
+
+      const ordersRes=await env.DB.prepare(`${orderSelectSql('WHERE o.store_id=? AND o.delivery_company_settled=0')} ORDER BY o.id DESC`)
+        .bind(storeId).all();
+      const orders=ordersRes.results||[];
+      const byPhone=new Map();
+
+      for(const o of orders){
+        const p=normalizePhone(o.phone);
+        if(!p)continue;
+        if(!byPhone.has(p))byPhone.set(p,[]);
+        byPhone.get(p).push(o);
+      }
+
+      const result=[];
+      let matched=0,duplicate=0,unmatched=0;
+
+      for(let i=0;i<rows.length;i++){
+        const row=rows[i]||{};
+        const phone=normalizePhone(row.phone);
+        const candidates=phone?(byPhone.get(phone)||[]):[];
+
+        if(!phone||candidates.length===0){
+          unmatched++;
+          result.push({row_index:i+1,phone,status:String(row.status||''),amount:Number(row.amount||0),note:String(row.note||''),match_type:'unmatched',candidates:[]});
+        }else if(candidates.length===1){
+          matched++;
+          result.push({row_index:i+1,phone,status:String(row.status||''),amount:Number(row.amount||0),note:String(row.note||''),match_type:'matched',order:candidates[0],candidates:candidates});
+        }else{
+          duplicate++;
+          result.push({row_index:i+1,phone,status:String(row.status||''),amount:Number(row.amount||0),note:String(row.note||''),match_type:'duplicate',candidates:candidates});
+        }
+      }
+
+      return json({rows:result,summary:{total:rows.length,matched,duplicate,unmatched}});
+    }
+
+    if(path==='/delivery-reconcile/commit'&&method==='POST'){
+      const b=await readBody(request);
+      const storeId=Number(b.store_id||0);
+      const sourceName=String(b.source_name||'').trim();
+      const rows=Array.isArray(b.rows)?b.rows.slice(0,3000):[];
+      if(!storeId)return json({error:'اختر المتجر'},400);
+      if(!rows.length)return json({error:'لا توجد نتائج للاعتماد'},400);
+
+      const accepted=[];
+      let unmatched=0,duplicate=0;
+
+      const storeOrdersRes=await env.DB.prepare(`${orderSelectSql('WHERE o.store_id=? AND o.delivery_company_settled=0')}`)
+        .bind(storeId).all();
+      const orderById=new Map((storeOrdersRes.results||[]).map(o=>[Number(o.id),o]));
+
+      for(const row of rows){
+        const orderId=Number(row.order_id||0);
+        if(!orderId){
+          if(row.match_type==='duplicate')duplicate++;
+          else unmatched++;
+          continue;
+        }
+        const order=orderById.get(orderId);
+        if(!order)continue;
+
+        let status=String(row.status||'pending');
+        if(!Object.prototype.hasOwnProperty.call(STATUS_LABELS,status))status='pending';
+
+        const importedAmount=Math.max(0,Number(row.amount||0));
+        if(status==='delivered' && importedAmount>0 && Math.abs(importedAmount-Number(order.amount||0))>0.001){
+          status='delivered_adjusted';
+        }
+
+        const delivered=['delivered','delivered_adjusted'].includes(status);
+        const partial=status==='partial';
+        const feePaid=status==='refused_fee_paid';
+        const deliveryFee=(delivered||partial||feePaid)?Number(order.delivery_fee||2):0;
+        const cashCollected=(delivered||partial)?importedAmount:0;
+
+        accepted.push({
+          order,
+          status,
+          importedAmount,
+          cashCollected,
+          deliveryFee,
+          note:String(row.note||'').trim(),
+          phone:normalizePhone(row.phone||order.phone),
+          match_type:String(row.match_type||'matched')
+        });
+      }
+
+      if(!accepted.length)return json({error:'لا توجد طلبات مطابقة لاعتمادها'},400);
+
+      let deliveredCount=0,refusedCount=0,pendingCount=0,collected=0,fees=0;
+      for(const x of accepted){
+        if(['delivered','delivered_adjusted','partial'].includes(x.status))deliveredCount++;
+        else if(['refused_fee_paid','refused_no_fee','canceled_before_arrival'].includes(x.status))refusedCount++;
+        else pendingCount++;
+        collected+=x.cashCollected;
+        fees+=x.deliveryFee;
+      }
+
+      const code='DC-'+Date.now();
+      const settlementRes=await env.DB.prepare(`INSERT INTO delivery_company_settlements(
+        settlement_code,store_id,source_name,matched_count,unmatched_count,duplicate_count,
+        delivered_count,refused_count,pending_count,collected_amount,delivery_fees,net_due,created_by
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .bind(code,storeId,sourceName,accepted.length,unmatched,duplicate,deliveredCount,refusedCount,pendingCount,collected,fees,collected-fees,me.id).run();
+      const settlementId=settlementRes.meta.last_row_id;
+
+      const statements=[];
+      for(const x of accepted){
+        const finalSettled=x.status==='pending'?0:1;
+        statements.push(
+          env.DB.prepare(`UPDATE orders SET
+            delivery_status=?,
+            delivered_amount=?,
+            cash_collected=?,
+            delivery_fee=?,
+            settlement_note=CASE WHEN ?='' THEN settlement_note ELSE ? END,
+            settled_at=CASE WHEN ?='pending' THEN NULL ELSE datetime('now') END,
+            delivery_company_settled=?,
+            delivery_company_settlement_id=?,
+            updated_at=datetime('now')
+            WHERE id=?`)
+            .bind(x.status,x.importedAmount,x.cashCollected,x.deliveryFee,x.note,x.note,x.status,finalSettled,settlementId,x.order.id)
+        );
+        statements.push(
+          env.DB.prepare(`INSERT INTO delivery_company_settlement_orders(
+            settlement_id,order_id,phone,imported_status,applied_status,imported_amount,note,match_type
+          ) VALUES(?,?,?,?,?,?,?,?)`)
+            .bind(settlementId,x.order.id,x.phone,String(x.status),x.status,x.importedAmount,x.note,x.match_type)
+        );
+      }
+
+      for(let i=0;i<statements.length;i+=40){
+        await env.DB.batch(statements.slice(i,i+40));
+      }
+
+      return json({settlement:{
+        id:settlementId,settlement_code:code,matched_count:accepted.length,
+        unmatched_count:unmatched,duplicate_count:duplicate,
+        delivered_count:deliveredCount,refused_count:refusedCount,pending_count:pendingCount,
+        collected_amount:collected,delivery_fees:fees,net_due:collected-fees
+      }});
+    }
+
+    if(path==='/delivery-reconcile/history'&&method==='GET'){
+      const storeId=Number(url.searchParams.get('store_id')||0);
+      const sql=`SELECT d.*,s.name store_name,u.display_name created_by_name
+        FROM delivery_company_settlements d
+        LEFT JOIN stores s ON s.id=d.store_id
+        LEFT JOIN users u ON u.id=d.created_by
+        ${storeId?'WHERE d.store_id=?':''}
+        ORDER BY d.id DESC LIMIT 200`;
+      const rows=storeId?await env.DB.prepare(sql).bind(storeId).all():await env.DB.prepare(sql).all();
+      return json({settlements:rows.results||[]});
+    }
 
     if(path==='/store-account'&&method==='GET'){
       const sid=Number(url.searchParams.get('store_id')||0);
