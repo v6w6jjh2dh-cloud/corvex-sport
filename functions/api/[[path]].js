@@ -67,7 +67,8 @@ function sameOrderSpecification(row, input) {
 }
 
 function orderSelectSql(where = '') {
-  return `SELECT o.*, u.display_name AS created_by_name, s.name AS store_name, s.phone AS store_phone FROM orders o LEFT JOIN users u ON u.id=o.created_by LEFT JOIN stores s ON s.id=o.store_id ${where}`;
+  const deliveryDate=`CASE WHEN o.first_printed_at IS NULL THEN NULL WHEN strftime('%w',o.first_printed_at,'+3 hours')='4' THEN date(o.first_printed_at,'+3 hours','+2 days') ELSE date(o.first_printed_at,'+3 hours','+1 day') END`;
+  return `SELECT o.*, ${deliveryDate} AS delivery_date, u.display_name AS created_by_name, s.name AS store_name, s.phone AS store_phone FROM orders o LEFT JOIN users u ON u.id=o.created_by LEFT JOIN stores s ON s.id=o.store_id ${where}`;
 }
 
 async function ensureBusinessSchema(env) {
@@ -285,6 +286,8 @@ async function listOrders(url, env) {
   const q = (url.searchParams.get('q') || '').trim();
   const printed = url.searchParams.get('printed');
   const status = (url.searchParams.get('status') || '').trim();
+  const statuses = (url.searchParams.get('statuses') || '').split(',').map(x=>x.trim()).filter(Boolean);
+  const dateBasis = (url.searchParams.get('date_basis') || '').trim();
   const storeId = url.searchParams.get('store_id');
   const fromCode = url.searchParams.get('from_code');
   const toCode = url.searchParams.get('to_code');
@@ -309,10 +312,26 @@ async function listOrders(url, env) {
     }
   }
 
+  if (statuses.length) {
+    const allowed=new Set(Object.keys(STATUS_LABELS));
+    const selected=[...new Set(statuses.filter(x=>allowed.has(x)))];
+    if(selected.length){
+      where.push(`o.delivery_status IN (${selected.map(()=>'?').join(',')})`);
+      params.push(...selected);
+    }
+  }
+
   if (fromCode) { where.push('o.order_code >= ?'); params.push(Number(fromCode)); }
   if (toCode) { where.push('o.order_code <= ?'); params.push(Number(toCode)); }
-  if (fromDate) { where.push("date(o.created_at) >= date(?)"); params.push(fromDate); }
-  if (toDate) { where.push("date(o.created_at) <= date(?)"); params.push(toDate); }
+  if(dateBasis==='delivery'){
+    const deliveryDate=`CASE WHEN strftime('%w',o.first_printed_at,'+3 hours')='4' THEN date(o.first_printed_at,'+3 hours','+2 days') ELSE date(o.first_printed_at,'+3 hours','+1 day') END`;
+    where.push('o.first_printed_at IS NOT NULL');
+    if(fromDate){where.push(`${deliveryDate} >= date(?)`);params.push(fromDate)}
+    if(toDate){where.push(`${deliveryDate} <= date(?)`);params.push(toDate)}
+  }else{
+    if (fromDate) { where.push("date(o.created_at) >= date(?)"); params.push(fromDate); }
+    if (toDate) { where.push("date(o.created_at) <= date(?)"); params.push(toDate); }
+  }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const stmt = env.DB.prepare(`${orderSelectSql(clause)} ORDER BY o.id DESC LIMIT 1000`).bind(...params);
