@@ -71,6 +71,28 @@ const COMMON_NAMES = new Set(`
 فاطمة مريم سارة هبة اية لين ليان لجين جنى جود رنا رانيا ريهام ريم روان رولا ربى زينب زينة زهراء سمر سما سمية سناء سوسن شذى شهد شيماء صفاء ضحى عبير عائشة علا غدير فرح كندة لمى لانا لارا ليلى لينا ميس نادين نسرين نهى هناء هيا يارا ياسمين تالا تيا حلا حنان خلود دانا دعاء ديمة راما رند ريتال بيان بسمة بشرى اسراء ايمان امل ابتسام اسمهان
 `.trim().split(/\s+/).map(normalizeArabic));
 
+`
+ادهم أديب ارسلان اكرم الياس امير ايهاب باسل باسم باهر بدر برهان ثائر جابر جعفر حازم خضر دريد ذياب زاهر زهير سرمد سهيل شهم صهيب ضرغام عاصم عباس عبد عز عروة عكرمة عمران عواد فؤاد كاظم كامل كنان مجد مجدي محسن مروان منذر مهدي مهند نايل نبيل نزار نضال هشام هلال همام هزاع رشيد صالح صابر صادق صبحي صدام ضياء عارف عاطف عبدالحليم عبدالكريم عبدالرزاق عبدالسلام عبدالقادر عبداللطيف عبدالمجيد عبدالوهاب عطا عوني غالب ماهر ممدوح منصور ناجي نجيب نهاد
+اسيل الاء اروى اريج بتول بيسان تسنيم جمان جمانة جودي ديالا رزان رنيم زلفى سلسبيل سيرين صبا طيبة غنى كادي كارما كوثر ماريا ماسة مها منال منى ميرا ميرنا نبال ندى نورهان وعد ولاء
+`.trim().split(/\s+/).map(normalizeArabic).forEach(n=>COMMON_NAMES.add(n));
+
+function learnedArabicNames(){
+  try{return new Set((JSON.parse(localStorage.getItem('corvex_learned_names')||'[]')||[]).map(normalizeArabic))}catch{return new Set()}
+}
+function isKnownArabicGivenName(word){
+  const n=normalizeArabic(String(word||''));
+  return COMMON_NAMES.has(n)||learnedArabicNames().has(n);
+}
+function learnAcceptedArabicName(value){
+  const n=normalizeArabic(String(value||''));
+  if(!n||n==='لا يوجد')return;
+  const first=n.split(/\s+/).filter(Boolean)[0];
+  if(!first||first.length<2)return;
+  const learned=learnedArabicNames();
+  learned.add(first);
+  localStorage.setItem('corvex_learned_names',JSON.stringify([...learned].slice(-1000)));
+}
+
 const JORDAN_GOVERNORATES = {
   "عمان": ["عمان", "الجاردنز", "جاردنز", "عبدون", "دير غبار", "الصويفية", "الرابية", "ام اذينة", "أم أذينة", "الكرسي", "تلاع العلي", "خلدا", "دابوق", "ام السماق", "أم السماق", "الشميساني", "جبل الحسين", "جبل عمان", "جبل النصر", "جبل التاج", "جبل الزهور", "جبل الاشرفية", "الأشرفية", "الاشرفية", "العبدلي", "راس العين", "رأس العين", "المقابلين", "الياسمين", "مرج الحمام", "البيادر", "بيادر وادي السير", "وسط البلد", "الوحدات", "القويسمة", "الموقر", "الجويدة", "جاوا", "اليادودة", "خريبة السوق", "ناعور", "وادي السير", "صويلح", "الجبيهة", "طبربور", "ماركا", "ماركا الشمالية", "ماركا الجنوبية", "ابو نصير", "أبو نصير", "شفا بدران", "شفا بدران", "ضاحية الرشيد", "ضاحية الامير راشد", "ضاحية الأمير راشد", "المدينة الرياضية", "شارع المدينة المنورة", "شارع مكة", "الدوار السابع", "السابع", "الدوار الثامن", "الثامن", "الدوار السادس", "السادس", "الدوار الخامس", "الخامس", "الدوار الرابع", "الرابع", "الدوار الثالث", "الثالث", "الدوار الثاني", "الثاني", "الدوار الاول", "الاول", "أبو علندا", "ابو علندا", "القسطل", "سحاب", "الجيزة", "اللبن", "نتل", "ام الرصاص", "أم الرصاص", "حسبان", "الطنيب", "المشتى", "اليادوده", "أم البساتين", "ام البساتين", "منجا", "ام العمد", "أم العمد", "الماضونة", "الرقيم", "خشافية الشوابكة", "خشافية الدبايبة", "الموقر", "الذهيبة الغربية", "الذهيبة الشرقية", "رجوم الشامي", "الفيصلية عمان", "الزميلات", "الطالبيه", "الطالبية", "الماضونة", "بدر الجديدة", "بدر نزال", "نزال", "حي نزال", "الهاشمي الشمالي", "الهاشمي الجنوبي", "الهاشمي", "المحطة", "النزهة", "طبربور طارق", "طارق", "ضاحية الاقصى", "ضاحية الأقصى", "ماركا طارق", "عرجان عمان", "خلدا ام السماق", "أبو السوس", "ابو السوس", "الكمالية", "الرباحية", "الرباحية الشمالية", "الرباحية الجنوبية", "الظهير", "النهارية", "حسبان الجديدة"],
   "إربد": ["اربد", "إربد", "الرمثا", "الحصن", "ايدون", "إيدون", "حوارة", "بني عبيد", "بني كنانة", "سما الروسان", "الشجرة", "الطرة", "المزار الشمالي", "الوسطية", "كفر اسد", "كفر أسد", "دير ابي سعيد", "دير أبي سعيد", "الكورة", "الاغوار الشمالية", "الأغوار الشمالية", "الشونة الشمالية", "الطيبة اربد", "الطيبة", "النعيمة", "سال", "بشرى", "بيت راس", "بيت رأس", "حكما", "كفر يوبا", "كفر يوبا", "زحر", "حور", "كفر جايز", "مرو", "عالية", "ناتفة", "فوعرا", "كفر أسد", "سموع", "قفقفا اربد", "حريما", "سحم الكفارات", "ملكا", "ام قيس", "أم قيس", "خرجا", "حبراص", "حرثا", "يبلا", "الشونة الشمالية", "وقاص", "كريمة", "المنشية", "المشارع", "العدسية", "الشيخ حسين", "دير السعنة", "كفر راكب", "جديتا", "تبنة", "كفر عوان", "بيت ايدس", "بيت إيدس", "جنين الصفا", "ارحابا", "إرحابا", "زمال", "سموع الكورة", "كفر الماء", "كفر الماء", "حوفا الوسطية", "قم", "كفر سوم", "الرفيد", "سمر", "عقربا", "حرتا", "رحابا", "كفر ابيل", "كفر أبيل", "صمد", "مخيم اربد", "مخيم إربد"],
@@ -462,79 +484,64 @@ function isHardNonNameLine(line){
 
 function pickCustomerName(lines){
   const phoneIndexes=[];
-  for(let i=0;i<lines.length;i++){
-    if(phoneFrom(lines[i]))phoneIndexes.push(i);
-  }
+  for(let i=0;i<lines.length;i++)if(phoneFrom(lines[i]))phoneIndexes.push(i);
   const firstPhone=phoneIndexes.length?phoneIndexes[0]:-1;
 
-  const valid=(i,strictLocation)=>{
-    const raw=String(lines[i]||'').trim();
-    const n=normalizeArabic(raw);
-    if(isHardNonNameLine(raw))return false;
-    const ws=n.split(/\s+/).filter(Boolean);
-    if(ws.length<1||ws.length>4)return false;
-
-    // A recognized place never becomes a customer name.
-    if(findBestPlaceRawOnly(raw))return false;
-
-    return true;
+  const explicitValue=raw=>{
+    const m=String(raw||'').trim().match(/^(?:اسم المستلم|المستلم|الاسم|اسم)\s*[:：\-]?\s*(.+)$/);
+    return m?String(m[1]||'').trim():'';
+  };
+  const validNameValue=raw=>{
+    const value=explicitValue(raw)||String(raw||'').trim();
+    const n=normalizeArabic(value);
+    if(isHardNonNameLine(value)||findBestPlaceRawOnly(value))return '';
+    const words=n.split(/\s+/).filter(Boolean);
+    if(words.length<1||words.length>4)return '';
+    if(!isKnownArabicGivenName(words[0]))return '';
+    return value;
   };
 
-  // Rule 1: Prefer the nearest valid Arabic line BEFORE the first phone.
-  // This correctly locks: محمد / مهند / رامي / ليث / اسمهان حيمور / حسام محمود بني عامر.
+  // An explicit "الاسم:" label is authoritative anywhere in the order.
+  for(let i=0;i<lines.length;i++){
+    const value=explicitValue(lines[i]);
+    if(value){
+      const accepted=validNameValue(lines[i]);
+      if(accepted)return {name:accepted,index:i};
+    }
+  }
+
+  // Normal orders: only the nearest valid known Arabic name before the first phone.
   if(firstPhone>0){
-    for(let i=firstPhone-1;i>=0 && i>=firstPhone-4;i--){
-      if(valid(i,false))return {name:lines[i],index:i};
+    for(let i=firstPhone-1;i>=0&&i>=firstPhone-3;i--){
+      const value=validNameValue(lines[i]);
+      if(value)return {name:value,index:i};
     }
+    return {name:'',index:-1};
   }
 
-  // Rule 2: If there is no name before the phone, search only a short window after it,
-  // with strict location rejection.
-  if(firstPhone>=0){
-    for(let i=firstPhone+1;i<lines.length && i<=firstPhone+3;i++){
-      if(valid(i,true))return {name:lines[i],index:i};
-    }
-  }
+  // If the phone is first, do not guess a later line as a name.
+  if(firstPhone===0)return {name:'',index:-1};
 
-  // Rule 3: No phone case: only the first few lines and strict location checks.
-  for(let i=0;i<Math.min(lines.length,4);i++){
-    if(valid(i,true))return {name:lines[i],index:i};
+  // No phone: accept only a known name in the first two lines.
+  for(let i=0;i<Math.min(lines.length,2);i++){
+    const value=validNameValue(lines[i]);
+    if(value)return {name:value,index:i};
   }
-
   return {name:'',index:-1};
 }
 
 function isLikelyName(line,index,lines=[]){
   const raw=String(line||'').trim();
-  const n=normalizeArabic(raw);
-  if(!/[\u0600-\u06FF]/.test(raw))return false;
-  if(/\d/.test(normalizeDigits(raw)))return false;
-  if(phoneFrom(raw)||isPriceLine(raw))return false;
-  if(isInstructionLine(raw)||looksLikeFutureLocationInstruction(raw))return false;
-
-  const ws=n.split(/\s+/).filter(Boolean);
-  if(ws.length<1||ws.length>4)return false;
-
-  const hardAddress=/^(?:سكان|ساكن|ساكنه|ساكنة|عنواني|العنوان|عنوان|المكان|موقع|الموقع)\b/.test(n);
-  const hardOperation=/^(?:طلب|تبديل|استبدال|مرتجع|ارجاع)\b/.test(n);
-  if(hardAddress||hardOperation)return false;
-  if(containsAny(n,PRODUCT_WORDS))return false;
-  if(/وزن|الوزن|وزني|مقاس|المقاس|قياس|الطول|طولي|ترند|موديل|عرض/.test(n))return false;
-
-  // Strong known shipping location always wins.
+  const n=normalizeArabic(raw.replace(/^(?:اسم المستلم|المستلم|الاسم|اسم)\s*[:：\-]?\s*/,''));
+  if(!/[\u0600-\u06FF]/.test(raw)||/\d/.test(normalizeDigits(raw)))return false;
+  if(phoneFrom(raw)||isPriceLine(raw)||isHardNonNameLine(raw))return false;
   if(priorityLocalMatch(raw)||explicitGovernorateMatch(raw)||shippingAliasMatch(raw)||findBestPlaceRawOnly(raw))return false;
-
-  let phoneDistance=99;
-  for(let i=0;i<lines.length;i++){
-    if(phoneFrom(lines[i]))phoneDistance=Math.min(phoneDistance,Math.abs(i-index));
-  }
-
-  // Names are context-driven, not dictionary-driven. Color-like family words such as "بني"
-  // do not disqualify a multi-word person name beside the phone.
-  if(ws.length===1)return index<=2||phoneDistance<=2;
-  return index<=4||phoneDistance<=3;
+  const words=n.split(/\s+/).filter(Boolean);
+  if(words.length<1||words.length>4||!isKnownArabicGivenName(words[0]))return false;
+  const firstPhone=lines.findIndex(x=>!!phoneFrom(x));
+  if(firstPhone===0&&!/^(?:اسم المستلم|المستلم|الاسم|اسم)/.test(normalizeArabic(raw)))return false;
+  return firstPhone<0?index<=1:index<firstPhone&&firstPhone-index<=3;
 }
-
 
 function isColorLine(line){
   return actualColorsInLine(line).length>0;
@@ -782,6 +789,30 @@ function parseSmart(text){
     address=[address,...extras].filter(Boolean).join(' - ');
   }
 
+  // If a locality is not in the dictionary, the first plain line(s) immediately
+  // after the phone are still the address until product/detail content begins.
+  if(!address){
+    const firstPhoneIndex=lines.findIndex(x=>!!phoneFrom(x));
+    const positionalAddress=[];
+    if(firstPhoneIndex>=0){
+      for(let i=firstPhoneIndex+1;i<lines.length;i++){
+        if(used.has(i)||isPriceLine(lines[i]))continue;
+        const n=normalizeArabic(lines[i]);
+        const detailLike=containsAny(n,PRODUCT_WORDS)||isColorLine(lines[i])||isQuantityLine(lines[i])||
+          /وزن|الوزن|وزني|مقاس|المقاس|الطول|طولي/.test(n);
+        if(detailLike)break;
+        positionalAddress.push({i,line:lines[i]});
+        if(positionalAddress.length>=2)break;
+      }
+    }
+    if(positionalAddress.length){
+      address=positionalAddress.map(x=>x.line).join(' - ');
+      const inferred=splitAreaAddress(address);
+      area=inferred.area||'عمان';
+      positionalAddress.forEach(x=>used.add(x.i));
+    }
+  }
+
   // No location at all: business rule requested by user.
   if(!area && !address){
     area='عمان';
@@ -791,11 +822,14 @@ function parseSmart(text){
   // 6) Notes are copied as written. Do not add labels or reinterpret product details.
   const noteRows=[];
   extraPhones.forEach(p=>noteRows.push(p));
-  if(priceInstruction)noteRows.push(priceInstruction);
   for(let i=0;i<lines.length;i++){
-    if(used.has(i))continue;
     const line=lines[i];
-    if(phoneFrom(line)||isPriceLine(line))continue;
+    if(isPriceLine(line)){
+      if(priceInstruction)noteRows.push(priceInstruction);
+      continue;
+    }
+    if(used.has(i))continue;
+    if(phoneFrom(line))continue;
     if(name!=='لا يوجد'&&line===name)continue;
     noteRows.push(line);
   }
@@ -1133,6 +1167,7 @@ async function newOrder(){
         })
       });
 
+      learnAcceptedArabicName($('#name').value);
       toast(`تم حفظ الطلب رقم ${d.order.order_code}`);
       if(next)newOrder();else show('orders');
     }catch(e){toast(e.message)}
