@@ -2147,6 +2147,16 @@ async function deliveryReconcileView(){
   }
 }
 
+function renderReportTable(orders){
+  const box=$('#reportTable');
+  if(!orders.length){box.innerHTML='<div class="empty">لا توجد طلبات مطابقة</div>';return}
+  box.innerHTML=`<div class="table-wrap"><table class="table" style="min-width:980px"><thead><tr>
+    <th>الكود</th><th>المتجر</th><th>الاسم</th><th>المحافظة</th><th>العنوان</th><th>رقم الهاتف</th><th>القيمة</th><th>الحالة</th><th>الملاحظات</th><th>التاريخ</th>
+  </tr></thead><tbody>${orders.map(o=>`<tr>
+    <td class="code">#${esc(o.order_code)}</td><td>${esc(o.store_name||'—')}</td><td>${esc(o.recipient_name||'لا يوجد')}</td><td>${esc(o.area||'—')}</td><td>${esc(o.detailed_address||'—')}</td><td>${esc(o.phone||'')}</td><td>${money(o.amount)}</td><td>${esc(DELIVERY_STATUS_LABELS[o.delivery_status||'pending']||o.delivery_status||'')}</td><td style="white-space:pre-line;min-width:180px">${esc(o.order_notes||'—')}</td><td style="direction:ltr;white-space:nowrap">${esc(o.delivery_date||'—')}</td>
+  </tr>`).join('')}</tbody></table></div>`;
+}
+
 async function reportsView(){
   const c=$('#content');
   const stores=await getActiveStores();
@@ -2163,16 +2173,18 @@ async function reportsView(){
           <option value="">كل المتاجر</option>
           ${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}
         </select>
-        <select id="reportStatus" class="select">
-          <option value="">كل حالات الطلب</option>
-          <option value="pending">قيد التوصيل</option>
-          <option value="delivered">تم الاستلام</option>
-          <option value="delivered_adjusted">تم الاستلام وتعديل قيمة</option>
-          <option value="refused_fee_paid">رفض ودفع أجور</option>
-          <option value="refused_no_fee">رفض وعدم دفع أجور</option>
-          <option value="canceled_before_arrival">ملغي قبل الوصول</option>
-          <option value="partial">استلام جزئي</option>
-        </select>
+        <details id="reportStatusPicker" style="position:relative">
+          <summary class="btn btn-soft" style="list-style:none;white-space:nowrap">الحالات: <span id="reportStatusCount">الكل</span></summary>
+          <div class="card" style="position:absolute;z-index:20;top:calc(100% + 6px);right:0;width:245px;padding:10px;box-shadow:0 12px 30px rgba(0,0,0,.18)">
+            <label class="perm-check"><input class="report-status-check" type="checkbox" value="pending"><span>قيد التوصيل</span></label>
+            <label class="perm-check"><input class="report-status-check" type="checkbox" value="delivered"><span>تم الاستلام</span></label>
+            <label class="perm-check"><input class="report-status-check" type="checkbox" value="delivered_adjusted"><span>تم الاستلام وتعديل قيمة</span></label>
+            <label class="perm-check"><input class="report-status-check" type="checkbox" value="refused_fee_paid"><span>رفض ودفع أجور</span></label>
+            <label class="perm-check"><input class="report-status-check" type="checkbox" value="refused_no_fee"><span>رفض وعدم دفع أجور</span></label>
+            <label class="perm-check"><input class="report-status-check" type="checkbox" value="canceled_before_arrival"><span>ملغي قبل الوصول</span></label>
+            <label class="perm-check"><input class="report-status-check" type="checkbox" value="partial"><span>استلام جزئي</span></label>
+          </div>
+        </details>
         <input id="fd" type="date" class="input">
         <input id="td" type="date" class="input">
         <button id="rr" class="btn btn-primary">عرض</button>
@@ -2208,12 +2220,13 @@ async function reportsView(){
   $('#otd').value=today;
 
   async function load(){
-    const p=new URLSearchParams({from_date:$('#fd').value,to_date:$('#td').value});
+    const p=new URLSearchParams({from_date:$('#fd').value,to_date:$('#td').value,date_basis:'delivery'});
     if($('#reportStore').value)p.set('store_id',$('#reportStore').value);
-    if($('#reportStatus').value)p.set('status',$('#reportStatus').value);
+    const statuses=[...document.querySelectorAll('.report-status-check:checked')].map(x=>x.value);
+    if(statuses.length)p.set('statuses',statuses.join(','));
     const d=await api('/orders?'+p);
     state.orders=d.orders;
-    renderOrdersTable('#reportTable',state.orders,false);
+    renderReportTable(state.orders);
   }
 
   async function loadOutgoing(){
@@ -2242,7 +2255,11 @@ async function reportsView(){
   $('#rp').onclick=()=>printReport(state.orders);
   $('#rx').onclick=()=>downloadCsv(state.orders);
   $('#reportStore').onchange=load;
-  $('#reportStatus').onchange=load;
+  document.querySelectorAll('.report-status-check').forEach(x=>x.onchange=()=>{
+    const count=document.querySelectorAll('.report-status-check:checked').length;
+    $('#reportStatusCount').textContent=count?String(count):'الكل';
+    load();
+  });
 
   $('#outgoingLoad').onclick=loadOutgoing;
   $('#outgoingStore').onchange=loadOutgoing;
@@ -2259,8 +2276,8 @@ async function reportsView(){
   await load();
   await loadOutgoing();
 }
-function printReport(orders){const w=window.open('','_blank');w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>كشف CORVEX SPORT</title><style>@page{size:A4 landscape;margin:8mm}body{font-family:Tahoma,Arial}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aaa;padding:5px;text-align:right}h2{margin:0 0 10px}</style></head><body><h2>كشف طلبات CORVEX SPORT</h2><table><thead><tr><th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th><th>القيمة</th><th>الحالة</th><th>الملاحظات</th><th>الموظف</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr><td>${o.order_code}</td><td>${esc(o.store_name||'—')}</td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}</td><td>${esc(o.detailed_address)}</td><td>${money(o.amount)}</td><td>${esc(DELIVERY_STATUS_LABELS[o.delivery_status||'pending']||o.delivery_status||'')}</td><td>${esc(o.order_notes)}</td><td>${esc(o.created_by_name||'')}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()}
-function downloadCsv(orders){const rows=[['رقم البوليصة','المتجر','اسم المستلم','رقم الهاتف','المحافظة','العنوان التفصيلي','قيمة الطرد','حالة الطلب','ملاحظات الطلب','الموظف','تاريخ الإدخال'],...orders.map(o=>[o.order_code,o.store_name||'',o.recipient_name,o.phone,o.area,o.detailed_address,o.amount,DELIVERY_STATUS_LABELS[o.delivery_status||'pending']||o.delivery_status||'',o.order_notes,o.created_by_name||'',o.created_at])];const csv='\\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`corvex-orders-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(a.href)}
+function printReport(orders){const w=window.open('','_blank');w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>كشف CORVEX SPORT</title><style>@page{size:A4 landscape;margin:7mm}body{font-family:Tahoma,Arial}table{width:100%;border-collapse:collapse;font-size:9px;table-layout:auto}th,td{border:1px solid #aaa;padding:4px;text-align:right;vertical-align:top}.notes{white-space:pre-line;max-width:58mm}h2{margin:0 0 8px}</style></head><body><h2>كشف طلبات CORVEX SPORT</h2><table><thead><tr><th>الكود</th><th>المتجر</th><th>الاسم</th><th>المحافظة</th><th>العنوان</th><th>رقم الهاتف</th><th>القيمة</th><th>الحالة</th><th>الملاحظات</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr><td>#${o.order_code}</td><td>${esc(o.store_name||'—')}</td><td>${esc(o.recipient_name||'لا يوجد')}</td><td>${esc(o.area||'—')}</td><td>${esc(o.detailed_address||'—')}</td><td>${esc(o.phone||'')}</td><td>${money(o.amount)}</td><td>${esc(DELIVERY_STATUS_LABELS[o.delivery_status||'pending']||o.delivery_status||'')}</td><td class="notes">${esc(o.order_notes||'—')}</td><td>${esc(o.delivery_date||'—')}</td></tr>`).join('')}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()}
+function downloadCsv(orders){const rows=[['الكود','المتجر','الاسم','المحافظة','العنوان','رقم الهاتف','القيمة','الحالة','الملاحظات','التاريخ'],...orders.map(o=>[o.order_code,o.store_name||'',o.recipient_name,o.area,o.detailed_address,o.phone,o.amount,DELIVERY_STATUS_LABELS[o.delivery_status||'pending']||o.delivery_status||'',o.order_notes,o.delivery_date||''])];const csv='\\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`corvex-report-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(a.href)}
 
 
 async function couriersView(){
