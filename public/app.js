@@ -1384,9 +1384,11 @@ async function couriersView(){
             ${x.phone?`<div class="sub">${esc(x.phone)}</div>`:''}
           </div>
           <div class="courier-actions">
+            <button class="btn btn-outline custody-courier" data-id="${x.id}">العهدة</button>
             <button class="btn btn-soft edit-courier" data-id="${x.id}">تعديل</button>
             <button class="btn btn-danger delete-courier" data-id="${x.id}">حذف</button>
             <button class="btn btn-accent settle-courier" data-id="${x.id}">تسكير الحساب</button>
+            <button class="btn btn-soft courier-history" data-id="${x.id}">سجل الحساب</button>
           </div>
         </div>`).join(''):'<div class="empty">لا يوجد مناديب</div>'}
     </div>
@@ -1406,6 +1408,30 @@ async function couriersView(){
   document.querySelectorAll('.settle-courier').forEach(b=>b.onclick=()=>{
     openCourierSettlement(Number(b.dataset.id),cs.find(x=>Number(x.id)===Number(b.dataset.id)));
   });
+  document.querySelectorAll('.custody-courier').forEach(b=>b.onclick=()=>openCourierCustody(Number(b.dataset.id)));
+  document.querySelectorAll('.courier-history').forEach(b=>b.onclick=()=>openCourierHistory(Number(b.dataset.id)));
+}
+
+
+async function openCourierCustody(cid){
+  const d=await api('/courier-custody?courier_id='+cid);
+  const s=d.summary||{},x=d.courier||{};
+  $('#settlementArea').innerHTML=`<div class="card accounting-card"><h2>عهدة المندوب: ${esc(x.name||'')}</h2>
+  <div class="accounting-stats">
+    <div><span>خرج معه</span><b>${s.assigned_count||0}</b></div>
+    <div><span>قيمة الشحنات</span><b>${money(s.assigned_value||0)}</b></div>
+    <div><span>تم الاستلام</span><b>${s.delivered_count||0}</b></div>
+    <div><span>رفض / رجوع</span><b>${s.refused_count||0}</b></div>
+    <div><span>باقي معه</span><b>${s.pending_count||0}</b></div>
+    <div><span>قيمة الباقي</span><b>${money(s.pending_value||0)}</b></div>
+    <div><span>الكاش المحصل</span><b>${money(s.cash_collected||0)}</b></div>
+  </div></div>`;
+}
+
+async function openCourierHistory(cid){
+  const d=await api('/courier-settlements?courier_id='+cid);
+  $('#settlementArea').innerHTML=`<div class="card accounting-card"><h2>سجل تسكير حساب المندوب</h2>
+  ${(d.settlements||[]).length?d.settlements.map(s=>`<div class="settlement-row"><div><b>${esc(s.settlement_code)}</b><div class="sub">${fmtDate(s.created_at)} • ${s.orders_count} طلب • مستلم ${s.delivered_count} • مرتجع ${s.returned_count}</div></div><strong>${money(s.total_due)} د.أ</strong></div>`).join(''):'<div class="empty">لا يوجد تسويات سابقة</div>'}</div>`;
 }
 
 async function courierAddView(editId=0){
@@ -1587,7 +1613,7 @@ async function storeShipmentsView(storeId){
   c.innerHTML=`
     <div class="page-title">
       <div><h1>شحنات ${esc(store.name)}</h1><div class="sub">كل شحنات هذا المتجر فقط</div></div>
-      <button class="btn btn-soft" onclick="show('stores')">العودة للمتاجر</button>
+      <div class="actions" style="margin:0"><button id="storeAccountBtn" class="btn btn-accent">حساب المتجر</button><button class="btn btn-soft" onclick="show('stores')">العودة للمتاجر</button></div>
     </div>
     <div class="card">
       <div class="toolbar">
@@ -1603,8 +1629,10 @@ async function storeShipmentsView(storeId){
         </select>
         <button id="storeShipmentSearch" class="btn btn-primary">بحث</button>
       </div>
-      <div id="storeShipmentsTable"></div>
+      <div id="storeShipmentsTable"></div><div id="storeAccountingArea"></div>
     </div>`;
+
+  $('#storeAccountBtn').onclick=()=>openStoreAccount(storeId,store);
 
   const load=async()=>{
     const p=new URLSearchParams({store_id:String(storeId)});
@@ -1616,6 +1644,65 @@ async function storeShipmentsView(storeId){
 
   $('#storeShipmentSearch').onclick=load;
   await load();
+}
+
+
+async function openStoreAccount(storeId,store){
+  const [a,e,h]=await Promise.all([
+    api('/store-account?store_id='+storeId),
+    api('/store-settlement-eligible?store_id='+storeId),
+    api('/store-settlements?store_id='+storeId)
+  ]);
+
+  const s=a.summary||{},orders=e.orders||[];
+
+  $('#storeAccountingArea').innerHTML=`<div class="card accounting-card">
+    <h2>حساب متجر ${esc(store.name||'')}</h2>
+
+    <div class="accounting-stats">
+      <div><span>خرج</span><b>${s.outgoing_count||0}</b></div>
+      <div><span>تم الاستلام</span><b>${s.delivered_count||0}</b></div>
+      <div><span>رفض / رجوع</span><b>${s.refused_count||0}</b></div>
+      <div><span>قيد التوصيل</span><b>${s.pending_count||0}</b></div>
+      <div><span>المبلغ المحصل</span><b>${money(s.collected_amount||0)}</b></div>
+      <div><span>أجور التوصيل</span><b>${money(s.delivery_fees||0)}</b></div>
+    </div>
+
+    <h3>طلبات جاهزة لتسكير الحساب</h3>
+    ${orders.length?`
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>✓</th><th>الكود</th><th>الحالة</th><th>الكاش</th></tr></thead>
+          <tbody>${orders.map(o=>`<tr>
+            <td><input type="checkbox" class="store-settle-check" data-id="${o.id}" checked></td>
+            <td>${o.order_code}</td>
+            <td>${deliveryBadge(o)}</td>
+            <td>${money(o.cash_collected||0)}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <button id="settleStoreDone" class="btn btn-accent">تسكير حساب المحدد</button>
+    `:'<div class="empty">لا توجد طلبات غير محاسبة</div>'}
+
+    <h3 style="margin-top:20px">سجل تسويات المتجر</h3>
+    ${(h.settlements||[]).length?h.settlements.map(x=>`
+      <div class="settlement-row">
+        <div><b>${esc(x.settlement_code)}</b><div class="sub">${fmtDate(x.created_at)} • ${x.orders_count} طلب</div></div>
+        <strong>${money(x.store_due)} د.أ</strong>
+      </div>`).join(''):'<div class="empty">لا يوجد تسويات سابقة</div>'}
+  </div>`;
+
+  if($('#settleStoreDone')){
+    $('#settleStoreDone').onclick=async()=>{
+      const ids=[...document.querySelectorAll('.store-settle-check:checked')].map(x=>Number(x.dataset.id));
+      if(!ids.length)return toast('حدد طلباً واحداً على الأقل');
+      try{
+        const r=await api('/store-settlements',{method:'POST',body:JSON.stringify({store_id:storeId,order_ids:ids})});
+        toast('تم تسكير حساب المتجر: '+money(r.settlement.store_due)+' د.أ');
+        openStoreAccount(storeId,store);
+      }catch(err){toast(err.message)}
+    };
+  }
 }
 
 async function storeOrdersHub(){

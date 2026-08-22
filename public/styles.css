@@ -1048,3 +1048,12 @@ html,body,#app,.shell{width:100%!important;max-width:100%!important;overflow-x:h
 .outgoing-report-total b{font-size:24px;color:#117a65}
 @media(max-width:900px){.outgoing-store-grid{grid-template-columns:repeat(2,minmax(140px,1fr))}}
 @media(max-width:520px){.outgoing-store-grid{grid-template-columns:1fr}.section-head{align-items:flex-start}.outgoing-total{min-width:54px;height:54px;font-size:22px}}
+
+/* V29 accounting */
+.accounting-card{margin-top:18px}
+.accounting-stats{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px;margin:14px 0 20px}
+.accounting-stats>div{padding:14px;border:1px solid #dfe7ed;border-radius:12px;background:#f8fafc;display:flex;flex-direction:column;gap:5px}
+.accounting-stats span{font-size:12px;color:#657587}
+.accounting-stats b{font-size:22px;color:#102a43}
+.settlement-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border-bottom:1px solid #edf1f4}
+@media(max-width:800px){.accounting-stats{grid-template-columns:repeat(2,minmax(120px,1fr))}}
