@@ -68,7 +68,8 @@ function sameOrderSpecification(row, input) {
 
 function orderSelectSql(where = '') {
   const deliveryDate=`CASE WHEN o.first_printed_at IS NULL THEN NULL WHEN strftime('%w',o.first_printed_at,'+3 hours')='4' THEN date(o.first_printed_at,'+3 hours','+2 days') ELSE date(o.first_printed_at,'+3 hours','+1 day') END`;
-  return `SELECT o.*, ${deliveryDate} AS delivery_date, u.display_name AS created_by_name, s.name AS store_name, s.phone AS store_phone FROM orders o LEFT JOIN users u ON u.id=o.created_by LEFT JOIN stores s ON s.id=o.store_id ${where}`;
+  const firstPrintDate=`CASE WHEN o.first_printed_at IS NULL THEN NULL ELSE date(o.first_printed_at,'+3 hours') END`;
+  return `SELECT o.*, ${deliveryDate} AS delivery_date, ${firstPrintDate} AS first_print_date, u.display_name AS created_by_name, s.name AS store_name, s.phone AS store_phone FROM orders o LEFT JOIN users u ON u.id=o.created_by LEFT JOIN stores s ON s.id=o.store_id ${where}`;
 }
 
 async function ensureBusinessSchema(env) {
@@ -323,7 +324,12 @@ async function listOrders(url, env) {
 
   if (fromCode) { where.push('o.order_code >= ?'); params.push(Number(fromCode)); }
   if (toCode) { where.push('o.order_code <= ?'); params.push(Number(toCode)); }
-  if(dateBasis==='delivery'){
+  if(dateBasis==='first_printed'){
+    const firstPrintDate="date(o.first_printed_at,'+3 hours')";
+    where.push('o.first_printed_at IS NOT NULL');
+    if(fromDate){where.push(`${firstPrintDate} >= date(?)`);params.push(fromDate)}
+    if(toDate){where.push(`${firstPrintDate} <= date(?)`);params.push(toDate)}
+  }else if(dateBasis==='delivery'){
     const deliveryDate=`CASE WHEN strftime('%w',o.first_printed_at,'+3 hours')='4' THEN date(o.first_printed_at,'+3 hours','+2 days') ELSE date(o.first_printed_at,'+3 hours','+1 day') END`;
     where.push('o.first_printed_at IS NOT NULL');
     if(fromDate){where.push(`${deliveryDate} >= date(?)`);params.push(fromDate)}
@@ -402,7 +408,7 @@ export async function onRequest(context) {
         SUM(CASE WHEN printed=0 THEN 1 ELSE 0 END) unprinted,
         SUM(CASE WHEN printed=1 THEN 1 ELSE 0 END) printed,
         SUM(CASE WHEN date(created_at)=date('now') THEN 1 ELSE 0 END) today,
-        SUM(CASE WHEN date(first_printed_at)=date('now') THEN 1 ELSE 0 END) outgoing_today,
+        COUNT(DISTINCT CASE WHEN date(first_printed_at,'+3 hours')=date('now','+3 hours') THEN id END) outgoing_today,
         SUM(CASE WHEN delivery_status='delivered' THEN 1 ELSE 0 END) delivered,
         SUM(CASE WHEN delivery_status='delivered_adjusted' THEN 1 ELSE 0 END) delivered_adjusted,
         SUM(CASE WHEN delivery_status='partial' THEN 1 ELSE 0 END) partial,
@@ -421,12 +427,12 @@ export async function onRequest(context) {
       const storeRows = await env.DB.prepare(`SELECT
         s.id store_id,
         s.name store_name,
-        COUNT(o.id) outgoing_count
+        COUNT(DISTINCT o.id) outgoing_count
         FROM stores s
-        LEFT JOIN orders o ON o.store_id=s.id AND date(o.first_printed_at)=date('now')
+        LEFT JOIN orders o ON o.store_id=s.id AND date(o.first_printed_at,'+3 hours')=date('now','+3 hours')
         WHERE s.is_active=1
         GROUP BY s.id,s.name
-        HAVING COUNT(o.id) > 0
+        HAVING COUNT(DISTINCT o.id) > 0
         ORDER BY outgoing_count DESC,s.name ASC`).all();
 
       return json({
@@ -444,29 +450,25 @@ export async function onRequest(context) {
       const from=(url.searchParams.get('from_date')||'').trim();
       const to=(url.searchParams.get('to_date')||'').trim();
       const storeId=Number(url.searchParams.get('store_id')||0);
-      const deliveryDateExpr=`CASE
-        WHEN strftime('%w',o.first_printed_at,'+3 hours')='4'
-          THEN date(o.first_printed_at,'+3 hours','+2 days')
-        ELSE date(o.first_printed_at,'+3 hours','+1 day')
-      END`;
+      const firstPrintDateExpr="date(o.first_printed_at,'+3 hours')";
       const where=["o.first_printed_at IS NOT NULL"];
       const params=[];
-      if(from){where.push(`${deliveryDateExpr}>=date(?)`);params.push(from)}
-      if(to){where.push(`${deliveryDateExpr}<=date(?)`);params.push(to)}
+      if(from){where.push(`${firstPrintDateExpr}>=date(?)`);params.push(from)}
+      if(to){where.push(`${firstPrintDateExpr}<=date(?)`);params.push(to)}
       if(storeId){where.push("o.store_id=?");params.push(storeId)}
 
       const rows=await env.DB.prepare(`SELECT
-        ${deliveryDateExpr} print_date,
+        ${firstPrintDateExpr} print_date,
         o.store_id,
         s.name store_name,
-        COUNT(*) orders_count
+        COUNT(DISTINCT o.id) orders_count
         FROM orders o
         LEFT JOIN stores s ON s.id=o.store_id
         WHERE ${where.join(' AND ')}
-        GROUP BY ${deliveryDateExpr},o.store_id,s.name
+        GROUP BY ${firstPrintDateExpr},o.store_id,s.name
         ORDER BY print_date DESC,orders_count DESC`).bind(...params).all();
 
-      const total=await env.DB.prepare(`SELECT COUNT(*) c FROM orders o WHERE ${where.join(' AND ')}`).bind(...params).first();
+      const total=await env.DB.prepare(`SELECT COUNT(DISTINCT o.id) c FROM orders o WHERE ${where.join(' AND ')}`).bind(...params).first();
 
       return json({rows:rows.results||[],total:Number(total?.c||0)});
     }
