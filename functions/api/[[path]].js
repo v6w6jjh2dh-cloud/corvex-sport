@@ -1238,10 +1238,14 @@ export async function onRequest(context) {
     if (path === '/users' && method === 'POST') {
       if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة'},403);
       const b = await readBody(request);
-      if (!b.username || !b.display_name || String(b.password||'').length < 6) return json({error:'بيانات المستخدم غير مكتملة'},400);
+      const username = String(b.username||'').trim();
+      const displayName = String(b.display_name||'').trim();
+      if (!username || !displayName || String(b.password||'').length < 6) return json({error:'بيانات المستخدم غير مكتملة، وكلمة المرور 6 أحرف على الأقل'},400);
+      const duplicate = await env.DB.prepare('SELECT id FROM users WHERE lower(username)=lower(?) LIMIT 1').bind(username).first();
+      if (duplicate) return json({error:'اسم المستخدم مستخدم مسبقًا، اختر اسمًا آخر'},409);
       const hash = await hashPassword(String(b.password));
       await env.DB.prepare('INSERT INTO users(username,display_name,password_hash,role) VALUES(?,?,?,?)')
-        .bind(String(b.username).trim(),String(b.display_name).trim(),hash,b.role==='admin'?'admin':'staff').run();
+        .bind(username,displayName,hash,b.role==='admin'?'admin':'staff').run();
       return json({ok:true},201);
     }
 
