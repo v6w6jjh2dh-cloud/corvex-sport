@@ -123,8 +123,8 @@ const ADDRESS_WORDS = [
 ].map(normalizeArabic);
 
 const PRODUCT_WORDS = [
-  'قطعه','قطع','قطعتين','بلايز','بلوز','بلوزه','تيشيرت','تيشيرتات','تشيرت','بولو',
-  'تريننغ','طقم','اطقم','بنطلون','بناطيل','شورت','بيجاما','جاكيت','هودي','قميص',
+  'قطعه','قطع','قطعتين','بلايز','بلوز','بلوزه','تيشيرت','تيشيرتات','تيشرت','تي شيرت','تشيرت','بولو',
+  'تركي','تريننغ','طقم','اطقم','بنطلون','بناطيل','شورت','بيجاما','جاكيت','هودي','قميص',
   'فستان','عبايه','تنوره','جينز','رياضه','سحاب','جيوب','جيب','بزرار','بزار','ريبوك','نايك','اديداس','بوما','زارا'
 ].map(normalizeArabic);
 
@@ -200,10 +200,16 @@ function containsAny(n, words){
   return words.some(w => n.includes(w));
 }
 
+function canonicalJordanPhone(value){
+  const digits=normalizeDigits(String(value||'')).replace(/\D/g,'');
+  if(/^9627[789]\d{7}$/.test(digits))return '0'+digits.slice(3);
+  if(/^7[789]\d{7}$/.test(digits))return '0'+digits;
+  return digits;
+}
 function phonesFrom(line){
-  const c = normalizeDigits(line).replace(/[\s-]/g,'');
-  const matches = c.match(/(?:\+?962|0)?7[789]\d{7}/g) || [];
-  return [...new Set(matches)];
+  const c=normalizeDigits(line).replace(/[\s-]/g,'');
+  const matches=c.match(/(?:\+?962|0)?7[789]\d{7}/g)||[];
+  return [...new Set(matches.map(canonicalJordanPhone).filter(Boolean))];
 }
 
 function phoneFrom(line){
@@ -219,7 +225,16 @@ function isPriceLine(line){
 function priceFrom(line){
   if(!isPriceLine(line)) return '';
   const nums = normalizeDigits(line).match(/\d+(?:\.\d+)?/g) || [];
-  return nums.length ? nums[nums.length - 1] : '';
+  return nums.length ? nums[0] : '';
+}
+
+function instructionFromPriceLine(line){
+  let raw=normalizeDigits(String(line||''));
+  raw=raw.replace(/(?:السعر\s*)?\d+(?:\.\d+)?\s*(?:دنانير|دينار|د\.?ا|jd|jod)?\s*(?:شامل|مع)\s*التوصيل/ig,' ');
+  raw=raw.replace(/(?:السعر\s*)?(?:شامل|مع)\s*التوصيل\s*\d+(?:\.\d+)?\s*(?:دنانير|دينار|د\.?ا|jd|jod)?/ig,' ');
+  raw=raw.replace(/[💥🌼⭐🚨✨❤❤️]/gu,' ');
+  raw=raw.replace(/^[\s،,.:;!_\/\\و-]+/,'').replace(/\s+/g,' ').trim();
+  return raw;
 }
 
 
@@ -403,11 +418,27 @@ function findBestPlaceRawOnly(line){
 }
 
 
+function isOnlyColorsLine(line){
+  const tokens=normalizeArabic(String(line||'')).split(/\s+/).filter(Boolean);
+  if(!tokens.length)return false;
+  const colorSet=new Set(COLOR_WORDS_V38.filter(x=>!x.includes(' ')));
+  let found=false;
+  for(let token of tokens){
+    if(token==='و'||token==='اللون'||token==='الوان'||token==='الالوان')continue;
+    if(token.startsWith('و')&&token.length>2)token=token.slice(1);
+    if(token.startsWith('ال')&&token.length>3)token=token.slice(2);
+    if(!colorSet.has(token))return false;
+    found=true;
+  }
+  return found;
+}
+
 function isHardNonNameLine(line){
   const raw=String(line||'').trim();
   const n=normalizeArabic(raw);
 
   if(!raw)return true;
+  if(isOnlyColorsLine(raw))return true;
   if(phoneFrom(raw)||isPriceLine(raw))return true;
   if(/\d/.test(normalizeDigits(raw)))return true;
   if(isInstructionLine(raw)||looksLikeFutureLocationInstruction(raw))return true;
@@ -440,8 +471,8 @@ function pickCustomerName(lines){
     const ws=n.split(/\s+/).filter(Boolean);
     if(ws.length<1||ws.length>4)return false;
 
-    // After the phone we are stricter: known places must not become names.
-    if(strictLocation && findBestPlaceRawOnly(raw))return false;
+    // A recognized place never becomes a customer name.
+    if(findBestPlaceRawOnly(raw))return false;
 
     return true;
   };
@@ -583,6 +614,8 @@ function classifyNoteLineMulti(line){
   // preserve the whole product description instead of deleting words.
   if(containsAny(n,PRODUCT_CORE_WORDS)){
     out.push({label:'الطلب',value:raw});
+    const size=(raw.match(/\b(?:xxxxl|xxxl|xxl|xl|xlarge|xlarg|x-large|large|medium|small|m|l|s)\b/i)||[])[0]||((n.match(/(?:اكس\s*لارج|لارج|ميديوم|سمول)/)||[])[0]||'');
+    if(size)out.push({label:'المقاس',value:size});
     return out;
   }
 
@@ -594,7 +627,7 @@ function classifyNoteLineMulti(line){
   const qty=extractQuantityText(raw);
   if(qty)out.push({label:'العدد',value:qty});
 
-  if(/مقاس|المقاس|قياس|سايز|السايز|size|\b(?:s|m|l|xl|xxl|xxxl|xxxxl)\b/i.test(raw)){
+  if(/مقاس|المقاس|قياس|سايز|السايز|size|xlarge|xlarg|x-large|اكس\s*لارج|\b(?:s|m|l|xl|xxl|xxxl|xxxxl)\b/i.test(raw)){
     out.push({label:'المقاس',value:raw});
   }
 
@@ -617,7 +650,7 @@ function classifyNoteLineMulti(line){
   }
 
   if(!colors.length && /^\s*\d+\s*(?:الوان|ألوان)\s*$/i.test(normalizeDigits(raw))){
-    out.push({label:'تفصيل',value:raw});
+    out.push({label:'الألوان',value:raw.replace(/([0-9٠-٩])(?=الوان|ألوان)/,'$1 ')});
   }
 
   if(out.length)return out;
@@ -643,6 +676,7 @@ function parseSmart(text){
   let area='';
   let address='';
   let amount='';
+  let priceInstruction='';
 
   // 1) Phones first. Exact duplicate phone is not treated as an extra number.
   const allPhones=[];
@@ -660,6 +694,7 @@ function parseSmart(text){
   for(let i=lines.length-1;i>=0;i--){
     if(isPriceLine(lines[i])){
       amount=priceFrom(lines[i]);
+      priceInstruction=instructionFromPriceLine(lines[i]);
       used.add(i);
       break;
     }
@@ -775,6 +810,9 @@ function parseSmart(text){
   };
 
   extraPhones.forEach((p,idx)=>pushNote(idx===0?'هاتف إضافي':'هاتف إضافي '+(idx+1),p));
+  if(priceInstruction)pushNote('ملاحظة مهمة',priceInstruction);
+  const hasProductLine=lines.some(x=>containsAny(normalizeArabic(x),PRODUCT_CORE_WORDS));
+  const hasExplicitPrice=lines.some(isPriceLine);
 
   for(let i=0;i<lines.length;i++){
     const line=lines[i];
@@ -803,8 +841,14 @@ function parseSmart(text){
       continue;
     }
 
+    const standaloneNumber=normalizeDigits(line).match(/^\s*(\d{2,3})\s*$/);
+    if(standaloneNumber&&hasProductLine&&hasExplicitPrice){
+      const value=Number(standaloneNumber[1]);
+      if(value>=40&&value<=200){pushNote('الوزن',standaloneNumber[1]);continue;}
+    }
     const items=classifyNoteLineMulti(line);
     items.forEach(item=>pushNote(item.label,item.value));
+    used.add(i);
   }
 
   // Final safety net: no customer instruction/detail may disappear.
@@ -2414,16 +2458,27 @@ async function storeShipmentsView(storeId){
     <div class="card">
       <div class="toolbar">
         <input id="storeShipmentQ" class="input" placeholder="كود / هاتف / اسم">
-        <select id="storeShipmentStatus" class="select">
-          <option value="">كل الحالات</option>
-          <option value="pending">قيد التوصيل</option>
-          <option value="delivered">تم الاستلام</option>
-          <option value="refused_fee_paid">رفض ودفع أجور</option>
-          <option value="refused_no_fee">رفض وعدم دفع أجور</option>
-          <option value="canceled_before_arrival">ملغي قبل الوصول</option>
-          <option value="partial">استلام جزئي</option>
-        </select>
-        <button id="storeShipmentSearch" class="btn btn-primary">بحث</button>
+        <button id="storeShipmentSearch" class="btn btn-primary">بحث وخيارات</button>
+      </div>
+      <div id="storeShipmentFilters" class="card hidden" style="margin:0 0 14px;padding:14px">
+        <div class="toolbar" style="margin:0">
+          <select id="storeShipmentStatus" class="select">
+            <option value="">كل حالات التوصيل</option>
+            <option value="pending">قيد التوصيل</option>
+            <option value="delivered">تم الاستلام</option>
+            <option value="delivered_adjusted">تم الاستلام وتعديل قيمة</option>
+            <option value="refused_fee_paid">رفض ودفع أجور</option>
+            <option value="refused_no_fee">رفض وعدم دفع أجور</option>
+            <option value="canceled_before_arrival">ملغي قبل الوصول</option>
+            <option value="partial">استلام جزئي</option>
+          </select>
+          <select id="storeShipmentPrinted" class="select">
+            <option value="">كل حالات الطباعة</option>
+            <option value="1">مطبوع</option>
+            <option value="0">غير مطبوع</option>
+          </select>
+          <button id="storeShipmentApply" class="btn btn-accent">عرض النتائج</button>
+        </div>
       </div>
       <div id="storeShipmentsTable"></div><div id="storeAccountingArea"></div>
     </div>`;
@@ -2433,12 +2488,18 @@ async function storeShipmentsView(storeId){
   const load=async()=>{
     const p=new URLSearchParams({store_id:String(storeId)});
     if($('#storeShipmentQ').value)p.set('q',$('#storeShipmentQ').value);
-    if($('#storeShipmentStatus').value)p.set('status',$('#storeShipmentStatus').value);
+    if($('#storeShipmentStatus')?.value)p.set('status',$('#storeShipmentStatus').value);
+    if($('#storeShipmentPrinted')?.value!=='')p.set('printed',$('#storeShipmentPrinted').value);
     const d=await api('/orders?'+p.toString());
     renderOrdersTable('#storeShipmentsTable',d.orders||[],false);
   };
 
-  $('#storeShipmentSearch').onclick=load;
+  $('#storeShipmentSearch').onclick=()=>{
+    $('#storeShipmentFilters').classList.toggle('hidden');
+    if(!$('#storeShipmentFilters').classList.contains('hidden'))$('#storeShipmentStatus').focus();
+  };
+  $('#storeShipmentApply').onclick=load;
+  $('#storeShipmentQ').onkeydown=e=>{if(e.key==='Enter')load()};
   await load();
 }
 
