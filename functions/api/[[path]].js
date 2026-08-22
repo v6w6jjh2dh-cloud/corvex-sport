@@ -135,20 +135,27 @@ async function ensureBusinessSchema(env) {
     PRIMARY KEY(actor_type,actor_id)
   )`).run();
 
-  // Keep the full supplied Jordan regions list installed automatically.
-  for(let gi=0;gi<DEFAULT_REGION_GROUPS.length;gi++){
-    const g=DEFAULT_REGION_GROUPS[gi];
-    await env.DB.prepare('INSERT OR IGNORE INTO region_groups(name,governorate,sort_order) VALUES(?,?,?)')
-      .bind(g.name,g.governorate,gi).run();
-    const gr=await env.DB.prepare('SELECT id FROM region_groups WHERE name=?').bind(g.name).first();
-    const gid=gr.id;
-    for(let ri=0;ri<g.regions.length;ri++){
-      await env.DB.prepare('INSERT OR IGNORE INTO regions(group_id,name,sort_order) VALUES(?,?,?)')
-        .bind(gid,g.regions[ri],ri).run();
+  // V26 performance: verify counts first; seed only if defaults are actually missing.
+  const expectedGroups = DEFAULT_REGION_GROUPS.length;
+  const expectedRegions = DEFAULT_REGION_GROUPS.reduce((n,g)=>n+g.regions.length,0);
+  const rgStats = await env.DB.prepare('SELECT COUNT(*) c FROM region_groups').first();
+  const rStats = await env.DB.prepare('SELECT COUNT(*) c FROM regions').first();
+
+  if(Number(rgStats?.c||0) < expectedGroups || Number(rStats?.c||0) < expectedRegions){
+    for(let gi=0;gi<DEFAULT_REGION_GROUPS.length;gi++){
+      const g=DEFAULT_REGION_GROUPS[gi];
+      await env.DB.prepare('INSERT OR IGNORE INTO region_groups(name,governorate,sort_order) VALUES(?,?,?)')
+        .bind(g.name,g.governorate,gi).run();
+      const gr=await env.DB.prepare('SELECT id FROM region_groups WHERE name=?').bind(g.name).first();
+      const gid=gr.id;
+      for(let ri=0;ri<g.regions.length;ri++){
+        await env.DB.prepare('INSERT OR IGNORE INTO regions(group_id,name,sort_order) VALUES(?,?,?)')
+          .bind(gid,g.regions[ri],ri).run();
+      }
     }
   }
 
-  // Standard fallback courier used when no courier has the detected region.
+  // Cheap fallback-courier check only.
   await env.DB.prepare(`INSERT INTO couriers(name,username,phone,address,delivered_commission,returned_commission,areas,notes,is_active)
     SELECT 'مندوب','','','','0','0','','مندوب افتراضي للتوزيع التلقائي',1
     WHERE NOT EXISTS (SELECT 1 FROM couriers WHERE name='مندوب')`).run();
