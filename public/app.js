@@ -788,112 +788,16 @@ function parseSmart(text){
     address='لا يوجد';
   }
 
-  // 6) Notes. Only extra phone(s), never primary phone or price.
+  // 6) Notes are copied as written. Do not add labels or reinterpret product details.
   const noteRows=[];
-  const noteSeen=new Set();
-  const colorSeen=new Set();
-  const pushNote=(label,value)=>{
-    let v=String(value||'').trim();
-    if(!v)return;
-
-    if(label==='اللون'){
-      const colors=actualColorsInLine(v);
-      const fresh=colors.filter(c=>!colorSeen.has(c));
-      fresh.forEach(c=>colorSeen.add(c));
-      if(colors.length){
-        if(!fresh.length)return;
-        v=fresh.join(' و ');
-      }
-    }
-
-    const key=label+'|'+normalizeArabic(v);
-    if(noteSeen.has(key))return;
-    noteSeen.add(key);
-    noteRows.push(`${label}: ${v}`);
-  };
-
-  extraPhones.forEach((p,idx)=>pushNote(idx===0?'هاتف إضافي':'هاتف إضافي '+(idx+1),p));
-  if(priceInstruction)pushNote('ملاحظة مهمة',priceInstruction);
-  const hasProductLine=lines.some(x=>containsAny(normalizeArabic(x),PRODUCT_CORE_WORDS));
-  const hasExplicitPrice=lines.some(isPriceLine);
-
-  for(let i=0;i<lines.length;i++){
-    const line=lines[i];
-
-    if(phoneFrom(line))continue;
-    if(name!=='لا يوجد' && line===name)continue;
-    if(isPriceLine(line))continue;
-    if(used.has(i))continue;
-
-    const n=normalizeArabic(line);
-
-    // Header "الألوان" by itself is not a color value.
-    if(/^(?:الوان|الالوان|اللون)$/.test(n)){
-      continue;
-    }
-
-    // WhatsApp instructions are always preserved and visually explicit.
-    if(hasWhatsappCue(line)){
-      pushNote('⚠️ واتساب',line);
-      continue;
-    }
-
-    // Instructions like "تعديل الألوان" stay as a note, never a name.
-    if(isInstructionLine(line)){
-      pushNote('ملاحظة',line);
-      continue;
-    }
-
-    const standaloneNumber=normalizeDigits(line).match(/^\s*(\d{2,3})\s*$/);
-    if(standaloneNumber&&hasProductLine&&hasExplicitPrice){
-      const value=Number(standaloneNumber[1]);
-      if(value>=40&&value<=200){pushNote('الوزن',standaloneNumber[1]);continue;}
-    }
-    const items=classifyNoteLineMulti(line);
-    items.forEach(item=>pushNote(item.label,item.value));
-    used.add(i);
-  }
-
-  // Final safety net: no customer instruction/detail may disappear.
-  // If the original line is not represented anywhere in the structured notes,
-  // preserve it as "ملاحظة" unless it was already consumed as name/phone/price/address.
-  const represented=()=>normalizeArabic(noteRows.join(' '));
+  extraPhones.forEach(p=>noteRows.push(p));
+  if(priceInstruction)noteRows.push(priceInstruction);
   for(let i=0;i<lines.length;i++){
     if(used.has(i))continue;
     const line=lines[i];
     if(phoneFrom(line)||isPriceLine(line))continue;
     if(name!=='لا يوجد'&&line===name)continue;
-
-    const n=normalizeArabic(line);
-    if(/^(?:الوان|الالوان|اللون)$/.test(n))continue;
-
-    const structured=classifyNoteLineMulti(line);
-    if(structured.some(x=>['الطلب','الوزن','الطول','المقاس','العدد','اللون','الموديل'].includes(x.label)))continue;
-
-    // Only preserve truly unstructured customer instructions/details.
-    const rep=represented();
-    const significant=n.split(/\s+/).filter(w=>w.length>2 && !['اللون','الوان','الالوان','وزن','الوزن','وزني','مقاس','المقاس'].includes(w));
-    if(significant.length && !significant.some(w=>rep.includes(w))){
-      pushNote('ملاحظة',line);
-    }
-  }
-
-  // Final English-text safety rule: if any English fragment from an unused customer line
-  // is not represented in the structured notes, preserve the full line clearly.
-  const notesNormEnglish=()=>noteRows.join(' ').toLowerCase();
-  for(let i=0;i<lines.length;i++){
-    if(used.has(i))continue;
-    const line=lines[i];
-    if(phoneFrom(line)||isPriceLine(line))continue;
-    if(name!=='لا يوجد'&&line===name)continue;
-
-    const eng=englishFragments(line);
-    if(!eng.length)continue;
-
-    const representedEnglish=eng.every(x=>notesNormEnglish().includes(String(x).toLowerCase()));
-    if(!representedEnglish){
-      pushNote('English',line);
-    }
+    noteRows.push(line);
   }
 
   return {name,phone,area,address,amount,notes:noteRows.join('\n')};
@@ -1805,9 +1709,9 @@ function labelHtml(o){
   const notesHtml=noteColumns.map(col=>`<div class="note-column">${col.map(line=>`<div class="note-line">${esc(line)}</div>`).join('')}</div>`).join('');
   const hasReturn=phraseMatch(normalizeArabic(String(o.order_notes||'')+' '+String(o.raw_text||'')),'تبديل');
   const returnAlert=hasReturn?'<div class="return-alert">⚠ يوجد مرتجع</div>':'';
-  return `<div class="label"><div class="label-head"><span class="label-code">#${o.order_code}</span><b class="label-brand">CORVEX SPORT</b><span class="label-spacer"></span></div><div class="recipient-date-row"><div><strong>المستلم:</strong> ${esc(o.recipient_name)}</div><strong class="delivery-date">${nextDeliveryDateLabel()}</strong></div><div><strong>الهاتف:</strong> ${esc(o.phone)}</div><div><strong>العنوان:</strong> ${esc(o.area)} ${esc(o.detailed_address)}</div><div><strong>القيمة:</strong> ${money(o.amount)} د.أ</div><div class="note" style="--note-cols:${Math.max(1,noteColumns.length)}">${notesHtml}</div>${returnAlert}</div>`;
+  return `<div class="label"><div class="label-head"><span class="label-code">#${o.order_code}</span><b class="label-brand">CORVEX SPORT</b><span class="label-spacer"></span></div><div class="label-store">اسم المتجر: ${esc(o.store_name||'—')}</div><div class="recipient-date-row"><div><strong>المستلم:</strong> ${esc(o.recipient_name)}</div><strong class="delivery-date">${nextDeliveryDateLabel()}</strong></div><div><strong>الهاتف:</strong> ${esc(o.phone)}</div><div><strong>العنوان:</strong> ${esc(o.area)} ${esc(o.detailed_address)}</div><div><strong>القيمة:</strong> ${money(o.amount)} د.أ</div><div class="note" style="--note-cols:${Math.max(1,noteColumns.length)}">${notesHtml}</div>${returnAlert}</div>`;
 }
-function openPrintWindow(orders,title='طباعة'){const w=window.open('','_blank');const pages=[];for(let i=0;i<orders.length;i+=8)pages.push(orders.slice(i,i+8));w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}body{margin:0;font-family:Tahoma,Arial,sans-serif}.page{width:200mm;height:287mm;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:3mm;page-break-after:always}.page:last-child{page-break-after:auto}.label{border:1px solid #555;padding:4mm;font-size:10.5pt;overflow:hidden}.label-head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-bottom:1px solid #999;padding-bottom:2mm;margin-bottom:2mm;font-size:12pt}.label-code{justify-self:start}.label-brand{justify-self:center;text-align:center}.label-spacer{justify-self:end}.recipient-date-row{display:flex;align-items:center;justify-content:space-between;gap:3mm}.delivery-date{direction:ltr;white-space:nowrap}.note{margin-top:1mm;border-top:1px dashed #aaa;padding-top:1mm;font-weight:700;display:grid;grid-template-columns:repeat(var(--note-cols),minmax(0,1fr));gap:2mm;line-height:1.22;word-break:break-word}.note-column{min-width:0}.note-column+.note-column{border-right:1px dotted #bbb;padding-right:2mm}.note-line{margin:0 0 .55mm}.return-alert{margin-top:1mm;padding:.8mm 1.5mm;border:2px solid #000;text-align:center;font-size:13pt;font-weight:900;background:#fff}</style></head><body>${pages.map(pg=>`<section class="page">${pg.map(labelHtml).join('')}</section>`).join('')}<script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);w.document.close()}
+function openPrintWindow(orders,title='طباعة'){const w=window.open('','_blank');const pages=[];for(let i=0;i<orders.length;i+=8)pages.push(orders.slice(i,i+8));w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}body{margin:0;font-family:Tahoma,Arial,sans-serif}.page{width:200mm;height:287mm;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:3mm;page-break-after:always}.page:last-child{page-break-after:auto}.label{border:1px solid #555;padding:4mm;font-size:10.5pt;overflow:hidden}.label-head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-bottom:1px solid #999;padding-bottom:2mm;margin-bottom:2mm;font-size:12pt}.label-code{justify-self:start}.label-brand{justify-self:center;text-align:center}.label-spacer{justify-self:end}.label-store{text-align:center;font-size:12pt;font-weight:900;margin:0 0 1mm;padding-bottom:1mm;border-bottom:1px solid #777}.recipient-date-row{display:flex;align-items:center;justify-content:space-between;gap:3mm}.delivery-date{direction:ltr;white-space:nowrap}.note{margin-top:1mm;border-top:1px dashed #aaa;padding-top:1mm;font-weight:700;display:grid;grid-template-columns:repeat(var(--note-cols),minmax(0,1fr));gap:2mm;line-height:1.22;word-break:break-word}.note-column{min-width:0}.note-column+.note-column{border-right:1px dotted #bbb;padding-right:2mm}.note-line{margin:0 0 .55mm}.return-alert{margin-top:1mm;padding:.8mm 1.5mm;border:2px solid #000;text-align:center;font-size:13pt;font-weight:900;background:#fff}</style></head><body>${pages.map(pg=>`<section class="page">${pg.map(labelHtml).join('')}</section>`).join('')}<script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);w.document.close()}
 async function batchesView(){
   const c=$('#content');
   const stores=await getActiveStores();
