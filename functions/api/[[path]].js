@@ -1123,7 +1123,7 @@ export async function onRequest(context) {
           method:'POST',
           headers:{'authorization':`Bearer ${env.OPENAI_API_KEY}`,'content-type':'application/json'},
           body:JSON.stringify({
-            model:env.OPENAI_MODEL || 'gpt-5-mini',
+            model:env.OPENAI_MODEL || 'gpt-5-nano',
             instructions, input:rawText,
             reasoning:{effort:'minimal'},
             text:{format:{type:'json_schema',name:'corvex_order',strict:true,schema}}
@@ -1160,7 +1160,7 @@ export async function onRequest(context) {
           parsed.detailed_address=[...localities,String(parsed.detailed_address||'')].filter(Boolean).join(' - ');
         }
       }
-      return json({parsed,model:data.model||env.OPENAI_MODEL||'gpt-5-mini',usage:data.usage||null});
+      return json({parsed,model:data.model||env.OPENAI_MODEL||'gpt-5-nano',usage:data.usage||null});
     }
 
     if (path === '/deleted-orders' && method === 'GET') {
