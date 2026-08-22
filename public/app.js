@@ -1152,7 +1152,7 @@ async function newOrder(){
 
   const fallbackCourier=couriers.find(x=>x.name==='مندوب')||null;
 
-  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">Smart Parser V60 • Safe Quantity + AI</div></div></div>
+  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">Smart Parser V61 • Stable Phone + Notes</div></div></div>
   <div class="card">
     <div class="store-picker-box">
       <div class="field">
@@ -1224,8 +1224,14 @@ async function newOrder(){
     const btn=$('#aiParse'),status=$('#aiParseStatus');
     btn.disabled=true;btn.textContent='جاري التحليل...';status.textContent='الذكاء الاصطناعي يحلل الطلب';
     try{
+      const local=parseSmart(text);
       const d=await api('/ai-parse-order',{method:'POST',body:JSON.stringify({text})});
-      applyParsedOrder(d.parsed||{});
+      const smart=d.parsed||{};
+      const localPhone=canonicalJordanPhone(local.phone||'');
+      const smartPhone=canonicalJordanPhone(smart.phone||'');
+      smart.phone=/^07\d{8}$/.test(localPhone)?localPhone:smartPhone;
+      smart.notes=local.notes||smart.notes||$('#notes').value||'';
+      applyParsedOrder(smart);
       status.textContent='تم التحليل الذكي — راجع البيانات قبل الحفظ';
       toast('تم التحليل الذكي');
     }catch(e){
