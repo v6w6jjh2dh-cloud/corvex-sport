@@ -421,21 +421,26 @@ export async function onRequest(context) {
       const from=(url.searchParams.get('from_date')||'').trim();
       const to=(url.searchParams.get('to_date')||'').trim();
       const storeId=Number(url.searchParams.get('store_id')||0);
+      const deliveryDateExpr=`CASE
+        WHEN strftime('%w',o.first_printed_at,'+3 hours')='4'
+          THEN date(o.first_printed_at,'+3 hours','+2 days')
+        ELSE date(o.first_printed_at,'+3 hours','+1 day')
+      END`;
       const where=["o.first_printed_at IS NOT NULL"];
       const params=[];
-      if(from){where.push("date(o.first_printed_at)>=date(?)");params.push(from)}
-      if(to){where.push("date(o.first_printed_at)<=date(?)");params.push(to)}
+      if(from){where.push(`${deliveryDateExpr}>=date(?)`);params.push(from)}
+      if(to){where.push(`${deliveryDateExpr}<=date(?)`);params.push(to)}
       if(storeId){where.push("o.store_id=?");params.push(storeId)}
 
       const rows=await env.DB.prepare(`SELECT
-        date(o.first_printed_at) print_date,
+        ${deliveryDateExpr} print_date,
         o.store_id,
         s.name store_name,
         COUNT(*) orders_count
         FROM orders o
         LEFT JOIN stores s ON s.id=o.store_id
         WHERE ${where.join(' AND ')}
-        GROUP BY date(o.first_printed_at),o.store_id,s.name
+        GROUP BY ${deliveryDateExpr},o.store_id,s.name
         ORDER BY print_date DESC,orders_count DESC`).bind(...params).all();
 
       const total=await env.DB.prepare(`SELECT COUNT(*) c FROM orders o WHERE ${where.join(' AND ')}`).bind(...params).first();
