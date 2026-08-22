@@ -1803,9 +1803,11 @@ function labelHtml(o){
   const noteColumns=[];
   for(let i=0;i<noteLines.length;i+=6)noteColumns.push(noteLines.slice(i,i+6));
   const notesHtml=noteColumns.map(col=>`<div class="note-column">${col.map(line=>`<div class="note-line">${esc(line)}</div>`).join('')}</div>`).join('');
-  return `<div class="label"><div class="label-head"><span class="label-code">#${o.order_code}</span><b class="label-brand">CORVEX SPORT</b><span class="label-spacer"></span></div><div class="recipient-date-row"><div><strong>المستلم:</strong> ${esc(o.recipient_name)}</div><strong class="delivery-date">${nextDeliveryDateLabel()}</strong></div><div><strong>الهاتف:</strong> ${esc(o.phone)}</div><div><strong>العنوان:</strong> ${esc(o.area)} ${esc(o.detailed_address)}</div><div><strong>القيمة:</strong> ${money(o.amount)} د.أ</div><div class="note" style="--note-cols:${Math.max(1,noteColumns.length)}">${notesHtml}</div></div>`;
+  const hasReturn=phraseMatch(normalizeArabic(String(o.order_notes||'')+' '+String(o.raw_text||'')),'تبديل');
+  const returnAlert=hasReturn?'<div class="return-alert">⚠ يوجد مرتجع</div>':'';
+  return `<div class="label"><div class="label-head"><span class="label-code">#${o.order_code}</span><b class="label-brand">CORVEX SPORT</b><span class="label-spacer"></span></div><div class="recipient-date-row"><div><strong>المستلم:</strong> ${esc(o.recipient_name)}</div><strong class="delivery-date">${nextDeliveryDateLabel()}</strong></div><div><strong>الهاتف:</strong> ${esc(o.phone)}</div><div><strong>العنوان:</strong> ${esc(o.area)} ${esc(o.detailed_address)}</div><div><strong>القيمة:</strong> ${money(o.amount)} د.أ</div><div class="note" style="--note-cols:${Math.max(1,noteColumns.length)}">${notesHtml}</div>${returnAlert}</div>`;
 }
-function openPrintWindow(orders,title='طباعة'){const w=window.open('','_blank');const pages=[];for(let i=0;i<orders.length;i+=8)pages.push(orders.slice(i,i+8));w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}body{margin:0;font-family:Tahoma,Arial,sans-serif}.page{width:200mm;height:287mm;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:3mm;page-break-after:always}.page:last-child{page-break-after:auto}.label{border:1px solid #555;padding:4mm;font-size:10.5pt;overflow:hidden}.label-head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-bottom:1px solid #999;padding-bottom:2mm;margin-bottom:2mm;font-size:12pt}.label-code{justify-self:start}.label-brand{justify-self:center;text-align:center}.label-spacer{justify-self:end}.recipient-date-row{display:flex;align-items:center;justify-content:space-between;gap:3mm}.delivery-date{direction:ltr;white-space:nowrap}.note{margin-top:1mm;border-top:1px dashed #aaa;padding-top:1mm;font-weight:700;display:grid;grid-template-columns:repeat(var(--note-cols),minmax(0,1fr));gap:2mm;line-height:1.22;word-break:break-word}.note-column{min-width:0}.note-column+.note-column{border-right:1px dotted #bbb;padding-right:2mm}.note-line{margin:0 0 .55mm}</style></head><body>${pages.map(pg=>`<section class="page">${pg.map(labelHtml).join('')}</section>`).join('')}<script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);w.document.close()}
+function openPrintWindow(orders,title='طباعة'){const w=window.open('','_blank');const pages=[];for(let i=0;i<orders.length;i+=8)pages.push(orders.slice(i,i+8));w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}body{margin:0;font-family:Tahoma,Arial,sans-serif}.page{width:200mm;height:287mm;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:3mm;page-break-after:always}.page:last-child{page-break-after:auto}.label{border:1px solid #555;padding:4mm;font-size:10.5pt;overflow:hidden}.label-head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-bottom:1px solid #999;padding-bottom:2mm;margin-bottom:2mm;font-size:12pt}.label-code{justify-self:start}.label-brand{justify-self:center;text-align:center}.label-spacer{justify-self:end}.recipient-date-row{display:flex;align-items:center;justify-content:space-between;gap:3mm}.delivery-date{direction:ltr;white-space:nowrap}.note{margin-top:1mm;border-top:1px dashed #aaa;padding-top:1mm;font-weight:700;display:grid;grid-template-columns:repeat(var(--note-cols),minmax(0,1fr));gap:2mm;line-height:1.22;word-break:break-word}.note-column{min-width:0}.note-column+.note-column{border-right:1px dotted #bbb;padding-right:2mm}.note-line{margin:0 0 .55mm}.return-alert{margin-top:1mm;padding:.8mm 1.5mm;border:2px solid #000;text-align:center;font-size:13pt;font-weight:900;background:#fff}</style></head><body>${pages.map(pg=>`<section class="page">${pg.map(labelHtml).join('')}</section>`).join('')}<script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);w.document.close()}
 async function batchesView(){
   const c=$('#content');
   const stores=await getActiveStores();
@@ -2161,6 +2163,16 @@ async function reportsView(){
           <option value="">كل المتاجر</option>
           ${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}
         </select>
+        <select id="reportStatus" class="select">
+          <option value="">كل حالات الطلب</option>
+          <option value="pending">قيد التوصيل</option>
+          <option value="delivered">تم الاستلام</option>
+          <option value="delivered_adjusted">تم الاستلام وتعديل قيمة</option>
+          <option value="refused_fee_paid">رفض ودفع أجور</option>
+          <option value="refused_no_fee">رفض وعدم دفع أجور</option>
+          <option value="canceled_before_arrival">ملغي قبل الوصول</option>
+          <option value="partial">استلام جزئي</option>
+        </select>
         <input id="fd" type="date" class="input">
         <input id="td" type="date" class="input">
         <button id="rr" class="btn btn-primary">عرض</button>
@@ -2172,7 +2184,7 @@ async function reportsView(){
 
     <div class="card outgoing-report-card">
       <h3>الشحنات الخارجة حسب الطباعة</h3>
-      <div class="sub">كل طلب يُحسب مرة واحدة فقط بتاريخ أول طباعة له</div>
+      <div class="sub">كل طلب يُحسب مرة واحدة بتاريخ جولة التوصيل: اليوم التالي، والخميس للسبت</div>
 
       <div class="toolbar">
         <select id="outgoingStore" class="select">
@@ -2198,6 +2210,7 @@ async function reportsView(){
   async function load(){
     const p=new URLSearchParams({from_date:$('#fd').value,to_date:$('#td').value});
     if($('#reportStore').value)p.set('store_id',$('#reportStore').value);
+    if($('#reportStatus').value)p.set('status',$('#reportStatus').value);
     const d=await api('/orders?'+p);
     state.orders=d.orders;
     renderOrdersTable('#reportTable',state.orders,false);
@@ -2229,6 +2242,7 @@ async function reportsView(){
   $('#rp').onclick=()=>printReport(state.orders);
   $('#rx').onclick=()=>downloadCsv(state.orders);
   $('#reportStore').onchange=load;
+  $('#reportStatus').onchange=load;
 
   $('#outgoingLoad').onclick=loadOutgoing;
   $('#outgoingStore').onchange=loadOutgoing;
@@ -2245,8 +2259,8 @@ async function reportsView(){
   await load();
   await loadOutgoing();
 }
-function printReport(orders){const w=window.open('','_blank');w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>كشف CORVEX SPORT</title><style>@page{size:A4 landscape;margin:8mm}body{font-family:Tahoma,Arial}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aaa;padding:5px;text-align:right}h2{margin:0 0 10px}</style></head><body><h2>كشف طلبات CORVEX SPORT</h2><table><thead><tr><th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr><td>${o.order_code}</td><td>${esc(o.store_name||'—')}</td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}</td><td>${esc(o.detailed_address)}</td><td>${money(o.amount)}</td><td>${esc(o.order_notes)}</td><td>${esc(o.created_by_name||'')}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()}
-function downloadCsv(orders){const rows=[['رقم البوليصة','المتجر','اسم المستلم','رقم الهاتف','المحافظة','العنوان التفصيلي','قيمة الطرد','ملاحظات الطلب','الموظف','تاريخ الإدخال'],...orders.map(o=>[o.order_code,o.store_name||'',o.recipient_name,o.phone,o.area,o.detailed_address,o.amount,o.order_notes,o.created_by_name||'',o.created_at])];const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`corvex-orders-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(a.href)}
+function printReport(orders){const w=window.open('','_blank');w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>كشف CORVEX SPORT</title><style>@page{size:A4 landscape;margin:8mm}body{font-family:Tahoma,Arial}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aaa;padding:5px;text-align:right}h2{margin:0 0 10px}</style></head><body><h2>كشف طلبات CORVEX SPORT</h2><table><thead><tr><th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th><th>القيمة</th><th>الحالة</th><th>الملاحظات</th><th>الموظف</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr><td>${o.order_code}</td><td>${esc(o.store_name||'—')}</td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}</td><td>${esc(o.detailed_address)}</td><td>${money(o.amount)}</td><td>${esc(DELIVERY_STATUS_LABELS[o.delivery_status||'pending']||o.delivery_status||'')}</td><td>${esc(o.order_notes)}</td><td>${esc(o.created_by_name||'')}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()}
+function downloadCsv(orders){const rows=[['رقم البوليصة','المتجر','اسم المستلم','رقم الهاتف','المحافظة','العنوان التفصيلي','قيمة الطرد','حالة الطلب','ملاحظات الطلب','الموظف','تاريخ الإدخال'],...orders.map(o=>[o.order_code,o.store_name||'',o.recipient_name,o.phone,o.area,o.detailed_address,o.amount,DELIVERY_STATUS_LABELS[o.delivery_status||'pending']||o.delivery_status||'',o.order_notes,o.created_by_name||'',o.created_at])];const csv='\\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`corvex-orders-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(a.href)}
 
 
 async function couriersView(){
