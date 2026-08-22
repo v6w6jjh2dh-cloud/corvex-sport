@@ -68,7 +68,7 @@ function normalizeArabic(v=''){
 
 const COMMON_NAMES = new Set(`
 محمد احمد محمود مصطفى عبدالله عبدالرحمن ابراهيم اسماعيل يوسف يزن ياسين ياسر عمر عثمان علي حسن حسين حسام حمزة خالد خليل رائد رامي سامر سامي سائد سعيد سعد سيف سلطان سليمان شادي شاهر شريف صفوان طارق طلال عادل عدي عدنان عمار عامر علاء عيسى غسان فادي فارس فراس فيصل قيس كريم كرم لؤي ليث ماهر مازن مالك مراد معاذ معن موسى مؤمن ناصر نايف هاني هيثم وائل وسام وسيم وليد زيد زياد زكريا بهاء براء بشار بلال تامر تيم جمال جميل جهاد جواد حاتم حارث ربيع ركان رعد سفيان شاكر ادم ايهم امجد انس اياد ايمن اشرف اكرم نور
-فاطمة مريم سارة هبة اية لين ليان لجين جنى جود رنا رانيا ريهام ريم روان رولا ربى زينب زينة زهراء سمر سما سمية سناء سوسن شذى شهد شيماء صفاء ضحى عبير عائشة علا غدير فرح كندة لمى لانا لارا ليلى لينا ميس نادين نسرين نهى هناء هيا يارا ياسمين تالا تيا حلا حنان خلود دانا دعاء ديمة راما رند ريتال بيان بسمة بشرى اسراء ايمان امل ابتسام
+فاطمة مريم سارة هبة اية لين ليان لجين جنى جود رنا رانيا ريهام ريم روان رولا ربى زينب زينة زهراء سمر سما سمية سناء سوسن شذى شهد شيماء صفاء ضحى عبير عائشة علا غدير فرح كندة لمى لانا لارا ليلى لينا ميس نادين نسرين نهى هناء هيا يارا ياسمين تالا تيا حلا حنان خلود دانا دعاء ديمة راما رند ريتال بيان بسمة بشرى اسراء ايمان امل ابتسام اسمهان
 `.trim().split(/\s+/).map(normalizeArabic));
 
 const JORDAN_GOVERNORATES = {
@@ -117,7 +117,7 @@ const JORDAN_PLACES = [...PLACE_TO_GOV.keys()].sort((a,b)=>{
 });
 
 const ADDRESS_WORDS = [
-  'بجانب','جنب','قرب','مقابل','خلف','امام','شارع','دوار','حي','حاره','اشاره',
+  'بجانب','جنب','قرب','مقابل','خلف','امام','شارع','دوار','حي','حاره','اشاره','موقع','الموقع','المكان','عنوان','العنوان','عنواني','سكان','ساكن',
   'مسجد','مدرسه','جامعه','مجمع','سوق','مخيم','اسكان','عماره','بنايه','صيدليه',
   'مستشفى','مول','فرع','السابع','الثامن','السادس','الرابع','الثالث','الاول'
 ].map(normalizeArabic);
@@ -125,7 +125,7 @@ const ADDRESS_WORDS = [
 const PRODUCT_WORDS = [
   'قطعه','قطع','قطعتين','بلايز','بلوز','بلوزه','تيشيرت','تيشيرتات','تشيرت','بولو',
   'تريننغ','طقم','اطقم','بنطلون','بناطيل','شورت','بيجاما','جاكيت','هودي','قميص',
-  'فستان','عبايه','تنوره','جينز','رياضه','سحاب','ريبوك','نايك','اديداس','بوما','زارا'
+  'فستان','عبايه','تنوره','جينز','رياضه','سحاب','جيوب','جيب','بزرار','بزار','ريبوك','نايك','اديداس','بوما','زارا'
 ].map(normalizeArabic);
 
 const DETAIL_WORDS = [
@@ -137,6 +137,64 @@ const DETAIL_WORDS = [
 const PRICE_WORDS = [
   'شامل التوصيل','مع التوصيل','السعر','سعر','المجموع','دينار','د.ا','jd','jod'
 ].map(normalizeArabic);
+
+
+const PARSER_INSTRUCTION_WORDS = [
+  'تعديل','غير','تغيير','تصحيح','ملاحظه','ملاحظة','تنبيه','رجاء','يرجى',
+  'استلام','توصيل','اتصال','اتصل','خصم','بدي','عاوز','اريد','أريد','طلب','تبديل','استبدال','مرتجع','ارجاع','إرجاع'
+].map(normalizeArabic);
+
+const COLOR_WORDS_V38 = [
+  'اسود','ابيض','زيتي','زيتوني','اخضر','ازرق','احمر','زهري','وردي','رمادي',
+  'رصاصي','سكني','كحلي','بني','بيج','خمري','عنابي','موف','بنفسجي','اصفر',
+  'برتقالي','سكري','اوف وايت','اوفويت','سماوي','تركواز','فضي','ذهبي','ماروني',
+  'نبيتي','كاكي','فستقي','نيلي','اورانج','برتقالي'
+].map(normalizeArabic);
+
+function phraseMatch(text, phrase){
+  const n=' '+normalizeArabic(text)+' ';
+  const p=' '+normalizeArabic(phrase)+' ';
+  return !!normalizeArabic(phrase) && n.includes(p);
+}
+
+function containsPhraseFrom(text, list){
+  return list.some(x=>phraseMatch(text,x));
+}
+
+function actualColorsInLine(line){
+  const n=normalizeArabic(String(line||''));
+  const tokens=n.split(/\s+/).filter(Boolean);
+  const normalizedTokens=new Set();
+  for(const t of tokens){
+    normalizedTokens.add(t);
+    let x=t;
+    if(x.startsWith('و')&&x.length>2)x=x.slice(1);
+    normalizedTokens.add(x);
+    if(x.startsWith('ال')&&x.length>3)normalizedTokens.add(x.slice(2));
+  }
+
+  return COLOR_WORDS_V38.filter(c=>{
+    if(c.includes(' '))return phraseMatch(n,c)||phraseMatch(n,'و'+c);
+    return phraseMatch(n,c)||normalizedTokens.has(c)||normalizedTokens.has('ال'+c);
+  });
+}
+
+function isQuantityLine(line){
+  const n=normalizeArabic(String(line||''));
+  return /\b\d+\s*(?:قطعه|قطع)\b/.test(n) ||
+    /(?:قطعه|قطعة)\s*(?:واحده|واحدة)/.test(n) ||
+    /(?:قطعتين|ثلاث\s+قطع|ثلاثه\s+قطع|ثلاثة\s+قطع|اربع\s+قطع|اربعه\s+قطع|أربع\s+قطع|خمس\s+قطع|سته\s+قطع|ست\s+قطع)/.test(n);
+}
+
+function isHeightLine(line){
+  const n=normalizeArabic(String(line||''));
+  return /(?:الطول|طولي|طوله|طول)\s*\d+/.test(n);
+}
+
+function isInstructionLine(line){
+  const n=normalizeArabic(String(line||''));
+  return PARSER_INSTRUCTION_WORDS.some(w=>phraseMatch(n,w));
+}
 
 function containsAny(n, words){
   return words.some(w => n.includes(w));
@@ -164,18 +222,108 @@ function priceFrom(line){
   return nums.length ? nums[nums.length - 1] : '';
 }
 
+
+const SHIPPING_ALIASES = {"عمان":["اسكان الكهرباء","إسكان الكهرباء","بسمان","بدر نزال","زهران","اليرموك","طارق","وادي السير","أحد","احد","حي رغدان","حي المدرج","حي الصالحين","الغروس","ام الاسود","أم الأسود","السويسة","الرباحية","زبدا","الرواق","الجرن","حي الرواق","حي الجرن","الخشافية الشمالية","الدبابية","المناخر","قاعفور","البيضا","رميدان","المدونة","حسبان","ناعور"],"الزرقاء":["الهاشمية الزرقاء","بيرين الزرقاء","الضليل الزرقاء","الأزرق","الازرق"],"إربد":["الرمثا","الشونة الشمالية","دير أبي سعيد","دير ابي سعيد","الطيبة إربد","الطيبة اربد","الشجرة الرمثا","الطرة الرمثا","سحم الكفارات","سحم الكفارات إربد"],"البلقاء":["دير علا","ديرعلا","الشونة الجنوبية","العارضة السلط","زي السلط","عيرا السلط","يرقا السلط"],"الكرك":["مؤتة","مؤته","الثنية الكرك","الربة","الربه","فقوع","عي","غور المزرعة","غور المزرعه"],"معان":["الحسينية معان","الحسينيه معان","الجفر","اذرح","أذرح","الطيبة البترا","الطيبه البترا"],"المفرق":["أم الجمال","ام الجمال","رحاب المفرق","منشية بني حسن","منشيه بني حسن","سما السرحان","صبحا المفرق"],"الطفيلة":["بصيرا","بصيرة","القادسية الطفيلة","القادسيه الطفيله","الحسا الطفيلة","الحسا الطفيله"],"مأدبا":["مادبا","مأدبا","ماعين مادبا","مليح مادبا","ذيبان مادبا","الفيصلية مادبا","الفيصليه مادبا"],"جرش":["سوف جرش","ساكب جرش","برما جرش","المصطبة جرش","المصطبه جرش","قفقفا جرش","الكته","الكتة جرش"],"عجلون":["كفرنجا","كفرنجة","عنجرة عجلون","عبين عجلون","عبلين","راسون","صخرة عجلون","صخره عجلون"],"العقبة":["القويرة","القويره","الديسة","الديسي","وادي رم","وادي عربة العقبة","وادي عربه العقبه"]};
+
+
+const EXPLICIT_GOVERNORATES = [
+  ['عمان',['عمان','عمّان']],
+  ['الزرقاء',['الزرقاء']],
+  ['إربد',['إربد','اربد']],
+  ['المفرق',['المفرق']],
+  ['السلط',['السلط']],
+  ['البلقاء',['البلقاء']],
+  ['الكرك',['الكرك']],
+  ['الطفيلة',['الطفيلة','الطفيله']],
+  ['معان',['معان']],
+  ['العقبة',['العقبة','العقبه']],
+  ['مأدبا',['مأدبا','مادبا']],
+  ['جرش',['جرش']],
+  ['عجلون',['عجلون']]
+];
+
+
+const PRIORITY_LOCAL_ALIASES = [
+  ['الزرقاء',['جبل فيصل','ضاحية الأمير حسن','ضاحية الامير حسن','الازرق الشمالي','الأزرق الشمالي','عوجان الرصيفه','عوجان الرصيفة','الرصيفه','الرصيفة']],
+  ['عمان',['سحاب','القويسمة','القويسمه','شارع الإذاعة والتلفزيون','شارع الاذاعه والتلفزيون','شارع الاذاعة والتلفزيون','شارع الاذاعه و التلفزيون','شارع الاذاعة و التلفزيون','ناعور','اسكان الكهرباء','إسكان الكهرباء']],
+  ['جرش',['مخيم جرش','مخيم غزة','مخيم غزه']],
+  ['إربد',['ارحابا','إرحابا','الأغوار الشمالية','الاغوار الشمالية','الأغوار الشمالي','الاغوار الشمالي']],
+  ['السلط',['السلط','صبيحي','الصبيحي']],
+  ['عمان',['الدوار الثامن','دوار الثامن','الثامن','الدوار السابع','دوار السابع','السابع','الدوار السادس','دوار السادس','السادس','الدوار الخامس','دوار الخامس','الخامس','الدوار الرابع','دوار الرابع','الرابع','الدوار الثالث','دوار الثالث','الثالث','الدوار الثاني','دوار الثاني','الثاني','الدوار الأول','دوار الاول','دوار الأول','الاول','الأول']]
+];
+
+function priorityLocalMatch(line){
+  const n=normalizeArabic(String(line||''));
+  let best=null;
+  for(const [gov,names] of PRIORITY_LOCAL_ALIASES){
+    for(const raw of names){
+      const a=normalizeArabic(raw);
+      if(a && phraseMatch(n,a) && (!best || a.length>best.alias.length)){
+        best={governorate:gov,alias:a,raw};
+      }
+    }
+  }
+  return best;
+}
+
+function explicitGovernorateMatch(line){
+  const n=normalizeArabic(String(line||''));
+  const compact=n.replace(/\s+/g,'');
+  let best=null;
+  for(const [gov,names] of EXPLICIT_GOVERNORATES){
+    for(const raw of names){
+      const a=normalizeArabic(raw);
+      const ac=a.replace(/\s+/g,'');
+      const normalHit=phraseMatch(n,a);
+      const gluedHit=ac.length>=4 && compact.includes(ac);
+      if((normalHit||gluedHit) && (!best || a.length>best.alias.length)){
+        best={governorate:gov,alias:a,raw};
+      }
+    }
+  }
+  return best;
+}
+
+function shippingAliasMatch(line){
+  const n=normalizeArabic(String(line||''));
+  let best=null;
+  for(const [gov,names] of Object.entries(SHIPPING_ALIASES)){
+    for(const raw of names){
+      const a=normalizeArabic(raw);
+      if(a && phraseMatch(n,a) && (!best || a.length>best.alias.length)){
+        best={alias:a,governorate:gov,raw};
+      }
+    }
+  }
+  return best;
+}
+
 function findBestPlace(line){
+  const priorityLocal=priorityLocalMatch(line);
+  if(priorityLocal){
+    return {place:priorityLocal.alias,governorate:priorityLocal.governorate,words:priorityLocal.alias.split(/\s+/).length,chars:priorityLocal.alias.length,isGovernorateName:false};
+  }
+
+  const explicitGov=explicitGovernorateMatch(line);
+  if(explicitGov){
+    return {place:explicitGov.alias,governorate:explicitGov.governorate,words:explicitGov.alias.split(/\s+/).length,chars:explicitGov.alias.length,isGovernorateName:true};
+  }
+
+  const aliasHit=shippingAliasMatch(line);
+  if(aliasHit){
+    return {place:aliasHit.alias,governorate:aliasHit.governorate,words:aliasHit.alias.split(/\s+/).length,chars:aliasHit.alias.length,isGovernorateName:false};
+  }
   const n=normalizeArabic(line);
   const matches=[];
   const dyn=state.dynamicPlaces||[];
   for(const p of dyn){
-    if(n.includes(p)){
+    if(phraseMatch(n,p)){
       const gov=state.dynamicPlaceToGov.get(p)||'';
       matches.push({place:p,governorate:gov,words:p.split(/\s+/).length,chars:p.length,isGovernorateName:p===normalizeArabic(gov)});
     }
   }
   for(const p of JORDAN_PLACES){
-    if(n.includes(p)){
+    if(phraseMatch(n,p)){
       const gov=PLACE_TO_GOV.get(p)||'';
       matches.push({place:p,governorate:gov,words:p.split(/\s+/).length,chars:p.length,isGovernorateName:p===normalizeArabic(gov)});
     }
@@ -190,6 +338,24 @@ function findBestPlace(line){
 }
 
 function splitAreaAddress(line){
+  const rawLine=String(line||'').trim();
+  const rawNorm=normalizeArabic(rawLine);
+  const hasAddressPrefix=/^(?:سكان|ساكن|ساكنه|ساكنة|عنواني|العنوان|عنوان|المكان|موقع|الموقع)\b/.test(rawNorm);
+
+  const priorityLocal=priorityLocalMatch(line);
+  if(priorityLocal){
+    return {area:priorityLocal.governorate,address:String(line||'').trim()};
+  }
+
+  const explicitGov=explicitGovernorateMatch(line);
+  if(explicitGov){
+    return {area:explicitGov.governorate,address:String(line||'').trim()};
+  }
+
+  const aliasHit=shippingAliasMatch(line);
+  if(aliasHit){
+    return {area:aliasHit.governorate,address:String(line||'').trim()};
+  }
   const original = String(line).trim();
   const hit = findBestPlace(original);
 
@@ -210,223 +376,480 @@ function isLikelyProductOrDetail(line){
   return false;
 }
 
-function isLikelyName(line, index){
-  if(!/[\u0600-\u06FF]/.test(String(line))) return false;
-  if(/\d/.test(normalizeDigits(line))) return false;
-  if(phoneFrom(line)) return false;
-  if(isPriceLine(line)) return false;
-  if(isLikelyProductOrDetail(line)) return false;
-  if(isColorLine(line)) return false;
-  if(findBestPlace(line)) return false;
 
-  const n = normalizeArabic(line);
-  const ws = n.split(/\s+/).filter(Boolean);
-  if(ws.length < 1 || ws.length > 4) return false;
+function hasStrongAddressCue(line){
+  const n=normalizeArabic(String(line||''));
+  if(/^(?:سكان|ساكن|ساكنه|ساكنة|عنواني|العنوان|عنوان|المكان|موقع|الموقع|المنطقه|المنطقة)\b/.test(n))return true;
+  return ADDRESS_WORDS.some(w=>phraseMatch(n,w));
+}
 
-  if(ws[0] === 'ابو' || ws[0] === 'ام') return true;
-  if(COMMON_NAMES.has(ws[0])) return true;
+function looksLikeFutureLocationInstruction(line){
+  const n=normalizeArabic(String(line||''));
+  return /(?:يبعث|يبعت|يعطي|ابعت|ابعث).*(?:لوكيشن|الوكيشن|موقع)/.test(n) ||
+    /(?:لوكيشن|الوكيشن).*(?:لاحقا|بعدين|بعدها)/.test(n);
+}
 
-  // إذا أول سطر عربي قصير وليس مكان/منتج نعتبره اسمًا
-  if(index === 0 && ws.length <= 3) return true;
+
+function findBestPlaceRawOnly(line){
+  const n=normalizeArabic(String(line||''));
+  const candidates=[];
+  for(const p of (state.dynamicPlaces||[])){
+    if(phraseMatch(n,p))candidates.push(p);
+  }
+  for(const p of JORDAN_PLACES){
+    if(phraseMatch(n,p))candidates.push(p);
+  }
+  return candidates.some(p=>String(p).length>=4);
+}
+
+
+function isHardNonNameLine(line){
+  const raw=String(line||'').trim();
+  const n=normalizeArabic(raw);
+
+  if(!raw)return true;
+  if(phoneFrom(raw)||isPriceLine(raw))return true;
+  if(/\d/.test(normalizeDigits(raw)))return true;
+  if(isInstructionLine(raw)||looksLikeFutureLocationInstruction(raw))return true;
+
+  if(/^(?:سكان|ساكن|ساكنه|ساكنة|عنواني|العنوان|عنوان|المكان|موقع|الموقع|المنطقه|المنطقة|طلب|تبديل|استبدال|مرتجع|ارجاع|إرجاع)\b/.test(n))return true;
+
+  if(containsAny(n,PRODUCT_WORDS))return true;
+  if(isQuantityLine(raw)||isHeightLine(raw))return true;
+
+  if(/(?:وزن|الوزن|وزني|وزنه|الطول|طولي|مقاس|المقاس|قياس|سايز|السايز|size|لون|اللون|الوان|الالوان|ترند|موديل|عرض)/i.test(n))return true;
+
+  // Strong operational location signals are never names.
+  if(priorityLocalMatch(raw)||explicitGovernorateMatch(raw)||shippingAliasMatch(raw))return true;
+  if(ADDRESS_WORDS.some(w=>phraseMatch(n,w)))return true;
 
   return false;
 }
 
+function pickCustomerName(lines){
+  const phoneIndexes=[];
+  for(let i=0;i<lines.length;i++){
+    if(phoneFrom(lines[i]))phoneIndexes.push(i);
+  }
+  const firstPhone=phoneIndexes.length?phoneIndexes[0]:-1;
+
+  const valid=(i,strictLocation)=>{
+    const raw=String(lines[i]||'').trim();
+    const n=normalizeArabic(raw);
+    if(isHardNonNameLine(raw))return false;
+    const ws=n.split(/\s+/).filter(Boolean);
+    if(ws.length<1||ws.length>4)return false;
+
+    // After the phone we are stricter: known places must not become names.
+    if(strictLocation && findBestPlaceRawOnly(raw))return false;
+
+    return true;
+  };
+
+  // Rule 1: Prefer the nearest valid Arabic line BEFORE the first phone.
+  // This correctly locks: محمد / مهند / رامي / ليث / اسمهان حيمور / حسام محمود بني عامر.
+  if(firstPhone>0){
+    for(let i=firstPhone-1;i>=0 && i>=firstPhone-4;i--){
+      if(valid(i,false))return {name:lines[i],index:i};
+    }
+  }
+
+  // Rule 2: If there is no name before the phone, search only a short window after it,
+  // with strict location rejection.
+  if(firstPhone>=0){
+    for(let i=firstPhone+1;i<lines.length && i<=firstPhone+3;i++){
+      if(valid(i,true))return {name:lines[i],index:i};
+    }
+  }
+
+  // Rule 3: No phone case: only the first few lines and strict location checks.
+  for(let i=0;i<Math.min(lines.length,4);i++){
+    if(valid(i,true))return {name:lines[i],index:i};
+  }
+
+  return {name:'',index:-1};
+}
+
+function isLikelyName(line,index,lines=[]){
+  const raw=String(line||'').trim();
+  const n=normalizeArabic(raw);
+  if(!/[\u0600-\u06FF]/.test(raw))return false;
+  if(/\d/.test(normalizeDigits(raw)))return false;
+  if(phoneFrom(raw)||isPriceLine(raw))return false;
+  if(isInstructionLine(raw)||looksLikeFutureLocationInstruction(raw))return false;
+
+  const ws=n.split(/\s+/).filter(Boolean);
+  if(ws.length<1||ws.length>4)return false;
+
+  const hardAddress=/^(?:سكان|ساكن|ساكنه|ساكنة|عنواني|العنوان|عنوان|المكان|موقع|الموقع)\b/.test(n);
+  const hardOperation=/^(?:طلب|تبديل|استبدال|مرتجع|ارجاع)\b/.test(n);
+  if(hardAddress||hardOperation)return false;
+  if(containsAny(n,PRODUCT_WORDS))return false;
+  if(/وزن|الوزن|وزني|مقاس|المقاس|قياس|الطول|طولي|ترند|موديل|عرض/.test(n))return false;
+
+  // Strong known shipping location always wins.
+  if(priorityLocalMatch(raw)||explicitGovernorateMatch(raw)||shippingAliasMatch(raw)||findBestPlaceRawOnly(raw))return false;
+
+  let phoneDistance=99;
+  for(let i=0;i<lines.length;i++){
+    if(phoneFrom(lines[i]))phoneDistance=Math.min(phoneDistance,Math.abs(i-index));
+  }
+
+  // Names are context-driven, not dictionary-driven. Color-like family words such as "بني"
+  // do not disqualify a multi-word person name beside the phone.
+  if(ws.length===1)return index<=2||phoneDistance<=2;
+  return index<=4||phoneDistance<=3;
+}
+
 
 function isColorLine(line){
+  return actualColorsInLine(line).length>0;
+}
+
+
+const QUANTITY_ONLY_WORDS = new Set(['قطعه','قطع','قطعتين'].map(normalizeArabic));
+const PRODUCT_CORE_WORDS = PRODUCT_WORDS.filter(w=>!QUANTITY_ONLY_WORDS.has(w));
+
+function firstNumberNearWord(line,wordRegex){
+  const s=normalizeDigits(String(line||''));
+  const after=s.match(new RegExp('(?:'+wordRegex+')\\s*(?:[:=-]?\\s*)?(\\d{2,3})','i'));
+  if(after)return after[1];
+  const before=s.match(new RegExp('(\\d{2,3})\\s*(?:'+wordRegex+')','i'));
+  return before?before[1]:'';
+}
+
+function extractWeightValue(line){
+  return firstNumberNearWord(line,'وزن|الوزن|وزني');
+}
+
+function extractHeightValue(line){
+  return firstNumberNearWord(line,'طول|الطول|طولي|طوله');
+}
+
+function extractQuantityText(line){
   const n=normalizeArabic(String(line||''));
-  const colors=[
-    'اسود','ابيض','زيتي','زيتوني','اخضر','ازرق','احمر','زهري','وردي',
-    'رمادي','رصاصي','سكني','كحلي','بني','بيج','خمري','عنابي','موف',
-    'بنفسجي','اصفر','برتقالي','سكري','اوف وايت','اوفويت','سماوي',
-    'تركواز','فضي','ذهبي','ماروني','نبيتي','كاكي','فستقي','نيلي'
-  ];
-  return /لون|اللون|الوان/.test(n) || colors.some(c=>n.includes(normalizeArabic(c)));
+  const m=n.match(/(\d+\s*(?:قطعه|قطع)|قطعه\s*(?:واحده|واحدة)|قطعتين|ثلاث\s+(?:قطع|الوان)|ثلاثه\s+قطع|ثلاثة\s+قطع|اربع\s+قطع|اربعه\s+قطع|أربع\s+قطع|خمس\s+قطع|ست\s+قطع|سته\s+قطع)/);
+  return m?m[1]:'';
+}
+
+
+const MODEL_WORDS = ['ترند','كلاسيك','اوفر سايز','أوفر سايز','اوفرسايز','ستريت','موديل','سكيني','وايد ليج'].map(normalizeArabic);
+
+function modelWordsInLine(line){
+  const n=normalizeArabic(String(line||''));
+  return MODEL_WORDS.filter(w=>phraseMatch(n,w));
+}
+
+function extractWeightText(line){
+  const raw=normalizeDigits(String(line||''));
+  const n=normalizeArabic(raw);
+  if(!/وزن|الوزن|وزني|وزنه|وزنوا/.test(n))return '';
+
+  const range=raw.match(/(?:وزن\w*[^0-9]{0,12})?(\d{2,3})\s*(?:الى|إلى|ل|:|-)\s*(\d{2,3})/i);
+  if(range)return `${range[1]}-${range[2]}`;
+
+  const num=raw.match(/(?:وزن\w*[^0-9]{0,12})(\d{2,3})/i);
+  return num?num[1]:'';
+}
+
+function extractHeightText(line){
+  const raw=normalizeDigits(String(line||''));
+  const n=normalizeArabic(raw);
+  if(!/طول|الطول|طولي|طوله/.test(n))return '';
+  const m=raw.match(/(?:طول\w*[^0-9]{0,12})(\d{2,3})/i);
+  return m?m[1]:'';
+}
+
+
+function hasWhatsappCue(line){
+  const raw=String(line||'');
+  const n=normalizeArabic(raw);
+  return /واتس|واتساب|whatsapp|what'?s?app|\bwa\b/i.test(raw) || /واتس|واتساب/.test(n);
+}
+
+function englishFragments(line){
+  const raw=String(line||'');
+  const parts=raw.match(/[A-Za-z][A-Za-z0-9+._/-]*/g)||[];
+  return [...new Set(parts)];
+}
+
+function classifyNoteLineMulti(line){
+  const raw=String(line||'').trim();
+  const n=normalizeArabic(raw);
+  const out=[];
+  if(isPriceLine(raw))return out;
+
+  // Product description wins. If color/model are embedded in the same product line,
+  // preserve the whole product description instead of deleting words.
+  if(containsAny(n,PRODUCT_CORE_WORDS)){
+    out.push({label:'الطلب',value:raw});
+    return out;
+  }
+
+  const weight=extractWeightText(raw)||extractWeightValue(raw);
+  const height=extractHeightText(raw)||extractHeightValue(raw);
+  if(weight)out.push({label:'الوزن',value:weight});
+  if(height)out.push({label:'الطول',value:height});
+
+  const qty=extractQuantityText(raw);
+  if(qty)out.push({label:'العدد',value:qty});
+
+  if(/مقاس|المقاس|قياس|سايز|السايز|size|\b(?:s|m|l|xl|xxl|xxxl|xxxxl)\b/i.test(raw)){
+    out.push({label:'المقاس',value:raw});
+  }
+
+  const colors=actualColorsInLine(raw);
+  if(colors.length)out.push({label:'اللون',value:colors.join(' و ')});
+
+  const models=modelWordsInLine(raw);
+  if(models.length)out.push({label:'الموديل',value:models.join(' و ')});
+
+  // Color/model line may contain meaningful leftover words. Keep them.
+  if(colors.length||models.length){
+    let leftover=n;
+    [...colors,...models].forEach(w=>{
+      leftover=leftover.replace(new RegExp('(^|\\s)(?:و)?(?:ال)?'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?=\\s|$)','g'),' ');
+    });
+    leftover=leftover.replace(/\s+/g,' ').trim();
+    if(leftover && !/^(?:لون|اللون|الوان|الالوان)$/.test(leftover)){
+      out.push({label:'تفصيل',value:leftover});
+    }
+  }
+
+  if(!colors.length && /^\s*\d+\s*(?:الوان|ألوان)\s*$/i.test(normalizeDigits(raw))){
+    out.push({label:'تفصيل',value:raw});
+  }
+
+  if(out.length)return out;
+
+  if(/^\s*\d+(?:\.\d+)?\s*$/.test(normalizeDigits(raw))||/(?:تقريبا|حوالي)\s*\d+/i.test(n)){
+    return [{label:'تفصيل',value:raw}];
+  }
+
+  return [{label:'ملاحظة',value:raw}];
 }
 
 function classifyNoteLine(line){
-  const n = normalizeArabic(line);
-
-  if(isPriceLine(line)){
-    return {label:'السعر', value:String(line).trim()};
-  }
-
-  if(/وزن|الوزن|وزني/.test(n)){
-    return {label:'الوزن', value:String(line).trim()};
-  }
-
-  if(/مقاس|المقاس|قياس|\b(?:s|m|l|xl|xxl|xxxl|xxxxl)\b/i.test(String(line))){
-    return {label:'المقاس', value:String(line).trim()};
-  }
-
-  if(isColorLine(line)){
-    return {label:'اللون', value:String(line).trim()};
-  }
-
-  if(containsAny(n, PRODUCT_WORDS) || /^\s*\d+\s+/.test(String(line))){
-    return {label:'الطلب', value:String(line).trim()};
-  }
-
-  return {label:'ملاحظة', value:String(line).trim()};
+  return classifyNoteLineMulti(line)[0]||{label:'ملاحظة',value:String(line).trim()};
 }
 
 function parseSmart(text){
-  const lines = String(text||'')
-    .split(/\n+/)
-    .map(x=>x.trim())
-    .filter(Boolean);
+  const lines=String(text||'').split(/\n+/).map(x=>x.trim()).filter(Boolean);
+  const used=new Set();
 
-  const used = new Set();
+  let name='';
+  let phone='';
+  let extraPhones=[];
+  let area='';
+  let address='';
+  let amount='';
 
-  let name = '';
-  let phone = '';
-  let extraPhones = [];
-  let area = '';
-  let address = '';
-  let amount = '';
-
-  // 1) الهواتف
-  const allPhones = [];
-
+  // 1) Phones first. Exact duplicate phone is not treated as an extra number.
+  const allPhones=[];
   for(let i=0;i<lines.length;i++){
-    const ps = phonesFrom(lines[i]);
-
+    const ps=phonesFrom(lines[i]);
     if(ps.length){
-      for(const p of ps){
-        if(!allPhones.includes(p)){
-          allPhones.push(p);
-        }
-      }
-
+      ps.forEach(p=>{if(!allPhones.includes(p))allPhones.push(p)});
       used.add(i);
     }
   }
+  phone=allPhones[0]||'';
+  extraPhones=allPhones.slice(1);
 
-  if(allPhones.length){
-    phone = allPhones[0];
-    extraPhones = allPhones.slice(1);
-  }
-
-  // 2) السعر - فقط من سطر سعر صريح
+  // 2) Explicit price line.
   for(let i=lines.length-1;i>=0;i--){
     if(isPriceLine(lines[i])){
-      amount = priceFrom(lines[i]);
-      break;
-    }
-  }
-
-  // 3) الاسم
-  for(let i=0;i<lines.length;i++){
-    if(used.has(i)) continue;
-
-    if(isLikelyName(lines[i], i)){
-      name = lines[i];
+      amount=priceFrom(lines[i]);
       used.add(i);
       break;
     }
   }
 
-  if(!name){
-    name = 'لا يوجد';
+  // 3) الاسم — V42: قفل الاسم من موقعه بالنسبة للهاتف
+  const pickedName=pickCustomerName(lines);
+  if(pickedName.name){
+    name=pickedName.name;
+    used.add(pickedName.index);
+  }else{
+    name='لا يوجد';
   }
 
-  // 4) المحافظة والعنوان - نفحص كل سطر قبل أي تصنيف منتجات
+  // 4) Detect ALL real location lines. Explicit governorate/local priority wins.
+  const locationRows=[];
   for(let i=0;i<lines.length;i++){
-    if(used.has(i)) continue;
-    if(isPriceLine(lines[i])) continue;
+    if(used.has(i)||isPriceLine(lines[i]))continue;
 
-    const pa = splitAreaAddress(lines[i]);
+    const line=lines[i];
+    const n=normalizeArabic(line);
 
-    if(pa.area){
-      area = pa.area;
-      address = pa.address;
-      used.add(i);
-      break;
-    }
-  }
-
-  // 5) سطور عنوان إضافية واضحة
-  const extraAddress = [];
-
-  for(let i=0;i<lines.length;i++){
-    if(used.has(i)) continue;
-    if(isPriceLine(lines[i])) continue;
-
-    const n = normalizeArabic(lines[i]);
-
-    if(containsAny(n, ADDRESS_WORDS) && !isLikelyProductOrDetail(lines[i])){
-      extraAddress.push(lines[i]);
-      used.add(i);
-    }
-  }
-
-  address = [address, ...extraAddress]
-    .filter(Boolean)
-    .join(' - ');
-
-  // 6) الملاحظات المرتبة
-  const noteRows = [];
-
-  if(phone){
-    noteRows.push(`الهاتف: ${phone}`);
-  }
-
-  extraPhones.forEach((p,idx)=>{
-    noteRows.push(
-      `${idx===0 ? 'هاتف إضافي' : 'هاتف إضافي '+(idx+1)}: ${p}`
-    );
-  });
-
-  for(let i=0;i<lines.length;i++){
-    const line = lines[i];
-
-    // لا نكرر أسطر الهاتف
-    if(phoneFrom(line)) continue;
-
-    // لا نكرر الاسم المعروف
-    if(name !== 'لا يوجد' && line === name) continue;
-
-    // اللون/تفاصيل اللبس لا تضيع حتى لو تشابهت كلمة مع اسم منطقة
-    if(isColorLine(line)){
-      noteRows.push(`اللون: ${String(line).trim()}`);
+    // A promise to send a location later is not an address by itself.
+    if(looksLikeFutureLocationInstruction(line) && !priorityLocalMatch(line) && !explicitGovernorateMatch(line) && !shippingAliasMatch(line)){
       continue;
     }
 
-    // لا نكرر سطر العنوان/المحافظة
-    const pa = splitAreaAddress(line);
-    if(pa.area) continue;
+    // Product/detail/instruction lines without a recognized place cannot become addresses.
+    const hit=splitAreaAddress(line);
+    if(!hit.area)continue;
 
-    // لا نكرر سطر عنوان إضافي التقطناه
-    if(used.has(i) && containsAny(normalizeArabic(line), ADDRESS_WORDS)){
-      continue;
-    }
+    const rawPlaceHit=findBestPlace(line);
+    const trustedGeneric=rawPlaceHit && String(rawPlaceHit.place||'').length>=5 && !/^(?:صحيح|تمام|اوكي|نعم|لا)$/.test(n);
+    const addressPrefix=/^(?:سكان|ساكن|ساكنه|ساكنة|عنواني|العنوان|عنوان|المكان|موقع|الموقع|المنطقه|المنطقة)\b/.test(n);
+    const explicitGovHit=!!explicitGovernorateMatch(line);
+    const explicitLocation=!!(priorityLocalMatch(line)||explicitGovHit||shippingAliasMatch(line)||ADDRESS_WORDS.some(w=>phraseMatch(n,w)));
 
-    const n = normalizeArabic(line);
+    // Merchandise descriptions always win over a locality alias unless the line is explicitly an address/governorate line.
+    if(containsAny(n,PRODUCT_WORDS) && !addressPrefix && !explicitGovHit)continue;
+    if(isLikelyName(line,i,lines) && !explicitLocation)continue;
+    if((isColorLine(line)||isQuantityLine(line)||isHeightLine(line)||/وزن|مقاس|الطول|طولي/.test(n)) && !explicitLocation)continue;
 
-    // تعليمات مهمة مثل الاستلام/الاتصال/التوصيل تبقى كملاحظة
-    if(/استلام|توصيل|اتصال|اتصل|يرجى|ملاحظه|ملاحظة|ضروري|موعد/.test(n)){
-      if(isPriceLine(line)){
-        noteRows.push(`السعر: ${String(line).trim()}`);
-      }else{
-        noteRows.push(`ملاحظة: ${String(line).trim()}`);
+    const strongLocation=explicitLocation||trustedGeneric;
+    if(!strongLocation)continue;
+
+    locationRows.push({i,area:hit.area,address:hit.address,line});
+  }
+
+  if(locationRows.length){
+    // Explicit governorate in any location line has the highest authority.
+    const explicitRow=locationRows.find(r=>explicitGovernorateMatch(r.line));
+    area=(explicitRow?.area)||locationRows[0].area;
+
+    // If several conditional/local addresses exist in the same governorate, preserve all of them.
+    const sameGov=locationRows.filter(r=>r.area===area);
+    address=sameGov.map(r=>r.address).filter(Boolean).join(' - ');
+    sameGov.forEach(r=>used.add(r.i));
+  }
+
+  if(locationRows.length){
+    // Explicit governorate in any location line has the highest authority.
+    const explicitRow=locationRows.find(r=>explicitGovernorateMatch(r.line));
+    area=(explicitRow?.area)||locationRows[0].area;
+
+    // If several conditional/local addresses exist in the same governorate, preserve all of them.
+    const sameGov=locationRows.filter(r=>r.area===area);
+    address=sameGov.map(r=>r.address).filter(Boolean).join(' - ');
+    sameGov.forEach(r=>used.add(r.i));
+  }
+
+  // 5) Extra descriptive address lines directly adjacent to a detected address.
+  if(address!==''){
+    const extras=[];
+    for(let i=0;i<lines.length;i++){
+      if(used.has(i)||isPriceLine(lines[i]))continue;
+      const n=normalizeArabic(lines[i]);
+      if(containsAny(n,ADDRESS_WORDS) && !containsAny(n,PRODUCT_WORDS) && !isLikelyName(lines[i],i,lines)){
+        extras.push(lines[i]);
+        used.add(i);
       }
+    }
+    address=[address,...extras].filter(Boolean).join(' - ');
+  }
+
+  // No location at all: business rule requested by user.
+  if(!area && !address){
+    area='عمان';
+    address='لا يوجد';
+  }
+
+  // 6) Notes. Only extra phone(s), never primary phone or price.
+  const noteRows=[];
+  const noteSeen=new Set();
+  const colorSeen=new Set();
+  const pushNote=(label,value)=>{
+    let v=String(value||'').trim();
+    if(!v)return;
+
+    if(label==='اللون'){
+      const colors=actualColorsInLine(v);
+      const fresh=colors.filter(c=>!colorSeen.has(c));
+      fresh.forEach(c=>colorSeen.add(c));
+      if(colors.length){
+        if(!fresh.length)return;
+        v=fresh.join(' و ');
+      }
+    }
+
+    const key=label+'|'+normalizeArabic(v);
+    if(noteSeen.has(key))return;
+    noteSeen.add(key);
+    noteRows.push(`${label}: ${v}`);
+  };
+
+  extraPhones.forEach((p,idx)=>pushNote(idx===0?'هاتف إضافي':'هاتف إضافي '+(idx+1),p));
+
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+
+    if(phoneFrom(line))continue;
+    if(name!=='لا يوجد' && line===name)continue;
+    if(isPriceLine(line))continue;
+    if(used.has(i))continue;
+
+    const n=normalizeArabic(line);
+
+    // Header "الألوان" by itself is not a color value.
+    if(/^(?:الوان|الالوان|اللون)$/.test(n)){
       continue;
     }
 
-    const item = classifyNoteLine(line);
-    noteRows.push(`${item.label}: ${item.value}`);
+    // WhatsApp instructions are always preserved and visually explicit.
+    if(hasWhatsappCue(line)){
+      pushNote('⚠️ واتساب',line);
+      continue;
+    }
+
+    // Instructions like "تعديل الألوان" stay as a note, never a name.
+    if(isInstructionLine(line)){
+      pushNote('ملاحظة',line);
+      continue;
+    }
+
+    const items=classifyNoteLineMulti(line);
+    items.forEach(item=>pushNote(item.label,item.value));
   }
 
-  const notes = noteRows.join('\n');
+  // Final safety net: no customer instruction/detail may disappear.
+  // If the original line is not represented anywhere in the structured notes,
+  // preserve it as "ملاحظة" unless it was already consumed as name/phone/price/address.
+  const represented=()=>normalizeArabic(noteRows.join(' '));
+  for(let i=0;i<lines.length;i++){
+    if(used.has(i))continue;
+    const line=lines[i];
+    if(phoneFrom(line)||isPriceLine(line))continue;
+    if(name!=='لا يوجد'&&line===name)continue;
 
-  return {
-    name,
-    phone,
-    area,
-    address,
-    amount,
-    notes
-  };
+    const n=normalizeArabic(line);
+    if(/^(?:الوان|الالوان|اللون)$/.test(n))continue;
+
+    const structured=classifyNoteLineMulti(line);
+    if(structured.some(x=>['الطلب','الوزن','الطول','المقاس','العدد','اللون','الموديل'].includes(x.label)))continue;
+
+    // Only preserve truly unstructured customer instructions/details.
+    const rep=represented();
+    const significant=n.split(/\s+/).filter(w=>w.length>2 && !['اللون','الوان','الالوان','وزن','الوزن','وزني','مقاس','المقاس'].includes(w));
+    if(significant.length && !significant.some(w=>rep.includes(w))){
+      pushNote('ملاحظة',line);
+    }
+  }
+
+  // Final English-text safety rule: if any English fragment from an unused customer line
+  // is not represented in the structured notes, preserve the full line clearly.
+  const notesNormEnglish=()=>noteRows.join(' ').toLowerCase();
+  for(let i=0;i<lines.length;i++){
+    if(used.has(i))continue;
+    const line=lines[i];
+    if(phoneFrom(line)||isPriceLine(line))continue;
+    if(name!=='لا يوجد'&&line===name)continue;
+
+    const eng=englishFragments(line);
+    if(!eng.length)continue;
+
+    const representedEnglish=eng.every(x=>notesNormEnglish().includes(String(x).toLowerCase()));
+    if(!representedEnglish){
+      pushNote('English',line);
+    }
+  }
+
+  return {name,phone,area,address,amount,notes:noteRows.join('\n')};
 }
 async function boot(){
   try{const setup=await api('/setup');if(setup.needs_setup){renderSetup();return}}catch{}
@@ -636,7 +1059,7 @@ async function newOrder(){
 
   const fallbackCourier=couriers.find(x=>x.name==='مندوب')||null;
 
-  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">الصق الطلب كامل أو عبّئ الحقول يدويًا</div></div></div>
+  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">Smart Parser V46 • User Edit</div></div></div>
   <div class="card">
     <div class="store-picker-box">
       <div class="field">
@@ -1070,6 +1493,15 @@ async function openOutcome(id){
         </div>
 
         <div class="field">
+          <label>حالة الطباعة</label>
+          <select id="outPrinted" class="select">
+            <option value="1" ${Number(o.printed||0)===1?'selected':''}>مطبوع</option>
+            <option value="0" ${Number(o.printed||0)===0?'selected':''}>غير مطبوع</option>
+          </select>
+          <div class="sub">عند اختيار غير مطبوع يرجع الطلب لقائمة جاهز للطباعة، مع بقاء سجل الطباعة القديم محفوظًا.</div>
+        </div>
+
+        <div class="field">
           <label>القيمة المسلّمة فعليًا</label>
           <input id="outDeliveredAmount" class="input" inputmode="decimal" value="${Number(o.delivered_amount||o.amount||0)}">
         </div>
@@ -1151,6 +1583,7 @@ async function openOutcome(id){
           method:'PUT',
           body:JSON.stringify({
             delivery_status:card.querySelector('#outStatus').value,
+            printed:Number(card.querySelector('#outPrinted').value),
             delivered_amount:card.querySelector('#outDeliveredAmount').value,
             delivery_fee:2,
             cash_collected:card.querySelector('#outCash').value,
@@ -1164,6 +1597,7 @@ async function openOutcome(id){
         close();
         if(state.view==='orders') loadOrders();
         if(state.view==='dashboard') dashboard();
+        if(state.view==='print') printView();
       }catch(e){
         saveBtn.disabled=false;
         saveBtn.textContent='حفظ النتيجة';
@@ -1182,7 +1616,28 @@ async function openOutcome(id){
   }
 }
 
-function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>النتيجة</th><th>الطباعة</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code"><button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button></td><td><b>${esc(o.store_name||'—')}</b></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td class="address-cell"><button type="button" class="address-preview" data-address="${encodeURIComponent([o.area,o.detailed_address].filter(Boolean).join(' - '))}" aria-label="عرض العنوان كامل">${esc(o.area||'—')}<span class="address-short">${o.detailed_address?` • ${esc(String(o.detailed_address).replace(/\s+/g,' ').trim())}`:''}</span></button></td><td>${money(o.amount)}</td><td class="notes-cell"><button type="button" class="notes-preview" data-notes="${encodeURIComponent(o.order_notes||'')}" aria-label="عرض الملاحظات كاملة">${esc((o.order_notes||'').replace(/\s+/g,' ').trim()||'—')}</button></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><button class="btn btn-soft outcome-btn" data-order-id="${o.id}">تحديث النتيجة</button><div class="sub" style="margin-top:4px">كاش ${money(o.cash_collected||0)} • ربح ${money((o.cash_collected||0)-(o.cost_of_goods||0))}</div></td><td>${o.printed?'<span class="badge badge-ok">مطبوع</span>':'<span class="badge badge-warn">غير مطبوع</span>'}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
+function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>النتيجة</th><th>الطباعة</th><th>التاريخ</th>${state.user?.role==='admin'?'<th>حذف</th>':''}</tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code"><button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button></td><td><b>${esc(o.store_name||'—')}</b></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td class="address-cell"><button type="button" class="address-preview" data-address="${encodeURIComponent([o.area,o.detailed_address].filter(Boolean).join(' - '))}" aria-label="عرض العنوان كامل">${esc(o.area||'—')}<span class="address-short">${o.detailed_address?` • ${esc(String(o.detailed_address).replace(/\s+/g,' ').trim())}`:''}</span></button></td><td>${money(o.amount)}</td><td class="notes-cell"><button type="button" class="notes-preview" data-notes="${encodeURIComponent(o.order_notes||'')}" aria-label="عرض الملاحظات كاملة">${esc((o.order_notes||'').replace(/\s+/g,' ').trim()||'—')}</button></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><button class="btn btn-soft outcome-btn" data-order-id="${o.id}">تحديث النتيجة</button><div class="sub" style="margin-top:4px">كاش ${money(o.cash_collected||0)} • ربح ${money((o.cash_collected||0)-(o.cost_of_goods||0))}</div></td><td>${o.printed?'<span class="badge badge-ok">مطبوع</span>':'<span class="badge badge-warn">غير مطبوع</span>'}</td><td>${fmtDate(o.created_at)}</td>${state.user?.role==='admin'?`<td><button type="button" class="btn btn-danger delete-order-btn" data-delete-order="${o.id}" data-order-code="${o.order_code}">حذف</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
+  document.querySelectorAll('.delete-order-btn').forEach(btn=>{
+    btn.onclick=async()=>{
+      const id=Number(btn.dataset.deleteOrder);
+      const code=btn.dataset.orderCode||id;
+      if(!confirm(`حذف الطلب #${code} نهائيًا؟\nسيختفي من عدادات الطلبات والكشوفات.`)) return;
+
+      btn.disabled=true;
+      btn.textContent='جاري الحذف...';
+      try{
+        await api('/orders/'+id,{method:'DELETE'});
+        state.orders=(state.orders||[]).filter(o=>Number(o.id)!==id);
+        const row=btn.closest('tr');
+        if(row) row.remove();
+        toast(`تم حذف الطلب #${code}`);
+      }catch(e){
+        btn.disabled=false;
+        btn.textContent='حذف';
+        toast(e.message);
+      }
+    };
+  });
   document.querySelectorAll('.outcome-btn').forEach(btn=>{btn.onclick=()=>openOutcome(Number(btn.dataset.orderId));});
 
   let infoPopover=document.querySelector('#infoPopover');
@@ -2062,5 +2517,167 @@ async function storeOrdersHub(){
 
   document.querySelectorAll('[data-store-orders]').forEach(b=>b.onclick=()=>storeShipmentsView(Number(b.dataset.storeOrders)));
 }
-async function usersView(){const c=$('#content');const d=await api('/users');c.innerHTML=`<div class="page-title"><div><h1>المستخدمون</h1><div class="sub">كل موظف يدخل بحسابه ويُحفظ اسمه مع الطلب</div></div></div><div class="grid" style="grid-template-columns:1fr 1fr"><div class="card"><h3>إضافة مستخدم</h3><div class="field"><label>الاسم الظاهر</label><input id="ud" class="input"></div><br><div class="field"><label>اسم المستخدم</label><input id="uu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="up" type="password" class="input"></div><br><div class="field"><label>الصلاحية</label><select id="ur" class="select"><option value="staff">موظف</option><option value="admin">مدير</option></select></div><button id="addUser" class="btn btn-primary" style="margin-top:15px">إضافة</button></div><div class="card"><h3>الحسابات</h3>${d.users.map(u=>`<div class="batch-card"><div><b>${esc(u.display_name)}</b><div class="batch-meta">@${esc(u.username)} • ${u.role==='admin'?'مدير':'موظف'}</div></div><span class="badge ${u.is_active?'badge-ok':'badge-warn'}">${u.is_active?'فعال':'موقوف'}</span></div>`).join('')}</div></div>`;$('#addUser').onclick=async()=>{try{await api('/users',{method:'POST',body:JSON.stringify({display_name:$('#ud').value,username:$('#uu').value,password:$('#up').value,role:$('#ur').value})});toast('تمت إضافة المستخدم');usersView()}catch(e){toast(e.message)}}}
+async function usersView(){
+  const c=$('#content');
+  const d=await api('/users');
+
+  c.innerHTML=`
+    <div class="page-title">
+      <div>
+        <h1>المستخدمون</h1>
+        <div class="sub">إضافة وتعديل حسابات الموظفين والمدراء</div>
+      </div>
+    </div>
+
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <div class="card">
+        <h3>إضافة مستخدم</h3>
+        <div class="field"><label>الاسم الظاهر</label><input id="ud" class="input"></div><br>
+        <div class="field"><label>اسم المستخدم</label><input id="uu" class="input"></div><br>
+        <div class="field"><label>كلمة المرور</label><input id="up" type="password" class="input"></div><br>
+        <div class="field"><label>الصلاحية</label>
+          <select id="ur" class="select">
+            <option value="staff">موظف</option>
+            <option value="admin">مدير</option>
+          </select>
+        </div>
+        <button id="addUser" class="btn btn-primary" style="margin-top:15px">إضافة</button>
+      </div>
+
+      <div class="card">
+        <h3>الحسابات</h3>
+        ${d.users.map(u=>`
+          <div class="batch-card" style="gap:10px">
+            <div style="min-width:0;flex:1">
+              <b>${esc(u.display_name)}</b>
+              <div class="batch-meta">@${esc(u.username)} • ${u.role==='admin'?'مدير':'موظف'}</div>
+            </div>
+            <span class="badge ${u.is_active?'badge-ok':'badge-warn'}">${u.is_active?'فعال':'موقوف'}</span>
+            <button type="button" class="btn btn-soft edit-user-btn"
+              data-user-id="${u.id}"
+              data-display-name="${encodeURIComponent(u.display_name||'')}"
+              data-username="${encodeURIComponent(u.username||'')}"
+              data-role="${u.role||'staff'}"
+              data-active="${Number(u.is_active||0)}">تعديل</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>`;
+
+  $('#addUser').onclick=async()=>{
+    try{
+      await api('/users',{
+        method:'POST',
+        body:JSON.stringify({
+          display_name:$('#ud').value,
+          username:$('#uu').value,
+          password:$('#up').value,
+          role:$('#ur').value
+        })
+      });
+      toast('تمت إضافة المستخدم');
+      usersView();
+    }catch(e){toast(e.message)}
+  };
+
+  document.querySelectorAll('.edit-user-btn').forEach(btn=>{
+    btn.onclick=()=>openUserEdit({
+      id:Number(btn.dataset.userId),
+      display_name:decodeURIComponent(btn.dataset.displayName||''),
+      username:decodeURIComponent(btn.dataset.username||''),
+      role:btn.dataset.role||'staff',
+      is_active:Number(btn.dataset.active||0)
+    });
+  });
+}
+
+function openUserEdit(user){
+  const old=document.querySelector('.modal-backdrop');
+  if(old) old.remove();
+
+  const overlay=document.createElement('div');
+  overlay.className='modal-backdrop';
+  overlay.innerHTML=`
+    <div class="modal-card" dir="rtl">
+      <div class="modal-head">
+        <h3>تعديل المستخدم</h3>
+        <button type="button" class="btn btn-soft user-edit-close">✕</button>
+      </div>
+
+      <div class="outcome-form">
+        <div class="field">
+          <label>الاسم الظاهر</label>
+          <input id="editUserDisplay" class="input" value="${esc(user.display_name)}">
+        </div>
+
+        <div class="field">
+          <label>اسم المستخدم</label>
+          <input id="editUserUsername" class="input" value="${esc(user.username)}">
+        </div>
+
+        <div class="field">
+          <label>كلمة مرور جديدة</label>
+          <input id="editUserPassword" type="password" class="input" placeholder="اتركها فارغة لعدم تغييرها">
+        </div>
+
+        <div class="field">
+          <label>الصلاحية</label>
+          <select id="editUserRole" class="select">
+            <option value="staff" ${user.role==='staff'?'selected':''}>موظف</option>
+            <option value="admin" ${user.role==='admin'?'selected':''}>مدير</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>حالة الحساب</label>
+          <select id="editUserActive" class="select">
+            <option value="1" ${user.is_active===1?'selected':''}>فعال</option>
+            <option value="0" ${user.is_active===0?'selected':''}>موقوف</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="actions" style="margin-top:16px">
+        <button type="button" id="saveUserEdit" class="btn btn-primary">حفظ التعديل</button>
+        <button type="button" class="btn btn-soft user-edit-close">إلغاء</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  document.documentElement.classList.add('modal-open');
+  document.body.classList.add('modal-open');
+
+  const close=()=>{
+    overlay.remove();
+    document.documentElement.classList.remove('modal-open');
+    document.body.classList.remove('modal-open');
+  };
+  overlay.onclick=e=>{if(e.target===overlay)close()};
+  overlay.querySelectorAll('.user-edit-close').forEach(x=>x.onclick=close);
+
+  $('#saveUserEdit').onclick=async()=>{
+    const btn=$('#saveUserEdit');
+    btn.disabled=true;
+    btn.textContent='جاري الحفظ...';
+    try{
+      await api('/users/'+user.id,{
+        method:'PUT',
+        body:JSON.stringify({
+          display_name:$('#editUserDisplay').value,
+          username:$('#editUserUsername').value,
+          password:$('#editUserPassword').value,
+          role:$('#editUserRole').value,
+          is_active:Number($('#editUserActive').value)
+        })
+      });
+      toast('تم تعديل المستخدم');
+      close();
+      usersView();
+    }catch(e){
+      btn.disabled=false;
+      btn.textContent='حفظ التعديل';
+      toast(e.message);
+    }
+  };
+}
 boot();
