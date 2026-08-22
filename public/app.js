@@ -394,9 +394,9 @@ function parseSmart(text){
 async function boot(){
   try{const setup=await api('/setup');if(setup.needs_setup){renderSetup();return}}catch{}
   if(!state.token){renderLogin();return}
-  try{const me=await api('/me');state.user=me.user;await loadRegionIndex();renderShell();await show('dashboard')}catch{localStorage.removeItem('corvex_token');state.token='';renderLogin()}
+  try{const me=await api('/me');state.user=me.user;renderShell();await show('dashboard')}catch{localStorage.removeItem('corvex_token');state.token='';renderLogin()}
 }
-function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);await loadRegionIndex();renderShell();show('dashboard')}catch(e){toast(e.message)}}}
+function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);renderShell();show('dashboard')}catch(e){toast(e.message)}}}
 function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>تهيئة CORVEX SPORT</h1><p>أنشئ أول حساب مدير</p></div><div class="field"><label>الاسم الظاهر</label><input id="sd" class="input" value="Admin"></div><br><div class="field"><label>اسم المستخدم</label><input id="su" class="input" value="admin"></div><br><div class="field"><label>كلمة المرور</label><input id="sp" type="password" class="input"></div><button id="setupBtn" class="btn btn-accent" style="width:100%;margin-top:18px">إنشاء النظام</button></div></div>`;$('#setupBtn').onclick=async()=>{try{await api('/setup',{method:'POST',body:JSON.stringify({display_name:$('#sd').value,username:$('#su').value,password:$('#sp').value})});toast('تمت التهيئة');renderLogin()}catch(e){toast(e.message)}}}
 function renderShell(){
   app.innerHTML=`<div class="shell">
@@ -537,6 +537,7 @@ function autoCourierForText(couriers,text){
 
 async function newOrder(){
   const c=$('#content');
+  if(!state.regionGroups?.length) await loadRegionIndex();
 
   let stores=[];
   let couriers=[];
@@ -1250,6 +1251,7 @@ async function couriersView(){
 
 async function courierAddView(editId=0){
   const c=$('#content');
+  if(!state.regionGroups?.length) await loadRegionIndex();
   let x=null;
 
   if(editId){
