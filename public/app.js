@@ -688,19 +688,26 @@ const PRODUCT_COST_RULES = [
   {name:'تيشيرت بولو',cost:3.50,terms:['تيشيرت بولو تريكو','تيشرت بولو تريكو','بولو تريكو','بولو ترند','تيشيرت بولو','تيشرت بولو','بولو']}
 ];
 
+function safeSmallQuantity(value){
+  const n=Number(value);
+  return Number.isFinite(n)&&n>=1&&n<=50?n:0;
+}
 function quantityFromProductSegment(segment){
   const s=normalizeDigits(segment);
   const piece=s.match(/(\d+)\s*(?:قطعه|قطعة|قطع|حبه|حبة)/);
-  if(piece)return Math.max(1,Number(piece[1]));
+  const pieceQty=piece?safeSmallQuantity(piece[1]):0;
+  if(pieceQty)return pieceQty;
   const count=s.match(/(?:العدد|عدد)\s*[:：-]?\s*(\d+)/);
-  if(count)return Math.max(1,Number(count[1]));
+  const countQty=count?safeSmallQuantity(count[1]):0;
+  if(countQty)return countQty;
   const leading=s.match(/^\s*(\d+)\b/);
-  return leading?Math.max(1,Number(leading[1])):1;
+  const leadingQty=leading?safeSmallQuantity(leading[1]):0;
+  return leadingQty||1;
 }
 
 function calculateGoodsCost(text){
   const normalized=normalizeArabic(text);
-  const rawSegments=normalized.split(/(?:\+|،|;|؛|\n)/).map(x=>x.trim()).filter(Boolean);
+  const rawSegments=String(text||'').split(/(?:\+|،|;|؛|\n)/).map(x=>normalizeArabic(x)).filter(Boolean);
   const segments=[];
   for(const raw of rawSegments){
     const hits=PRODUCT_COST_RULES.reduce((n,r)=>n+(r.terms.some(t=>raw.includes(normalizeArabic(t)))?1:0),0);
@@ -1145,7 +1152,7 @@ async function newOrder(){
 
   const fallbackCourier=couriers.find(x=>x.name==='مندوب')||null;
 
-  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">Smart Parser V59 • AI Cost Fallback</div></div></div>
+  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">Smart Parser V60 • Safe Quantity + AI</div></div></div>
   <div class="card">
     <div class="store-picker-box">
       <div class="field">
