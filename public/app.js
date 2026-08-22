@@ -6,10 +6,28 @@ async function api(path,opts={}){const headers={'content-type':'application/json
 function can(p){
   return state.user?.role==='admin'||(state.user?.permissions||[]).includes(p);
 }
-async function loadRegionIndex(){
+async function loadRegionIndex(force=false){
   try{
+    if(!force){
+      const cached=sessionStorage.getItem('corvex_regions_v27');
+      if(cached){
+        const parsed=JSON.parse(cached);
+        state.regionGroups=parsed;
+        const map=new Map();
+        for(const g of state.regionGroups){
+          for(const r of (g.regions||[])){
+            for(const alias of placeAliases(r.name))map.set(alias,g.governorate||g.name);
+          }
+          for(const alias of placeAliases(g.name))map.set(alias,g.governorate||g.name);
+        }
+        state.dynamicPlaceToGov=map;
+        state.dynamicPlaces=[...map.keys()].sort((a,b)=>b.length-a.length);
+        return;
+      }
+    }
     const d=await api('/regions');
     state.regionGroups=d.groups||[];
+    sessionStorage.setItem('corvex_regions_v27',JSON.stringify(state.regionGroups));
     const map=new Map();
     for(const g of state.regionGroups){
       for(const r of (g.regions||[])){
@@ -394,9 +412,21 @@ function parseSmart(text){
 async function boot(){
   try{const setup=await api('/setup');if(setup.needs_setup){renderSetup();return}}catch{}
   if(!state.token){renderLogin();return}
-  try{const me=await api('/me');state.user=me.user;renderShell();await show('dashboard')}catch{localStorage.removeItem('corvex_token');state.token='';renderLogin()}
+  try{
+    const me=await api('/me');
+    state.user=me.user;
+    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v27')!=='1'){
+      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v27','1')}catch{}
+    }
+    renderShell();
+    await show('dashboard')
+  }catch{localStorage.removeItem('corvex_token');state.token='';renderLogin()}
 }
-function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);renderShell();show('dashboard')}catch(e){toast(e.message)}}}
+function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);
+    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v27')!=='1'){
+      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v27','1')}catch{}
+    }
+    renderShell();show('dashboard')}catch(e){toast(e.message)}}}
 function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>تهيئة CORVEX SPORT</h1><p>أنشئ أول حساب مدير</p></div><div class="field"><label>الاسم الظاهر</label><input id="sd" class="input" value="Admin"></div><br><div class="field"><label>اسم المستخدم</label><input id="su" class="input" value="admin"></div><br><div class="field"><label>كلمة المرور</label><input id="sp" type="password" class="input"></div><button id="setupBtn" class="btn btn-accent" style="width:100%;margin-top:18px">إنشاء النظام</button></div></div>`;$('#setupBtn').onclick=async()=>{try{await api('/setup',{method:'POST',body:JSON.stringify({display_name:$('#sd').value,username:$('#su').value,password:$('#sp').value})});toast('تمت التهيئة');renderLogin()}catch(e){toast(e.message)}}}
 function renderShell(){
   app.innerHTML=`<div class="shell">
@@ -1336,12 +1366,12 @@ async function regionsView(){
       <div class="region-add"><input class="input region-new-name" placeholder="إضافة منطقة"><button class="btn btn-accent add-region" data-group="${g.id}">＋</button></div>
     </div>`).join('')}</div>`;
 
-  $('#addRegionGroup').onclick=async()=>{try{await api('/region-groups',{method:'POST',body:JSON.stringify({name:$('#newGroupName').value,governorate:$('#newGroupGov').value})});await loadRegionIndex();regionsView()}catch(e){toast(e.message)}};
-  document.querySelectorAll('.add-region').forEach(b=>b.onclick=async()=>{const card=b.closest('.region-card'),inp=card.querySelector('.region-new-name');if(!inp.value.trim())return;try{await api('/regions',{method:'POST',body:JSON.stringify({group_id:b.dataset.group,name:inp.value})});await loadRegionIndex();regionsView()}catch(e){toast(e.message)}});
-  document.querySelectorAll('.edit-region').forEach(b=>b.onclick=async()=>{const old=decodeURIComponent(b.dataset.name),name=prompt('اسم المنطقة',old);if(!name||name===old)return;try{await api('/regions/'+b.dataset.id,{method:'PUT',body:JSON.stringify({name})});await loadRegionIndex();regionsView()}catch(e){toast(e.message)}});
-  document.querySelectorAll('.del-region').forEach(b=>b.onclick=async()=>{if(!confirm('حذف المنطقة؟'))return;await api('/regions/'+b.dataset.id,{method:'DELETE'});await loadRegionIndex();regionsView()});
-  document.querySelectorAll('.edit-group').forEach(b=>b.onclick=async()=>{const g=state.regionGroups.find(x=>Number(x.id)===Number(b.dataset.id));const name=prompt('اسم المجموعة',g.name);if(!name)return;const governorate=prompt('المحافظة التي تسجل على الطلب',g.governorate||g.name);if(governorate===null)return;await api('/region-groups/'+g.id,{method:'PUT',body:JSON.stringify({name,governorate})});await loadRegionIndex();regionsView()});
-  document.querySelectorAll('.del-group').forEach(b=>b.onclick=async()=>{if(!confirm('حذف المجموعة وكل المناطق بداخلها؟'))return;await api('/region-groups/'+b.dataset.id,{method:'DELETE'});await loadRegionIndex();regionsView()});
+  $('#addRegionGroup').onclick=async()=>{try{await api('/region-groups',{method:'POST',body:JSON.stringify({name:$('#newGroupName').value,governorate:$('#newGroupGov').value})});await loadRegionIndex(true);regionsView()}catch(e){toast(e.message)}};
+  document.querySelectorAll('.add-region').forEach(b=>b.onclick=async()=>{const card=b.closest('.region-card'),inp=card.querySelector('.region-new-name');if(!inp.value.trim())return;try{await api('/regions',{method:'POST',body:JSON.stringify({group_id:b.dataset.group,name:inp.value})});await loadRegionIndex(true);regionsView()}catch(e){toast(e.message)}});
+  document.querySelectorAll('.edit-region').forEach(b=>b.onclick=async()=>{const old=decodeURIComponent(b.dataset.name),name=prompt('اسم المنطقة',old);if(!name||name===old)return;try{await api('/regions/'+b.dataset.id,{method:'PUT',body:JSON.stringify({name})});await loadRegionIndex(true);regionsView()}catch(e){toast(e.message)}});
+  document.querySelectorAll('.del-region').forEach(b=>b.onclick=async()=>{if(!confirm('حذف المنطقة؟'))return;await api('/regions/'+b.dataset.id,{method:'DELETE'});await loadRegionIndex(true);regionsView()});
+  document.querySelectorAll('.edit-group').forEach(b=>b.onclick=async()=>{const g=state.regionGroups.find(x=>Number(x.id)===Number(b.dataset.id));const name=prompt('اسم المجموعة',g.name);if(!name)return;const governorate=prompt('المحافظة التي تسجل على الطلب',g.governorate||g.name);if(governorate===null)return;await api('/region-groups/'+g.id,{method:'PUT',body:JSON.stringify({name,governorate})});await loadRegionIndex(true);regionsView()});
+  document.querySelectorAll('.del-group').forEach(b=>b.onclick=async()=>{if(!confirm('حذف المجموعة وكل المناطق بداخلها؟'))return;await api('/region-groups/'+b.dataset.id,{method:'DELETE'});await loadRegionIndex(true);regionsView()});
 }
 
 const PERMISSION_LABELS={
