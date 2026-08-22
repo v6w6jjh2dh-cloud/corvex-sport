@@ -111,6 +111,15 @@ async function ensureBusinessSchema(env) {
     await env.DB.prepare(`ALTER TABLE print_batches ADD COLUMN store_id INTEGER`).run();
   }
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_print_batches_store_id ON print_batches(store_id)').run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS deleted_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    original_order_id INTEGER NOT NULL,
+    order_code INTEGER,
+    order_json TEXT NOT NULL,
+    deleted_by INTEGER,
+    deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`).run();
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_deleted_orders_deleted_at ON deleted_orders(deleted_at)').run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS couriers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,username TEXT DEFAULT '',phone TEXT DEFAULT '',address TEXT DEFAULT '',
     delivered_commission REAL NOT NULL DEFAULT 0,returned_commission REAL NOT NULL DEFAULT 0,areas TEXT DEFAULT '',notes TEXT DEFAULT '',
@@ -967,10 +976,13 @@ export async function onRequest(context) {
       if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة لحذف الطلب'},403);
 
       const id = Number(orderMatch[1]);
-      const order = await env.DB.prepare('SELECT id,order_code FROM orders WHERE id=?').bind(id).first();
+      const order = await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
       if (!order) return json({error:'الطلب غير موجود'},404);
 
-      // Remove relation rows first so a hard delete does not leave orphan references.
+      await env.DB.prepare('INSERT INTO deleted_orders(original_order_id,order_code,order_json,deleted_by) VALUES(?,?,?,?)')
+        .bind(order.id,order.order_code,JSON.stringify(order),me.id).run();
+
+      // Remove relation rows after archiving so regular counters and reports exclude the order.
       const tableRows = await env.DB.prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('print_batch_orders','courier_settlement_orders','store_settlement_orders','delivery_company_settlement_orders')"
       ).all();
@@ -1056,6 +1068,36 @@ export async function onRequest(context) {
 
       const order = await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(id).first();
       return json({ order, status_label: STATUS_LABELS[status] || status });
+    }
+
+    if (path === '/deleted-orders' && method === 'GET') {
+      if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة'},403);
+      await env.DB.prepare("DELETE FROM deleted_orders WHERE deleted_at < datetime('now','-48 hours')").run();
+      const rows=await env.DB.prepare(`SELECT d.id,d.original_order_id,d.order_code,d.order_json,d.deleted_at,u.display_name deleted_by_name,
+        CAST((julianday(d.deleted_at,'+48 hours')-julianday('now'))*24*60 AS INTEGER) remaining_minutes
+        FROM deleted_orders d LEFT JOIN users u ON u.id=d.deleted_by
+        ORDER BY d.id DESC`).all();
+      return json({orders:(rows.results||[]).map(r=>{
+        let order={};try{order=JSON.parse(r.order_json||'{}')}catch{}
+        return {...order,archive_id:r.id,deleted_at:r.deleted_at,deleted_by_name:r.deleted_by_name,remaining_minutes:Math.max(0,Number(r.remaining_minutes||0))};
+      })});
+    }
+
+    const restoreDeletedMatch=path.match(/^\/deleted-orders\/(\d+)\/restore$/);
+    if (restoreDeletedMatch && method === 'POST') {
+      if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة'},403);
+      const archiveId=Number(restoreDeletedMatch[1]);
+      const archived=await env.DB.prepare("SELECT * FROM deleted_orders WHERE id=? AND deleted_at >= datetime('now','-48 hours')").bind(archiveId).first();
+      if(!archived)return json({error:'انتهت مدة الاسترجاع أو الطلب غير موجود'},404);
+      let saved={};try{saved=JSON.parse(archived.order_json||'{}')}catch{return json({error:'بيانات الطلب المحذوف غير صالحة'},500)}
+      const info=await env.DB.prepare('PRAGMA table_info(orders)').all();
+      const columns=(info.results||[]).map(x=>x.name).filter(name=>Object.prototype.hasOwnProperty.call(saved,name));
+      if(!columns.length)return json({error:'تعذر استرجاع بيانات الطلب'},500);
+      const placeholders=columns.map(()=>'?').join(',');
+      await env.DB.prepare(`INSERT INTO orders(${columns.join(',')}) VALUES(${placeholders})`).bind(...columns.map(name=>saved[name])).run();
+      await env.DB.prepare('DELETE FROM deleted_orders WHERE id=?').bind(archiveId).run();
+      const order=await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(saved.id).first();
+      return json({ok:true,order});
     }
 
     if (path === '/users' && method === 'GET') {
@@ -1164,6 +1206,16 @@ export async function onRequest(context) {
       if (!batch) return json({error:'دفعة الطباعة غير موجودة'},404);
       const rows = await env.DB.prepare(`${orderSelectSql('JOIN print_batch_orders pbo ON pbo.order_id=o.id WHERE pbo.batch_id=?')} ORDER BY pbo.position ASC`).bind(Number(batchMatch[1])).all();
       return json({batch,orders:rows.results||[]});
+    }
+
+    if (batchMatch && method === 'DELETE') {
+      if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة'},403);
+      const id=Number(batchMatch[1]);
+      const batch=await env.DB.prepare('SELECT id,batch_code FROM print_batches WHERE id=?').bind(id).first();
+      if(!batch)return json({error:'دفعة الطباعة غير موجودة'},404);
+      await env.DB.prepare('DELETE FROM print_batch_orders WHERE batch_id=?').bind(id).run();
+      await env.DB.prepare('DELETE FROM print_batches WHERE id=?').bind(id).run();
+      return json({ok:true,id,batch_code:batch.batch_code});
     }
 
     if (path === '/unprinted' && method === 'GET') {
