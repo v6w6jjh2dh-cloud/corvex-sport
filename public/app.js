@@ -980,6 +980,7 @@ function renderShell(){
 
           ${can('print')?'<button data-view="print">▣ جاهز للطباعة</button>':''}
           ${can('batches')?'<button data-view="batches">↻ دفعات الطباعة</button>':''}
+          ${can('reports')?'<button data-view="daily-profits">💰 الأرباح اليومية</button>':''}
           ${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}${can('reports')?'<button data-view="delivery-reconcile">⇄ تسوية شركة التوصيل</button>':''}
           ${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}
           ${can('users')?'<button data-view="users">♟ المستخدمون</button>':''}
@@ -1040,6 +1041,7 @@ async function show(v){
   if(v==='store-orders')return storeOrdersHub();
   if(v==='print')return printView();
   if(v==='batches')return batchesView();
+  if(v==='daily-profits')return dailyProfitsView();
   if(v==='reports')return reportsView();
   if(v==='delivery-reconcile')return deliveryReconcileView();
   if(v==='stores')return storesView();
@@ -1152,7 +1154,7 @@ async function newOrder(){
 
   const fallbackCourier=couriers.find(x=>x.name==='مندوب')||null;
 
-  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">Smart Parser V61 • Stable Phone + Notes</div></div></div>
+  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">إدخال سريع وبسيط</div></div></div>
   <div class="card">
     <div class="store-picker-box">
       <div class="field">
@@ -1169,7 +1171,7 @@ async function newOrder(){
 
     <div class="smart-box">
       <div class="field"><label>الصق الطلب هنا</label><textarea id="raw" class="textarea" placeholder="0772207993\nعلجون عرجان\n3 بلايز ريبوك\nالوزن 100\n15 شامل التوصيل"></textarea></div>
-      <div class="smart-actions"><button id="parse" class="btn btn-accent">⚡ تعبئة تلقائية</button><button id="aiParse" class="btn btn-primary">✨ تحليل ذكي</button><button id="clearRaw" class="btn btn-outline">مسح</button></div><div id="aiParseStatus" class="sub" style="margin-top:8px"></div>
+      <div class="smart-actions"><button id="parse" class="btn btn-accent">⚡ تعبئة تلقائية</button><button id="clearRaw" class="btn btn-outline">مسح</button></div>
     </div>
     <br>
 
@@ -1189,7 +1191,6 @@ async function newOrder(){
       <div class="field"><label>رقم الهاتف</label><input id="phone" class="input" inputmode="tel" placeholder="07xxxxxxxx"></div>
       <div class="field"><label>المحافظة</label><input id="area" class="input" placeholder="عمان / إربد / عجلون..."></div>
       <div class="field"><label>قيمة الطلب</label><input id="amount" class="input" inputmode="decimal" placeholder="0.00"></div>
-      <div class="field"><label>كوست البضاعة</label><input id="goodsCost" class="input" inputmode="decimal" placeholder="0.00"><small id="goodsCostBreakdown" class="sub">يتحسب تلقائيًا ويمكن تعديله</small></div>
       <div class="field full"><label>العنوان التفصيلي</label><textarea id="address" class="textarea" placeholder="العنوان الكامل"></textarea></div>
       <div class="field full"><label>ملاحظات الطلب / التجهيز</label><textarea id="notes" class="textarea" placeholder="الصنف، اللون، المقاس، الوزن، أي ملاحظات للموظف الذي يجهز الطلب"></textarea></div>
     </div>
@@ -1205,49 +1206,17 @@ async function newOrder(){
     $('#courierReason').textContent=(matched && matched.name!=='مندوب')?'تم اختياره تلقائيًا حسب المنطقة':'لا يوجد مندوب مخصص للمنطقة — تم اختيار مندوب';
   };
 
-  const applyParsedOrder=p=>{
-    $('#name').value=p.name||p.recipient_name||'لا يوجد';
-    if(p.phone)$('#phone').value=canonicalJordanPhone(p.phone);
-    $('#amount').value=p.amount||'';
-    $('#area').value=p.area||p.governorate||'';
-    $('#address').value=p.address||p.detailed_address||'';
-    $('#notes').value=p.notes||'';
-    const cost=p.cost??p.cost_of_goods??0;
-    $('#goodsCost').value=money(cost);
-    $('#goodsCostBreakdown').textContent=p.costItems?costBreakdownText(p.costItems):(p.items?.length?p.items.map(x=>`${x.quantity} × ${x.name} = ${money(x.total_cost)}`).join(' • '):'لم يتم التعرف على صنف له كوست تلقائي');
-    refreshCourier();
-  };
-
-  const runAiParse=async({automatic=false}={})=>{
-    const text=$('#raw').value.trim();
-    if(!text){if(!automatic)toast('الصق الطلب أولاً');return}
-    const btn=$('#aiParse'),status=$('#aiParseStatus');
-    btn.disabled=true;btn.textContent='جاري التحليل...';status.textContent='الذكاء الاصطناعي يحلل الطلب';
-    try{
-      const local=parseSmart(text);
-      const d=await api('/ai-parse-order',{method:'POST',body:JSON.stringify({text})});
-      const smart=d.parsed||{};
-      const localPhone=canonicalJordanPhone(local.phone||'');
-      const smartPhone=canonicalJordanPhone(smart.phone||'');
-      smart.phone=/^07\d{8}$/.test(localPhone)?localPhone:smartPhone;
-      smart.notes=local.notes||smart.notes||$('#notes').value||'';
-      applyParsedOrder(smart);
-      status.textContent='تم التحليل الذكي — راجع البيانات قبل الحفظ';
-      toast('تم التحليل الذكي');
-    }catch(e){
-      status.textContent=e.message||'تعذر التحليل الذكي';
-      if(!automatic)toast(e.message);
-    }finally{btn.disabled=false;btn.textContent='✨ تحليل ذكي'}
-  };
-
   $('#parse').onclick=()=>{
     const p=parseSmart($('#raw').value);
-    applyParsedOrder(p);
-    $('#aiParseStatus').textContent='';
+    $('#name').value=p.name||'لا يوجد';
+    if(p.phone)$('#phone').value=p.phone;
+    $('#amount').value=p.amount||'';
+    $('#area').value=p.area||'';
+    $('#address').value=p.address||'';
+    $('#notes').value=p.notes||'';
+    refreshCourier();
     toast('تم الفرز، راجع الحقول قبل الحفظ');
-    if(Number(p.cost||0)===0)runAiParse({automatic:true});
   };
-  $('#aiParse').onclick=()=>runAiParse();
 
   $('#raw').addEventListener('input',refreshCourier);
   $('#area').addEventListener('input',refreshCourier);
@@ -1277,7 +1246,6 @@ async function newOrder(){
           area:$('#area').value,
           detailed_address:$('#address').value,
           amount:$('#amount').value,
-          cost_of_goods:$('#goodsCost').value,
           order_notes:$('#notes').value,
           raw_text:$('#raw').value
         })
@@ -1532,7 +1500,7 @@ async function ordersView(){
         <div class="filter-group"><label>عرض فقط</label><select id="statusFilter" class="select">
           <option value="">الكل</option>
           <option value="pending">قيد التوصيل</option>
-          <option value="delivered">تم الاستلام</option>
+          <option value="delivered">تم التسليم</option>
           <option value="refused_fee_paid">رفض ودفع أجور</option>
           <option value="refused_no_fee">رفض وعدم دفع أجور</option>
           <option value="canceled_before_arrival">ملغي قبل الوصول</option>
@@ -1574,8 +1542,8 @@ async function loadOrders(){
 }
 const DELIVERY_STATUS_LABELS={
   pending:'قيد التوصيل',
-  delivered:'تم الاستلام',
-  delivered_adjusted:'تم الاستلام وتعديل قيمة',
+  delivered:'تم التسليم',
+  delivered_adjusted:'تم التسليم وتعديل قيمة',
   refused_fee_paid:'رفض ودفع أجور',
   refused_no_fee:'رفض وعدم دفع أجور',
   canceled_before_arrival:'ملغي قبل الوصول',
@@ -1763,7 +1731,7 @@ async function openOutcome(id){
   }
 }
 
-function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>النتيجة</th><th>الطباعة</th><th>التاريخ</th>${state.user?.role==='admin'?'<th>حذف</th>':''}</tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code"><button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button></td><td><b>${esc(o.store_name||'—')}</b></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td class="address-cell"><button type="button" class="address-preview" data-address="${encodeURIComponent([o.area,o.detailed_address].filter(Boolean).join(' - '))}" aria-label="عرض العنوان كامل">${esc(o.area||'—')}<span class="address-short">${o.detailed_address?` • ${esc(String(o.detailed_address).replace(/\s+/g,' ').trim())}`:''}</span></button></td><td>${money(o.amount)}</td><td class="notes-cell"><button type="button" class="notes-preview" data-notes="${encodeURIComponent(o.order_notes||'')}" aria-label="عرض الملاحظات كاملة">${esc((o.order_notes||'').replace(/\s+/g,' ').trim()||'—')}</button></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><button class="btn btn-soft outcome-btn" data-order-id="${o.id}">تحديث النتيجة</button><div class="sub" style="margin-top:5px;line-height:1.55">القيمة ${money(o.amount||0)} • الكوست ${money(o.cost_of_goods||0)}<br>التوصيل ${money(o.delivery_fee||0)} • الصافي ${money(['delivered','delivered_adjusted','partial'].includes(o.delivery_status)?Number(o.delivered_amount||0)-Number(o.cost_of_goods||0)-Number(o.delivery_fee||0):0)}</div></td><td>${o.printed?'<span class="badge badge-ok">مطبوع</span>':'<span class="badge badge-warn">غير مطبوع</span>'}</td><td>${fmtDate(o.created_at)}</td>${state.user?.role==='admin'?`<td><button type="button" class="btn btn-danger delete-order-btn" data-delete-order="${o.id}" data-order-code="${o.order_code}">حذف</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
+function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>الطباعة</th><th>التاريخ</th>${state.user?.role==='admin'?'<th>حذف</th>':''}</tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code"><button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button></td><td><b>${esc(o.store_name||'—')}</b></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td class="address-cell"><button type="button" class="address-preview" data-address="${encodeURIComponent([o.area,o.detailed_address].filter(Boolean).join(' - '))}" aria-label="عرض العنوان كامل">${esc(o.area||'—')}<span class="address-short">${o.detailed_address?` • ${esc(String(o.detailed_address).replace(/\s+/g,' ').trim())}`:''}</span></button></td><td>${money(o.amount)}</td><td class="notes-cell"><button type="button" class="notes-preview" data-notes="${encodeURIComponent(o.order_notes||'')}" aria-label="عرض الملاحظات كاملة">${esc((o.order_notes||'').replace(/\s+/g,' ').trim()||'—')}</button></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><select class="select print-status-select" data-order-id="${o.id}" style="min-width:105px"><option value="1" ${o.printed?'selected':''}>مطبوع</option><option value="0" ${!o.printed?'selected':''}>غير مطبوع</option></select></td><td>${fmtDate(o.created_at)}</td>${state.user?.role==='admin'?`<td><button type="button" class="btn btn-danger delete-order-btn" data-delete-order="${o.id}" data-order-code="${o.order_code}">حذف</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
   document.querySelectorAll('.delete-order-btn').forEach(btn=>{
     btn.onclick=async()=>{
       const id=Number(btn.dataset.deleteOrder);
@@ -1785,7 +1753,7 @@ function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!order
       }
     };
   });
-  document.querySelectorAll('.outcome-btn').forEach(btn=>{btn.onclick=()=>openOutcome(Number(btn.dataset.orderId));});
+  document.querySelectorAll('.print-status-select').forEach(sel=>{sel.onchange=async()=>{sel.disabled=true;try{await api('/orders/'+sel.dataset.orderId+'/printed',{method:'PUT',body:JSON.stringify({printed:Number(sel.value)})});toast('تم تغيير حالة الطباعة')}catch(e){toast(e.message)}finally{sel.disabled=false}}});
 
   let infoPopover=document.querySelector('#infoPopover');
   if(!infoPopover){
@@ -1957,7 +1925,7 @@ function deliveryHeaderGuess(headers,kind){
 function mapDeliveryCompanyStatus(raw){
   const n=normalizeArabic(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();
   if(!n)return '';
-  if(n.includes('تم الاستلام')||n.includes('تم التسليم')||n.includes('مسلم')||n.includes('delivered')||n==='done')return 'delivered';
+  if(n.includes('تم التسليم')||n.includes('تم التسليم')||n.includes('مسلم')||n.includes('delivered')||n==='done')return 'delivered';
   if((n.includes('رفض')||n.includes('راجع')||n.includes('مرتجع'))&&(n.includes('دفع')||n.includes('اجور')||n.includes('أجور')))return 'refused_fee_paid';
   if((n.includes('رفض')||n.includes('راجع')||n.includes('مرتجع'))&&(n.includes('عدم')||n.includes('بدون')||n.includes('لم يدفع')))return 'refused_no_fee';
   if(n.includes('ملغي')||n.includes('الغاء')||n.includes('إلغاء')||n.includes('cancel'))return 'canceled_before_arrival';
@@ -1969,7 +1937,7 @@ function mapDeliveryCompanyStatus(raw){
 function deliveryStatusOptions(selected=''){
   return [
     ['','اختر الحالة'],
-    ['delivered','تم الاستلام'],
+    ['delivered','تم التسليم'],
     ['refused_fee_paid','رفض ودفع أجور'],
     ['refused_no_fee','رفض وعدم دفع أجور'],
     ['canceled_before_arrival','ملغي قبل الوصول'],
@@ -2210,7 +2178,7 @@ async function deliveryReconcileView(){
           <div class="accounting-stats">
             <div><span>رقم التسوية</span><b>${esc(s.settlement_code)}</b></div>
             <div><span>تم تحديث</span><b>${s.matched_count}</b></div>
-            <div><span>تم الاستلام</span><b>${s.delivered_count}</b></div>
+            <div><span>تم التسليم</span><b>${s.delivered_count}</b></div>
             <div><span>رفض / رجوع</span><b>${s.refused_count}</b></div>
             <div><span>إجمالي التحصيل</span><b>${money(s.collected_amount)}</b></div>
             <div><span>أجور التوصيل</span><b>${money(s.delivery_fees)}</b></div>
@@ -2233,6 +2201,84 @@ function renderReportTable(orders){
   </tr>`).join('')}</tbody></table></div>`;
 }
 
+
+async function dailyProfitsView(){
+  const c=$('#content');
+  const stores=await getActiveStores();
+  const today=new Date().toISOString().slice(0,10);
+  c.innerHTML=`
+    <div class="page-title"><div><h1>الأرباح اليومية</h1><div class="sub">طلبات تم التسليم والتسليم الجزئي فقط</div></div></div>
+    <div class="card">
+      <div class="toolbar">
+        <input id="profitDate" type="date" class="input" value="${today}">
+        <select id="profitStore" class="select"><option value="">كل المتاجر</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+        <button id="loadProfits" class="btn btn-primary">عرض</button>
+      </div>
+      <div id="profitSummary"></div>
+      <div id="profitOrders"></div>
+    </div>`;
+
+  const recalc=()=>{
+    const cards=[...document.querySelectorAll('.profit-order-card')];
+    let sales=0,costs=0,fees=0;
+    cards.forEach(card=>{
+      const amount=Number(card.querySelector('.profit-amount').value||0);
+      const cost=Number(card.querySelector('.profit-cost').value||0);
+      const fee=Number(card.querySelector('.profit-fee').value||0);
+      const net=amount-cost-fee;
+      card.querySelector('.profit-net').textContent=money(net);
+      sales+=amount;costs+=cost;fees+=fee;
+    });
+    $('#profitSummary').innerHTML=`<div class="accounting-stats" style="margin:14px 0"><div><span>المبيعات الفعلية</span><b>${money(sales)}</b></div><div><span>كوست البضاعة</span><b>${money(costs)}</b></div><div><span>أجور التوصيل</span><b>${money(fees)}</b></div><div><span>صافي الربح</span><b>${money(sales-costs-fees)}</b></div></div>`;
+  };
+
+  const load=async()=>{
+    const p=new URLSearchParams({statuses:'delivered,delivered_adjusted,partial',date_basis:'settled',from_date:$('#profitDate').value,to_date:$('#profitDate').value});
+    if($('#profitStore').value)p.set('store_id',$('#profitStore').value);
+    const d=await api('/orders?'+p.toString()),orders=d.orders||[];
+    $('#profitOrders').innerHTML=orders.length?orders.map(o=>`
+      <div class="card profit-order-card" data-id="${o.id}" data-status="${o.delivery_status}" style="margin:12px 0;padding:14px">
+        <div class="section-head"><div><b>#${o.order_code} — ${esc(o.store_name||'')}</b><div class="sub">${esc(o.recipient_name||'لا يوجد')} • ${esc(o.phone||'')} • ${deliveryBadge(o)}</div></div><button class="btn btn-soft profit-ai" data-id="${o.id}">✨ حساب الكوست بالذكاء</button></div>
+        <div class="grid form-grid" style="margin-top:12px">
+          <div class="field"><label>المبلغ المستلم فعليًا</label><input class="input profit-amount" inputmode="decimal" value="${Number(o.delivered_amount||o.amount||0)}"></div>
+          <div class="field"><label>كوست البضاعة</label><input class="input profit-cost" inputmode="decimal" value="${Number(o.cost_of_goods||0)}"></div>
+          <div class="field"><label>أجور التوصيل</label><input class="input profit-fee" inputmode="decimal" value="${Number(o.delivery_fee||2)}"></div>
+          <div class="field"><label>صافي الربح</label><div style="background:#102a43;color:#fff;border-radius:12px;padding:13px;font-size:24px"><b class="profit-net">0.00</b> د.أ</div></div>
+        </div>
+        <div class="sub" style="white-space:pre-line;margin:10px 0">${esc(o.order_notes||'')}</div>
+        <button class="btn btn-accent profit-save" data-id="${o.id}">حفظ الحساب</button>
+      </div>`).join(''):'<div class="empty">لا توجد طلبات مسلّمة بهذا التاريخ</div>';
+
+    document.querySelectorAll('.profit-order-card input').forEach(x=>x.oninput=recalc);
+    document.querySelectorAll('.profit-ai').forEach(btn=>btn.onclick=async()=>{
+      const card=btn.closest('.profit-order-card'),o=orders.find(x=>Number(x.id)===Number(btn.dataset.id));
+      btn.disabled=true;btn.textContent='جاري التحليل...';
+      try{
+        const d=await api('/ai-parse-order',{method:'POST',body:JSON.stringify({text:o.raw_text||o.order_notes||''})});
+        card.querySelector('.profit-cost').value=money(d.parsed?.cost_of_goods||0);
+        recalc();toast('تم حساب الكوست — راجعه ثم احفظ');
+      }catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent='✨ حساب الكوست بالذكاء'}
+    });
+    document.querySelectorAll('.profit-save').forEach(btn=>btn.onclick=async()=>{
+      const card=btn.closest('.profit-order-card'),o=orders.find(x=>Number(x.id)===Number(btn.dataset.id));
+      btn.disabled=true;
+      try{
+        const amount=Number(card.querySelector('.profit-amount').value||0);
+        const fee=Number(card.querySelector('.profit-fee').value||0);
+        await api('/orders/'+o.id+'/outcome',{method:'PUT',body:JSON.stringify({
+          delivery_status:o.delivery_status,printed:Number(o.printed||0),delivered_amount:amount,
+          delivery_fee:fee,cash_collected:Math.max(0,amount-fee),cost_of_goods:Number(card.querySelector('.profit-cost').value||0),
+          delivered_pieces:Number(o.delivered_pieces||0),returned_pieces:Number(o.returned_pieces||0),settlement_note:o.settlement_note||''
+        })});
+        toast('تم حفظ حساب الطلب');recalc();
+      }catch(e){toast(e.message)}finally{btn.disabled=false}
+    });
+    recalc();
+  };
+  $('#loadProfits').onclick=load;$('#profitStore').onchange=load;$('#profitDate').onchange=load;
+  await load();
+}
+
 async function reportsView(){
   const c=$('#content');
   const stores=await getActiveStores();
@@ -2253,8 +2299,8 @@ async function reportsView(){
           <summary class="btn btn-soft" style="list-style:none;white-space:nowrap">الحالات: <span id="reportStatusCount">الكل</span></summary>
           <div class="card" style="position:absolute;z-index:20;top:calc(100% + 6px);right:0;width:245px;padding:10px;box-shadow:0 12px 30px rgba(0,0,0,.18)">
             <label class="perm-check"><input class="report-status-check" type="checkbox" value="pending"><span>قيد التوصيل</span></label>
-            <label class="perm-check"><input class="report-status-check" type="checkbox" value="delivered"><span>تم الاستلام</span></label>
-            <label class="perm-check"><input class="report-status-check" type="checkbox" value="delivered_adjusted"><span>تم الاستلام وتعديل قيمة</span></label>
+            <label class="perm-check"><input class="report-status-check" type="checkbox" value="delivered"><span>تم التسليم</span></label>
+            <label class="perm-check"><input class="report-status-check" type="checkbox" value="delivered_adjusted"><span>تم التسليم وتعديل قيمة</span></label>
             <label class="perm-check"><input class="report-status-check" type="checkbox" value="refused_fee_paid"><span>رفض ودفع أجور</span></label>
             <label class="perm-check"><input class="report-status-check" type="checkbox" value="refused_no_fee"><span>رفض وعدم دفع أجور</span></label>
             <label class="perm-check"><input class="report-status-check" type="checkbox" value="canceled_before_arrival"><span>ملغي قبل الوصول</span></label>
@@ -2379,7 +2425,7 @@ async function couriersView(){
           <div>
             <b>${esc(x.name)}</b>
             <span class="delivery-rate">${x.delivery_rate}% تسليم</span>
-            <div class="sub">الشحنات ${x.assigned_count||0} • تم الاستلام ${x.delivered_count||0} • رفض/رجوع ${x.returned_count||0}</div>
+            <div class="sub">الشحنات ${x.assigned_count||0} • تم التسليم ${x.delivered_count||0} • رفض/رجوع ${x.returned_count||0}</div>
             ${x.phone?`<div class="sub">${esc(x.phone)}</div>`:''}
           </div>
           <div class="courier-actions">
@@ -2419,7 +2465,7 @@ async function openCourierCustody(cid){
   <div class="accounting-stats">
     <div><span>خرج معه</span><b>${s.assigned_count||0}</b></div>
     <div><span>قيمة الشحنات</span><b>${money(s.assigned_value||0)}</b></div>
-    <div><span>تم الاستلام</span><b>${s.delivered_count||0}</b></div>
+    <div><span>تم التسليم</span><b>${s.delivered_count||0}</b></div>
     <div><span>رفض / رجوع</span><b>${s.refused_count||0}</b></div>
     <div><span>باقي معه</span><b>${s.pending_count||0}</b></div>
     <div><span>قيمة الباقي</span><b>${money(s.pending_value||0)}</b></div>
@@ -2625,8 +2671,8 @@ async function storeShipmentsView(storeId){
             <summary class="btn btn-soft" style="list-style:none;white-space:nowrap">حالات الطلب: <span id="storeShipmentStatusCount">الكل</span></summary>
             <div class="card" style="position:absolute;z-index:20;top:calc(100% + 6px);right:0;width:245px;padding:10px;box-shadow:0 12px 30px rgba(0,0,0,.18)">
               <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="pending"><span>قيد التوصيل</span></label>
-              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="delivered"><span>تم الاستلام</span></label>
-              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="delivered_adjusted"><span>تم الاستلام وتعديل قيمة</span></label>
+              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="delivered"><span>تم التسليم</span></label>
+              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="delivered_adjusted"><span>تم التسليم وتعديل قيمة</span></label>
               <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="refused_fee_paid"><span>رفض ودفع أجور</span></label>
               <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="refused_no_fee"><span>رفض وعدم دفع أجور</span></label>
               <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="canceled_before_arrival"><span>ملغي قبل الوصول</span></label>
@@ -2644,6 +2690,17 @@ async function storeShipmentsView(storeId){
       <div class="actions no-print" style="margin:0 0 14px;align-items:center">
         <span id="storeShipmentCount" class="pill" style="background:#e9eff4;color:#102a43">0 طلب</span>
         <button id="storeShipmentSelectAll" class="btn btn-soft">تحديد الكل</button>
+        <select id="storeBulkStatus" class="select" style="min-width:190px">
+          <option value="">اختر نتيجة المحدد...</option>
+          <option value="delivered">تم التسليم</option>
+          <option value="delivered_adjusted">تم التسليم وتعديل قيمة</option>
+          <option value="partial">استلام جزئي</option>
+          <option value="refused_fee_paid">رفض ودفع أجور</option>
+          <option value="refused_no_fee">رفض وعدم دفع أجور</option>
+          <option value="canceled_before_arrival">ملغي قبل الوصول</option>
+          <option value="pending">قيد التوصيل</option>
+        </select>
+        <button id="storeBulkStatusApply" class="btn btn-primary">تسكير الطلبات المحددة</button>
         <button id="storeShipmentPrintSelected" class="btn btn-accent">طباعة المحدد معًا</button>
       </div>
       <div id="storeShipmentsTable"></div><div id="storeAccountingArea"></div>
@@ -2680,6 +2737,18 @@ async function storeShipmentsView(storeId){
     const all=$('#storeShipmentsTable #allcheck');
     if(all)all.checked=shouldCheck;
   };
+  $('#storeBulkStatusApply').onclick=async()=>{
+    const ids=[...document.querySelectorAll('#storeShipmentsTable .rowcheck:checked')].map(x=>Number(x.dataset.id));
+    const status=$('#storeBulkStatus').value;
+    if(!ids.length)return toast('حدد طلباً واحداً على الأقل');
+    if(!status)return toast('اختر نتيجة الطلبات');
+    if(!confirm(`تغيير حالة ${ids.length} طلب إلى "${DELIVERY_STATUS_LABELS[status]}"؟`))return;
+    try{
+      const r=await api('/orders/bulk-status',{method:'PUT',body:JSON.stringify({order_ids:ids,delivery_status:status})});
+      toast(`تم تحديث ${r.updated||ids.length} طلب`);
+      await load();
+    }catch(e){toast(e.message)}
+  };
   $('#storeShipmentPrintSelected').onclick=async()=>{
     const ids=[...document.querySelectorAll('#storeShipmentsTable .rowcheck:checked')].map(x=>Number(x.dataset.id));
     if(!ids.length)return toast('حدد طلباً واحداً على الأقل');
@@ -2708,7 +2777,7 @@ async function openStoreAccount(storeId,store){
 
     <div class="accounting-stats">
       <div><span>خرج</span><b>${s.outgoing_count||0}</b></div>
-      <div><span>تم الاستلام</span><b>${s.delivered_count||0}</b></div>
+      <div><span>تم التسليم</span><b>${s.delivered_count||0}</b></div>
       <div><span>رفض / رجوع</span><b>${s.refused_count||0}</b></div>
       <div><span>قيد التوصيل</span><b>${s.pending_count||0}</b></div>
       <div><span>المبلغ المحصل</span><b>${money(s.collected_amount||0)}</b></div>
