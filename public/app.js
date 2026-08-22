@@ -216,6 +216,7 @@ function isLikelyName(line, index){
   if(phoneFrom(line)) return false;
   if(isPriceLine(line)) return false;
   if(isLikelyProductOrDetail(line)) return false;
+  if(isColorLine(line)) return false;
   if(findBestPlace(line)) return false;
 
   const n = normalizeArabic(line);
@@ -229,6 +230,18 @@ function isLikelyName(line, index){
   if(index === 0 && ws.length <= 3) return true;
 
   return false;
+}
+
+
+function isColorLine(line){
+  const n=normalizeArabic(String(line||''));
+  const colors=[
+    'اسود','ابيض','زيتي','زيتوني','اخضر','ازرق','احمر','زهري','وردي',
+    'رمادي','رصاصي','سكني','كحلي','بني','بيج','خمري','عنابي','موف',
+    'بنفسجي','اصفر','برتقالي','سكري','اوف وايت','اوفويت','سماوي',
+    'تركواز','فضي','ذهبي','ماروني','نبيتي','كاكي','فستقي','نيلي'
+  ];
+  return /لون|اللون|الوان/.test(n) || colors.some(c=>n.includes(normalizeArabic(c)));
 }
 
 function classifyNoteLine(line){
@@ -246,7 +259,7 @@ function classifyNoteLine(line){
     return {label:'المقاس', value:String(line).trim()};
   }
 
-  if(/لون|اللون|الوان|اسود|ابيض|اخضر|ازرق|احمر|زهري|وردي|رمادي|رصاصي|سكني|كحلي|بني|بيج/.test(n)){
+  if(isColorLine(line)){
     return {label:'اللون', value:String(line).trim()};
   }
 
@@ -372,6 +385,12 @@ function parseSmart(text){
 
     // لا نكرر الاسم المعروف
     if(name !== 'لا يوجد' && line === name) continue;
+
+    // اللون/تفاصيل اللبس لا تضيع حتى لو تشابهت كلمة مع اسم منطقة
+    if(isColorLine(line)){
+      noteRows.push(`اللون: ${String(line).trim()}`);
+      continue;
+    }
 
     // لا نكرر سطر العنوان/المحافظة
     const pa = splitAreaAddress(line);
