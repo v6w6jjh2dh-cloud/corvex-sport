@@ -1241,8 +1241,11 @@ export async function onRequest(context) {
       const username = String(b.username||'').trim();
       const displayName = String(b.display_name||'').trim();
       if (!username || !displayName || String(b.password||'').length < 6) return json({error:'بيانات المستخدم غير مكتملة، وكلمة المرور 6 أحرف على الأقل'},400);
-      const duplicate = await env.DB.prepare('SELECT id FROM users WHERE lower(username)=lower(?) LIMIT 1').bind(username).first();
-      if (duplicate) return json({error:'اسم المستخدم مستخدم مسبقًا، اختر اسمًا آخر'},409);
+      const duplicate = await env.DB.prepare('SELECT id,display_name,is_active FROM users WHERE lower(username)=lower(?) LIMIT 1').bind(username).first();
+      if (duplicate) {
+        const state = Number(duplicate.is_active)===1 ? 'فعال' : 'موقوف';
+        return json({error:`اسم المستخدم موجود لحساب «${duplicate.display_name||'بدون اسم'}» وحالته ${state}. يمكنك تعديله من قائمة الحسابات.`},409);
+      }
       const hash = await hashPassword(String(b.password));
       await env.DB.prepare('INSERT INTO users(username,display_name,password_hash,role) VALUES(?,?,?,?)')
         .bind(username,displayName,hash,b.role==='admin'?'admin':'staff').run();
