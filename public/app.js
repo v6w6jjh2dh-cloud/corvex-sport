@@ -415,16 +415,16 @@ async function boot(){
   try{
     const me=await api('/me');
     state.user=me.user;
-    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v27')!=='1'){
-      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v27','1')}catch{}
+    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v30')!=='1'){
+      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v30','1')}catch{}
     }
     renderShell();
     await show('dashboard')
   }catch{localStorage.removeItem('corvex_token');state.token='';renderLogin()}
 }
 function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);
-    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v27')!=='1'){
-      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v27','1')}catch{}
+    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v30')!=='1'){
+      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v30','1')}catch{}
     }
     renderShell();show('dashboard')}catch(e){toast(e.message)}}}
 function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>تهيئة CORVEX SPORT</h1><p>أنشئ أول حساب مدير</p></div><div class="field"><label>الاسم الظاهر</label><input id="sd" class="input" value="Admin"></div><br><div class="field"><label>اسم المستخدم</label><input id="su" class="input" value="admin"></div><br><div class="field"><label>كلمة المرور</label><input id="sp" type="password" class="input"></div><button id="setupBtn" class="btn btn-accent" style="width:100%;margin-top:18px">إنشاء النظام</button></div></div>`;$('#setupBtn').onclick=async()=>{try{await api('/setup',{method:'POST',body:JSON.stringify({display_name:$('#sd').value,username:$('#su').value,password:$('#sp').value})});toast('تمت التهيئة');renderLogin()}catch(e){toast(e.message)}}}
@@ -470,7 +470,7 @@ function renderShell(){
 
           ${can('print')?'<button data-view="print">▣ جاهز للطباعة</button>':''}
           ${can('batches')?'<button data-view="batches">↻ دفعات الطباعة</button>':''}
-          ${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}
+          ${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}${can('reports')?'<button data-view="delivery-reconcile">⇄ تسوية شركة التوصيل</button>':''}
           ${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}
           ${can('users')?'<button data-view="users">♟ المستخدمون</button>':''}
           ${can('permissions')?'<button data-view="permissions">⚙ الصلاحيات</button>':''}
@@ -528,6 +528,7 @@ async function show(v){
   if(v==='print')return printView();
   if(v==='batches')return batchesView();
   if(v==='reports')return reportsView();
+  if(v==='delivery-reconcile')return deliveryReconcileView();
   if(v==='stores')return storesView();
   if(v==='store-add')return storeAddView();
   if(v==='couriers')return couriersView();
@@ -1260,6 +1261,327 @@ async function batchesView(){
   };
   $('#batchStore').onchange=loadBatches;await loadBatches()
 }
+
+function parseDeliveryDelimitedText(text){
+  const raw=String(text||'').replace(/^\uFEFF/,'').trim();
+  if(!raw)return {headers:[],rows:[]};
+
+  const lines=raw.split(/\r?\n/).filter(x=>x.trim()!=='');
+  const sample=lines.slice(0,5).join('\n');
+  const candidates=[',','\t',';'];
+  let delimiter=',',best=-1;
+  for(const d of candidates){
+    const score=sample.split(d).length;
+    if(score>best){best=score;delimiter=d}
+  }
+
+  function splitLine(line){
+    const out=[];let cur='',quoted=false;
+    for(let i=0;i<line.length;i++){
+      const ch=line[i];
+      if(ch==='"'){
+        if(quoted&&line[i+1]==='"'){cur+='"';i++}
+        else quoted=!quoted;
+      }else if(ch===delimiter&&!quoted){
+        out.push(cur.trim());cur='';
+      }else cur+=ch;
+    }
+    out.push(cur.trim());
+    return out;
+  }
+
+  const matrix=lines.map(splitLine);
+  const headers=(matrix.shift()||[]).map((h,i)=>h||('عمود '+(i+1)));
+  const rows=matrix.map((cells,idx)=>{
+    const obj={__row:idx+2};
+    headers.forEach((h,i)=>obj[h]=cells[i]??'');
+    return obj;
+  });
+  return {headers,rows};
+}
+
+function deliveryHeaderGuess(headers,kind){
+  const hs=headers.map(h=>({raw:h,n:normalizeArabic(String(h)).toLowerCase()}));
+  const tests={
+    phone:['هاتف','الهاتف','رقم الهاتف','موبايل','جوال','phone','mobile','tel'],
+    status:['حاله','الحاله','الحالة','status','result','نتيجه','نتيجة'],
+    amount:['مبلغ','القيمه','القيمة','تحصيل','المحصل','cash','amount','cod','price'],
+    note:['ملاحظه','ملاحظات','note','notes','سبب','reason']
+  };
+  const list=tests[kind]||[];
+  const found=hs.find(x=>list.some(k=>x.n.includes(normalizeArabic(k).toLowerCase())));
+  return found?.raw||'';
+}
+
+function mapDeliveryCompanyStatus(raw){
+  const n=normalizeArabic(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();
+  if(!n)return '';
+  if(n.includes('تم الاستلام')||n.includes('تم التسليم')||n.includes('مسلم')||n.includes('delivered')||n==='done')return 'delivered';
+  if((n.includes('رفض')||n.includes('راجع')||n.includes('مرتجع'))&&(n.includes('دفع')||n.includes('اجور')||n.includes('أجور')))return 'refused_fee_paid';
+  if((n.includes('رفض')||n.includes('راجع')||n.includes('مرتجع'))&&(n.includes('عدم')||n.includes('بدون')||n.includes('لم يدفع')))return 'refused_no_fee';
+  if(n.includes('ملغي')||n.includes('الغاء')||n.includes('إلغاء')||n.includes('cancel'))return 'canceled_before_arrival';
+  if(n.includes('جزئي')||n.includes('partial'))return 'partial';
+  if(n.includes('قيد')||n.includes('توصيل')||n.includes('pending')||n.includes('out for delivery'))return 'pending';
+  return '';
+}
+
+function deliveryStatusOptions(selected=''){
+  return [
+    ['','اختر الحالة'],
+    ['delivered','تم الاستلام'],
+    ['refused_fee_paid','رفض ودفع أجور'],
+    ['refused_no_fee','رفض وعدم دفع أجور'],
+    ['canceled_before_arrival','ملغي قبل الوصول'],
+    ['partial','استلام جزئي'],
+    ['pending','قيد التوصيل']
+  ].map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');
+}
+
+async function deliveryReconcileView(){
+  const c=$('#content');
+  const stores=await getActiveStores();
+  let parsed={headers:[],rows:[]};
+  let previewRows=[];
+
+  c.innerHTML=`
+    <div class="page-title">
+      <div>
+        <h1>تسوية شركة التوصيل</h1>
+        <div class="sub">اختر المتجر، ارفع الكشف أو الصقه، والمطابقة تتم برقم الهاتف داخل نفس المتجر</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="delivery-upload-grid">
+        <div class="field">
+          <label>المتجر صاحب الكشف</label>
+          <select id="deliveryStore" class="select">
+            <option value="">اختر المتجر...</option>
+            ${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="field">
+          <label>رفع كشف CSV / TXT</label>
+          <input id="deliveryFile" type="file" class="input" accept=".csv,.txt,.tsv,text/csv,text/plain">
+        </div>
+
+        <div class="field full">
+          <label>أو الصق الكشف مباشرة من Excel</label>
+          <textarea id="deliveryPaste" class="textarea delivery-paste" placeholder="انسخ الأعمدة والصفوف من Excel والصقهم هنا"></textarea>
+        </div>
+      </div>
+
+      <div id="deliveryMapping" style="display:none"></div>
+      <div id="deliveryPreview"></div>
+      <div id="deliveryHistory"></div>
+    </div>`;
+
+  const loadHistory=async()=>{
+    const sid=$('#deliveryStore').value;
+    if(!sid){$('#deliveryHistory').innerHTML='';return}
+    try{
+      const h=await api('/delivery-reconcile/history?store_id='+encodeURIComponent(sid));
+      $('#deliveryHistory').innerHTML=`
+        <div class="delivery-history-block">
+          <h3>سجل كشوف شركة التوصيل</h3>
+          ${(h.settlements||[]).length?(h.settlements||[]).map(x=>`
+            <div class="settlement-row">
+              <div>
+                <b>${esc(x.settlement_code)}</b>
+                <div class="sub">${fmtDate(x.created_at)} • مطابق ${x.matched_count} • غير مطابق ${x.unmatched_count} • مكرر ${x.duplicate_count}</div>
+              </div>
+              <div class="delivery-history-money">
+                <strong>${money(x.net_due)} د.أ</strong>
+                <span>صافي التحصيل</span>
+              </div>
+            </div>`).join(''):'<div class="empty">لا يوجد كشوف سابقة لهذا المتجر</div>'}
+        </div>`;
+    }catch(e){$('#deliveryHistory').innerHTML=''}
+  };
+
+  const renderMapping=()=>{
+    if(!parsed.headers.length){$('#deliveryMapping').style.display='none';return}
+    const options=(selected='')=>'<option value="">— اختر —</option>'+parsed.headers.map(h=>`<option value="${encodeURIComponent(h)}" ${h===selected?'selected':''}>${esc(h)}</option>`).join('');
+    const phone=deliveryHeaderGuess(parsed.headers,'phone');
+    const status=deliveryHeaderGuess(parsed.headers,'status');
+    const amount=deliveryHeaderGuess(parsed.headers,'amount');
+    const note=deliveryHeaderGuess(parsed.headers,'note');
+
+    $('#deliveryMapping').style.display='block';
+    $('#deliveryMapping').innerHTML=`
+      <div class="delivery-map-card">
+        <h3>تحديد أعمدة الكشف</h3>
+        <div class="delivery-map-grid">
+          <div class="field"><label>رقم الهاتف *</label><select id="mapPhone" class="select">${options(phone)}</select></div>
+          <div class="field"><label>الحالة *</label><select id="mapStatus" class="select">${options(status)}</select></div>
+          <div class="field"><label>المبلغ المحصل</label><select id="mapAmount" class="select">${options(amount)}</select></div>
+          <div class="field"><label>الملاحظات</label><select id="mapNote" class="select">${options(note)}</select></div>
+        </div>
+        <div class="sub">تم قراءة ${parsed.rows.length} صف. إذا لم يتعرف النظام على اسم العمود، اختاره يدويًا.</div>
+        <button id="matchDeliveryReport" class="btn btn-primary">مطابقة الكشف</button>
+      </div>`;
+
+    $('#matchDeliveryReport').onclick=previewReport;
+  };
+
+  const parseText=(text)=>{
+    parsed=parseDeliveryDelimitedText(text);
+    previewRows=[];
+    $('#deliveryPreview').innerHTML='';
+    renderMapping();
+  };
+
+  $('#deliveryFile').onchange=async e=>{
+    const file=e.target.files?.[0];
+    if(!file)return;
+    const text=await file.text();
+    $('#deliveryPaste').value='';
+    parseText(text);
+  };
+
+  $('#deliveryPaste').oninput=()=>{
+    const v=$('#deliveryPaste').value;
+    if(v.trim())parseText(v);
+  };
+
+  $('#deliveryStore').onchange=loadHistory;
+  await loadHistory();
+
+  async function previewReport(){
+    const storeId=$('#deliveryStore').value;
+    if(!storeId)return toast('اختر المتجر أولاً');
+
+    const phoneCol=decodeURIComponent($('#mapPhone').value||'');
+    const statusCol=decodeURIComponent($('#mapStatus').value||'');
+    const amountCol=decodeURIComponent($('#mapAmount').value||'');
+    const noteCol=decodeURIComponent($('#mapNote').value||'');
+
+    if(!phoneCol)return toast('حدد عمود رقم الهاتف');
+    if(!statusCol)return toast('حدد عمود الحالة');
+
+    const rows=parsed.rows.map(r=>({
+      phone:r[phoneCol]||'',
+      status:mapDeliveryCompanyStatus(r[statusCol]),
+      raw_status:r[statusCol]||'',
+      amount:amountCol?Number(String(r[amountCol]||'0').replace(/[^\d.\-]/g,''))||0:0,
+      note:noteCol?r[noteCol]||'':''
+    }));
+
+    try{
+      const d=await api('/delivery-reconcile/preview',{
+        method:'POST',
+        body:JSON.stringify({store_id:storeId,rows})
+      });
+
+      previewRows=(d.rows||[]).map((x,i)=>({...x,raw_status:rows[i]?.raw_status||'',status:rows[i]?.status||''}));
+      renderDeliveryPreview(d.summary||{});
+    }catch(e){toast(e.message)}
+  }
+
+  function renderDeliveryPreview(summary){
+    const unresolved=previewRows.filter(x=>x.match_type!=='matched').length;
+    $('#deliveryPreview').innerHTML=`
+      <div class="delivery-summary">
+        <div><span>إجمالي الكشف</span><b>${summary.total||0}</b></div>
+        <div class="ok"><span>مطابق مؤكد</span><b>${summary.matched||0}</b></div>
+        <div class="warn"><span>رقم مكرر</span><b>${summary.duplicate||0}</b></div>
+        <div class="bad"><span>غير موجود</span><b>${summary.unmatched||0}</b></div>
+      </div>
+
+      <div class="sub delivery-review-note">راجع المكرر وغير المعروف قبل الاعتماد. الطلبات غير المحسومة لن تتغير.</div>
+
+      <div class="table-wrap">
+        <table class="table delivery-preview-table">
+          <thead>
+            <tr><th>#</th><th>الهاتف</th><th>المطابقة</th><th>الطلب</th><th>حالة الكشف</th><th>الحالة المعتمدة</th><th>المبلغ</th><th>ملاحظة</th></tr>
+          </thead>
+          <tbody>
+            ${previewRows.map((r,i)=>{
+              let orderCell='—';
+              if(r.match_type==='matched'&&r.order){
+                orderCell=`#${r.order.order_code} • ${esc(r.order.recipient_name||'لا يوجد')}`;
+              }else if(r.match_type==='duplicate'){
+                orderCell=`<select class="select delivery-order-choice" data-i="${i}">
+                  <option value="">اختر الطلب الصحيح...</option>
+                  ${(r.candidates||[]).map(o=>`<option value="${o.id}">#${o.order_code} • ${esc(o.recipient_name||'لا يوجد')} • ${money(o.amount)}</option>`).join('')}
+                </select>`;
+              }
+              const badge=r.match_type==='matched'
+                ?'<span class="match-badge match-ok">مطابق</span>'
+                :r.match_type==='duplicate'
+                  ?'<span class="match-badge match-warn">مكرر</span>'
+                  :'<span class="match-badge match-bad">غير موجود</span>';
+
+              return `<tr>
+                <td>${r.row_index}</td>
+                <td>${esc(r.phone||'')}</td>
+                <td>${badge}</td>
+                <td>${orderCell}</td>
+                <td>${esc(r.raw_status||'')}</td>
+                <td><select class="select delivery-status-choice" data-i="${i}">${deliveryStatusOptions(r.status||'')}</select></td>
+                <td><input class="input delivery-amount-choice" data-i="${i}" inputmode="decimal" value="${Number(r.amount||0)}"></td>
+                <td><input class="input delivery-note-choice" data-i="${i}" value="${esc(r.note||'')}"></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="delivery-commit-bar">
+        <div><b>المطابقة تعتمد على الهاتف داخل المتجر المختار فقط.</b><div class="sub">إذا تكرر نفس الهاتف، اختر الطلب الصحيح يدويًا.</div></div>
+        <button id="commitDeliveryReport" class="btn btn-accent">اعتماد وتسكير الكشف</button>
+      </div>`;
+
+    $('#commitDeliveryReport').onclick=commitReport;
+  }
+
+  async function commitReport(){
+    const storeId=$('#deliveryStore').value;
+    if(!storeId)return;
+
+    const rows=previewRows.map((r,i)=>{
+      const manual=document.querySelector(`.delivery-order-choice[data-i="${i}"]`);
+      const orderId=r.match_type==='matched'?Number(r.order?.id||0):Number(manual?.value||0);
+      const status=document.querySelector(`.delivery-status-choice[data-i="${i}"]`)?.value||'';
+      const amount=Number(document.querySelector(`.delivery-amount-choice[data-i="${i}"]`)?.value||0);
+      const note=document.querySelector(`.delivery-note-choice[data-i="${i}"]`)?.value||'';
+      return {order_id:orderId,phone:r.phone,status,amount,note,match_type:r.match_type};
+    });
+
+    const resolvable=rows.filter(r=>r.order_id);
+    const missingStatus=resolvable.filter(r=>!r.status);
+    if(!resolvable.length)return toast('لا توجد طلبات مطابقة للاعتماد');
+    if(missingStatus.length)return toast('يوجد طلب مطابق بدون حالة معتمدة');
+
+    if(!confirm(`سيتم تحديث ${resolvable.length} طلب. هل تريد اعتماد وتسكير الكشف؟`))return;
+
+    try{
+      const source=$('#deliveryFile').files?.[0]?.name||'كشف ملصوق';
+      const d=await api('/delivery-reconcile/commit',{
+        method:'POST',
+        body:JSON.stringify({store_id:storeId,source_name:source,rows})
+      });
+      const s=d.settlement;
+      $('#deliveryPreview').innerHTML=`
+        <div class="card delivery-done">
+          <h2>تم اعتماد الكشف ✓</h2>
+          <div class="accounting-stats">
+            <div><span>رقم التسوية</span><b>${esc(s.settlement_code)}</b></div>
+            <div><span>تم تحديث</span><b>${s.matched_count}</b></div>
+            <div><span>تم الاستلام</span><b>${s.delivered_count}</b></div>
+            <div><span>رفض / رجوع</span><b>${s.refused_count}</b></div>
+            <div><span>إجمالي التحصيل</span><b>${money(s.collected_amount)}</b></div>
+            <div><span>أجور التوصيل</span><b>${money(s.delivery_fees)}</b></div>
+            <div><span>الصافي</span><b>${money(s.net_due)}</b></div>
+          </div>
+        </div>`;
+      await loadHistory();
+      toast('تم تحديث الطلبات وتسكير الكشف');
+    }catch(e){toast(e.message)}
+  }
+}
+
 async function reportsView(){
   const c=$('#content');
   const stores=await getActiveStores();
