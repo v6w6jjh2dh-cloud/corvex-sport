@@ -49,6 +49,23 @@ function normalizePhone(value = '') {
   return String(value).replace(/[^0-9+]/g, '').trim();
 }
 
+function duplicateText(value = '') {
+  return String(value)
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[ـ]/g, '')
+    .toLowerCase();
+}
+
+function sameOrderSpecification(row, input) {
+  return duplicateText(row.recipient_name) === duplicateText(input.recipient_name)
+    && normalizePhone(row.phone) === normalizePhone(input.phone)
+    && duplicateText(row.area) === duplicateText(input.area)
+    && duplicateText(row.detailed_address) === duplicateText(input.detailed_address)
+    && Math.round(Number(row.amount || 0) * 100) === Math.round(Number(input.amount || 0) * 100)
+    && duplicateText(row.order_notes) === duplicateText(input.order_notes);
+}
+
 function orderSelectSql(where = '') {
   return `SELECT o.*, u.display_name AS created_by_name, s.name AS store_name, s.phone AS store_phone FROM orders o LEFT JOIN users u ON u.id=o.created_by LEFT JOIN stores s ON s.id=o.store_id ${where}`;
 }
@@ -894,6 +911,35 @@ export async function onRequest(context) {
 
       const store = await env.DB.prepare('SELECT id FROM stores WHERE id=? AND is_active=1').bind(storeId).first();
       if (!store) return json({error:'المتجر غير موجود أو موقوف'},400);
+
+      // Prevent an identical order from being entered twice during the same Jordan calendar day.
+      // The courier and employee are intentionally ignored: matching the customer's full order
+      // specification is enough to treat the second submission as a duplicate.
+      const incomingSpec = {
+        recipient_name: name,
+        phone,
+        area: String(b.area||'').trim(),
+        detailed_address: String(b.detailed_address||'').trim(),
+        amount: Number(b.amount||0),
+        order_notes: String(b.order_notes||'').trim()
+      };
+      const todayCandidates = await env.DB.prepare(`
+        SELECT id,order_code,recipient_name,phone,area,detailed_address,amount,order_notes
+        FROM orders
+        WHERE store_id=? AND phone=?
+          AND date(created_at,'+3 hours')=date('now','+3 hours')
+        ORDER BY id DESC
+        LIMIT 50
+      `).bind(storeId,phone).all();
+      const duplicate = (todayCandidates.results||[]).find(row=>sameOrderSpecification(row,incomingSpec));
+      if (duplicate) {
+        return json({
+          error:`هذا الطلب مكرر اليوم وموجود مسبقًا بالكود #${duplicate.order_code}`,
+          duplicate:true,
+          duplicate_order_id:duplicate.id,
+          duplicate_order_code:duplicate.order_code
+        },409);
+      }
 
       if (!courierId) {
         const fallback = await env.DB.prepare("SELECT id FROM couriers WHERE name='مندوب' AND is_active=1 ORDER BY id LIMIT 1").first();
