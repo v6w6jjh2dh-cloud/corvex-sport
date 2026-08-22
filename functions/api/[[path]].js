@@ -1109,6 +1109,9 @@ export async function onRequest(context) {
 استخرج فقط الاسم والهاتف والمحافظة من العنوان والعنوان وقيمة الطلب والأصناف والكميات والكوست.
 انسخ كل النص المتبقي في notes كما كُتب وبنفس ترتيبه بدون إضافة عناوين أو تفسير.
 إذا لا يوجد اسم اكتب "لا يوجد". طبّع هاتف الأردن إلى 07XXXXXXXX إن أمكن.
+المحافظة يجب أن تكون واحدة فقط من: عمان، الزرقاء، إربد، جرش، عجلون، المفرق، البلقاء، مادبا، الكرك، الطفيلة، معان، العقبة.
+لا تعتبر اسم منطقة أو بلدة محافظة. زيزيا والقسطل وبدر الجديدة والجاردنز وطبربور والمقابلين والجندويل كلها تتبع محافظة عمان، ويجب إبقاء اسم المنطقة داخل detailed_address.
+إذا ورد "ثلاث ألوان" أو "ثلاث الألوان" مع صنف واحد فهذا يعني 3 قطع حتمًا، واجعل quantity=3 واضرب الكوست بثلاثة.
 أسعار الكوست الثابتة وترتيب المطابقة:
 بنطلون جيوب سحاب 2.30؛ بنطلون رياضة سحاب 2.70؛ بنطلون تركي 2.70؛ بنطلون زرار 2.20؛ بنطلون جيوب 2.20؛ تيشيرت سادة تريكو 2.50؛ بجامة جاكار أو ترينغ أو تريننغ 4.25؛ تيشيرت بولو تريكو أو بولو ترند أو تيشيرت بولو أو بولو 3.50.
 عبارة مثل "ثلاث الألوان" مع صنف واحد تعني غالبًا 3 قطع. "جيوب سحاب" تعني بنطلون جيوب سحاب.
@@ -1120,7 +1123,7 @@ export async function onRequest(context) {
           method:'POST',
           headers:{'authorization':`Bearer ${env.OPENAI_API_KEY}`,'content-type':'application/json'},
           body:JSON.stringify({
-            model:env.OPENAI_MODEL || 'gpt-5-nano',
+            model:env.OPENAI_MODEL || 'gpt-5-mini',
             instructions, input:rawText,
             reasoning:{effort:'minimal'},
             text:{format:{type:'json_schema',name:'corvex_order',strict:true,schema}}
@@ -1136,7 +1139,28 @@ export async function onRequest(context) {
       try{parsed=JSON.parse(outputText)}catch{return json({error:'وصلت نتيجة غير مفهومة من التحليل الذكي'},502)}
       parsed.cost_of_goods=Math.max(0,Number(parsed.cost_of_goods||0));
       parsed.amount=Math.max(0,Number(parsed.amount||0));
-      return json({parsed,model:data.model||env.OPENAI_MODEL||'gpt-5-nano',usage:data.usage||null});
+      const normalizedOrder=duplicateText(rawText)
+        .replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه')
+        .replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+      const wordQuantityMap={واحد:1,واحده:1,اثنين:2,اتنين:2,ثنتين:2,ثلاث:3,ثلاثه:3,اربعه:4,خمس:5,سته:6};
+      const colorQuantity=normalizedOrder.match(/(?:^|\s)(\d+|واحد|واحده|اثنين|اتنين|ثنتين|ثلاث|ثلاثه|اربعه|خمس|سته)\s*(?:ال)?الوان/);
+      if(Array.isArray(parsed.items)&&parsed.items.length===1&&colorQuantity){
+        const q=Number(colorQuantity[1])||wordQuantityMap[colorQuantity[1]]||1;
+        if(q>=1&&q<=50){
+          parsed.items[0].quantity=q;
+          parsed.items[0].total_cost=Number((q*Number(parsed.items[0].unit_cost||0)).toFixed(2));
+          parsed.cost_of_goods=parsed.items[0].total_cost;
+        }
+      }
+      if(/زيزيا|القسطل|بدر الجديده|الجاردنز|طبربور|المقابلين|الجندويل/.test(normalizedOrder)){
+        parsed.governorate='عمان';
+        const localities=['زيزيا','القسطل','بدر الجديدة','الجاردنز','طبربور','المقابلين','الجندويل']
+          .filter(x=>normalizedOrder.includes(duplicateText(x).replace(/ة/g,'ه')));
+        if(localities.length&&!localities.some(x=>String(parsed.detailed_address||'').includes(x))){
+          parsed.detailed_address=[...localities,String(parsed.detailed_address||'')].filter(Boolean).join(' - ');
+        }
+      }
+      return json({parsed,model:data.model||env.OPENAI_MODEL||'gpt-5-mini',usage:data.usage||null});
     }
 
     if (path === '/deleted-orders' && method === 'GET') {
