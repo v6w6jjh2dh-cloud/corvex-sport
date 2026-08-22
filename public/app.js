@@ -825,7 +825,7 @@ function renderShell(){
   app.innerHTML=`<div class="shell">
     <header class="topbar">
       <button id="mobileMenuBtn" class="mobile-menu-btn" aria-label="القائمة">☰</button>
-      <div class="logo"><div class="logo-mark">C</div><div>CORVEX SPORT<small>ORDER DESK</small></div></div>
+      <button id="topLogoHome" class="logo" type="button" style="border:0;background:transparent;color:inherit;cursor:pointer;text-align:inherit"><div class="logo-mark">C</div><div>CORVEX SPORT<small>ORDER DESK</small></div></button>
       <div class="top-actions"><span class="pill">${esc(state.user?.display_name||'')}</span><button id="logout" class="btn btn-soft">خروج</button></div>
     </header>
     <div class="layout">
@@ -903,6 +903,8 @@ function renderShell(){
       sidebarOverlay.classList.remove('show');
     };
   }
+
+  $('#topLogoHome').onclick=()=>show('dashboard');
 
   $('#logout').onclick=async()=>{
     try{await api('/logout',{method:'POST'})}catch{}
@@ -1102,6 +1104,13 @@ async function newOrder(){
   $('#area').addEventListener('input',refreshCourier);
   $('#address').addEventListener('input',refreshCourier);
   $('#clearRaw').onclick=()=>{$('#raw').value='';refreshCourier()};
+  const rememberedStore=localStorage.getItem('corvex_selected_store')||'';
+  if(rememberedStore && stores.some(s=>String(s.id)===rememberedStore))$('#store').value=rememberedStore;
+  $('#store').onchange=()=>{
+    if($('#store').value)localStorage.setItem('corvex_selected_store',$('#store').value);
+    else localStorage.removeItem('corvex_selected_store');
+  };
+
   $('#quickAddStore').onclick=()=>show('store-add');
 
   async function save(next){
@@ -1715,11 +1724,11 @@ function openPrintWindow(orders,title='طباعة'){const w=window.open('','_bla
 async function batchesView(){
   const c=$('#content');
   const stores=await getActiveStores();
-  c.innerHTML=`<div class="page-title"><div><h1>دفعات الطباعة</h1><div class="sub">الدفعات مفصولة حسب المتجر</div></div></div><div class="card"><div class="toolbar"><select id="batchStore" class="select"><option value="">كل المتاجر</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div><div id="batchList"></div></div>`;
+  c.innerHTML=`<div class="page-title"><div><h1>دفعات الطباعة</h1><div class="sub">كل ضغطة طباعة تُسجّل دفعة واحدة مهما كان عدد أوراقها</div></div></div><div class="card"><div class="toolbar"><select id="batchStore" class="select"><option value="">كل المتاجر</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div><div id="batchList"></div></div>`;
   const loadBatches=async()=>{
     const q=$('#batchStore').value?('?store_id='+encodeURIComponent($('#batchStore').value)):'';
     const d=await api('/print-batches'+q);state.batches=d.batches;
-    $('#batchList').innerHTML=state.batches.length?state.batches.map(b=>`<div class="batch-card"><div><b>${esc(b.batch_code)}</b><div class="batch-meta">${esc(b.store_name||'متجر غير محدد')} • ${b.order_count} طلب • ${esc(b.created_by_name||'')} • ${fmtDate(b.created_at)}</div></div><div class="actions" style="margin:0"><button class="btn btn-outline" data-batch="${b.id}" data-mode="all">إعادة الدفعة</button><button class="btn btn-soft" data-batch="${b.id}" data-mode="page">إعادة صفحة</button>${state.user?.role==='admin'?`<button class="btn btn-danger" data-delete-batch="${b.id}" data-batch-code="${esc(b.batch_code)}">حذف الدفعة</button>`:''}</div></div>`).join(''):'<div class="empty">لا توجد دفعات</div>';
+    $('#batchList').innerHTML=state.batches.length?state.batches.map(b=>`<div class="batch-card"><div><b>${esc(b.batch_code)}</b><div class="batch-meta">${esc(b.store_name||'متجر غير محدد')} • ${b.order_count} طلب • ${Math.max(1,Math.ceil(Number(b.order_count||0)/8))} صفحة • طبعة واحدة • ${esc(b.created_by_name||'')} • ${fmtDate(b.created_at)}</div></div><div class="actions" style="margin:0"><button class="btn btn-outline" data-batch="${b.id}" data-mode="all">إعادة الدفعة</button><button class="btn btn-soft" data-batch="${b.id}" data-mode="page">إعادة صفحة</button>${state.user?.role==='admin'?`<button class="btn btn-danger" data-delete-batch="${b.id}" data-batch-code="${esc(b.batch_code)}">حذف الدفعة</button>`:''}</div></div>`).join(''):'<div class="empty">لا توجد دفعات</div>';
     document.querySelectorAll('[data-batch]').forEach(btn=>btn.onclick=async()=>{const d=await api('/print-batches/'+btn.dataset.batch);if(btn.dataset.mode==='all')openPrintWindow(d.orders,`إعادة ${d.batch.batch_code}`);else{const max=Math.ceil(d.orders.length/8);const p=Number(prompt(`رقم الصفحة من 1 إلى ${max}`,'1'));if(p>=1&&p<=max)openPrintWindow(d.orders.slice((p-1)*8,p*8),`صفحة ${p} - ${d.batch.batch_code}`)}})
     document.querySelectorAll('[data-delete-batch]').forEach(btn=>btn.onclick=async()=>{
       if(!confirm(`حذف دفعة ${btn.dataset.batchCode||''}؟\nلن يتم حذف الطلبات نفسها.`))return;
@@ -2442,16 +2451,18 @@ async function storeShipmentsView(storeId){
       </div>
       <div id="storeShipmentFilters" class="card hidden" style="margin:0 0 14px;padding:14px">
         <div class="toolbar" style="margin:0">
-          <select id="storeShipmentStatus" class="select">
-            <option value="">كل حالات التوصيل</option>
-            <option value="pending">قيد التوصيل</option>
-            <option value="delivered">تم الاستلام</option>
-            <option value="delivered_adjusted">تم الاستلام وتعديل قيمة</option>
-            <option value="refused_fee_paid">رفض ودفع أجور</option>
-            <option value="refused_no_fee">رفض وعدم دفع أجور</option>
-            <option value="canceled_before_arrival">ملغي قبل الوصول</option>
-            <option value="partial">استلام جزئي</option>
-          </select>
+          <details id="storeShipmentStatusPicker" style="position:relative">
+            <summary class="btn btn-soft" style="list-style:none;white-space:nowrap">حالات الطلب: <span id="storeShipmentStatusCount">الكل</span></summary>
+            <div class="card" style="position:absolute;z-index:20;top:calc(100% + 6px);right:0;width:245px;padding:10px;box-shadow:0 12px 30px rgba(0,0,0,.18)">
+              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="pending"><span>قيد التوصيل</span></label>
+              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="delivered"><span>تم الاستلام</span></label>
+              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="delivered_adjusted"><span>تم الاستلام وتعديل قيمة</span></label>
+              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="refused_fee_paid"><span>رفض ودفع أجور</span></label>
+              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="refused_no_fee"><span>رفض وعدم دفع أجور</span></label>
+              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="canceled_before_arrival"><span>ملغي قبل الوصول</span></label>
+              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="partial"><span>استلام جزئي</span></label>
+            </div>
+          </details>
           <select id="storeShipmentPrinted" class="select">
             <option value="">كل حالات الطباعة</option>
             <option value="1">مطبوع</option>
@@ -2473,7 +2484,8 @@ async function storeShipmentsView(storeId){
   const load=async()=>{
     const p=new URLSearchParams({store_id:String(storeId)});
     if($('#storeShipmentQ').value)p.set('q',$('#storeShipmentQ').value);
-    if($('#storeShipmentStatus')?.value)p.set('status',$('#storeShipmentStatus').value);
+    const statuses=[...document.querySelectorAll('.store-shipment-status-check:checked')].map(x=>x.value);
+    if(statuses.length)p.set('statuses',statuses.join(','));
     if($('#storeShipmentPrinted')?.value!=='')p.set('printed',$('#storeShipmentPrinted').value);
     const d=await api('/orders?'+p.toString());
     const orders=d.orders||[];
@@ -2483,8 +2495,12 @@ async function storeShipmentsView(storeId){
 
   $('#storeShipmentSearch').onclick=()=>{
     $('#storeShipmentFilters').classList.toggle('hidden');
-    if(!$('#storeShipmentFilters').classList.contains('hidden'))$('#storeShipmentStatus').focus();
+    if(!$('#storeShipmentFilters').classList.contains('hidden'))document.querySelector('.store-shipment-status-check')?.focus();
   };
+  document.querySelectorAll('.store-shipment-status-check').forEach(x=>x.onchange=()=>{
+    const count=document.querySelectorAll('.store-shipment-status-check:checked').length;
+    $('#storeShipmentStatusCount').textContent=count?String(count):'الكل';
+  });
   $('#storeShipmentApply').onclick=load;
   $('#storeShipmentQ').onkeydown=e=>{if(e.key==='Enter')load()};
   $('#storeShipmentSelectAll').onclick=()=>{
