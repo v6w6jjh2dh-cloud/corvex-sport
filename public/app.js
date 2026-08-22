@@ -1308,11 +1308,6 @@ async function editOrder(id){
             <label>قيمة الطلب</label>
             <input id="editAmount" class="input" inputmode="decimal" value="${Number(o.amount||0)}">
           </div>
-          <div class="edit-field">
-            <label>كوست البضاعة</label>
-            <input id="editCost" class="input" inputmode="decimal" value="${Number(o.cost_of_goods||0)}">
-          </div>
-
           <div class="edit-section-title">نتيجة التوصيل</div><div class="edit-field"><label>مندوب التوصيل</label><select id="editCourier" class="select"><option value="">بدون مندوب</option></select></div>
 
           <div class="edit-field">
@@ -1329,7 +1324,7 @@ async function editOrder(id){
 
           <div class="edit-field">
             <label>أجور التوصيل</label>
-            <input id="editDeliveryFee" class="input fixed-fee" value="2" readonly>
+            <input id="editDeliveryFee" class="input" inputmode="decimal" value="${Number(o.delivery_fee||2)}">
           </div>
 
           <div class="edit-field">
@@ -1435,7 +1430,7 @@ async function editOrder(id){
           body:JSON.stringify({
             delivery_status:$('#editStatus').value,
             delivered_amount:$('#editDeliveredAmount').value,
-            delivery_fee:card.querySelector('#outDeliveryFee').value,
+            delivery_fee:$('#editDeliveryFee').value,
             cash_collected:$('#editCash').value,
             cost_of_goods:$('#editCost').value,
             delivered_pieces:$('#editDeliveredPieces').value,
