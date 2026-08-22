@@ -274,8 +274,8 @@ async function userPermissions(env,user){
 
 const STATUS_LABELS = {
   pending: 'قيد التوصيل',
-  delivered: 'تم الاستلام',
-  delivered_adjusted: 'تم الاستلام وتعديل قيمة',
+  delivered: 'تم التسليم',
+  delivered_adjusted: 'تم التسليم وتعديل قيمة',
   refused_fee_paid: 'رفض ودفع أجور',
   refused_no_fee: 'رفض وعدم دفع أجور',
   canceled_before_arrival: 'ملغي قبل الوصول',
@@ -328,6 +328,10 @@ async function listOrders(url, env) {
     where.push('o.first_printed_at IS NOT NULL');
     if(fromDate){where.push(`${deliveryDate} >= date(?)`);params.push(fromDate)}
     if(toDate){where.push(`${deliveryDate} <= date(?)`);params.push(toDate)}
+  }else if(dateBasis==='settled'){
+    where.push('o.settled_at IS NOT NULL');
+    if(fromDate){where.push("date(o.settled_at,'+3 hours') >= date(?)");params.push(fromDate)}
+    if(toDate){where.push("date(o.settled_at,'+3 hours') <= date(?)");params.push(toDate)}
   }else{
     if (fromDate) { where.push("date(o.created_at) >= date(?)"); params.push(fromDate); }
     if (toDate) { where.push("date(o.created_at) <= date(?)"); params.push(toDate); }
@@ -1048,6 +1052,39 @@ export async function onRequest(context) {
       return json({order});
     }
 
+
+
+    if (path === '/orders/bulk-status' && method === 'PUT') {
+      const b=await readBody(request);
+      const ids=[...new Set((Array.isArray(b.order_ids)?b.order_ids:[]).map(Number).filter(x=>x>0))].slice(0,500);
+      const allowed=new Set(Object.keys(STATUS_LABELS));
+      const status=String(b.delivery_status||'');
+      if(!ids.length)return json({error:'حدد طلباً واحداً على الأقل'},400);
+      if(!allowed.has(status))return json({error:'حالة الطلب غير صحيحة'},400);
+      const marks=ids.map(()=>'?').join(',');
+      const rows=await env.DB.prepare(`SELECT id,amount,delivered_amount,delivery_fee FROM orders WHERE id IN (${marks})`).bind(...ids).all();
+      const statements=(rows.results||[]).map(o=>{
+        const deliveredAmount=status==='delivered'?Number(o.amount||0):
+          (['delivered_adjusted','partial'].includes(status)?Number(o.delivered_amount||o.amount||0):0);
+        const fee=['delivered','delivered_adjusted','partial','refused_fee_paid'].includes(status)?Number(o.delivery_fee||2):0;
+        const cash=['delivered','delivered_adjusted','partial'].includes(status)?Math.max(0,deliveredAmount-fee):0;
+        return env.DB.prepare(`UPDATE orders SET delivery_status=?,delivered_amount=?,delivery_fee=?,cash_collected=?,
+          settled_at=CASE WHEN ?='pending' THEN NULL ELSE datetime('now') END,updated_at=datetime('now') WHERE id=?`)
+          .bind(status,deliveredAmount,fee,cash,status,o.id);
+      });
+      for(let i=0;i<statements.length;i+=40)await env.DB.batch(statements.slice(i,i+40));
+      return json({ok:true,updated:statements.length,status_label:STATUS_LABELS[status]||status});
+    }
+
+    const printedMatch=path.match(/^\/orders\/(\d+)\/printed$/);
+    if(printedMatch && method==='PUT'){
+      const b=await readBody(request);
+      const printed=Number(b.printed)===1?1:0;
+      await env.DB.prepare("UPDATE orders SET printed=?,updated_at=datetime('now') WHERE id=?").bind(printed,Number(printedMatch[1])).run();
+      const order=await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(Number(printedMatch[1])).first();
+      if(!order)return json({error:'الطلب غير موجود'},404);
+      return json({order});
+    }
 
     const outcomeMatch = path.match(/^\/orders\/(\d+)\/outcome$/);
     if (outcomeMatch && method === 'PUT') {
