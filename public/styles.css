@@ -1024,3 +1024,27 @@ html,body,#app,.shell{width:100%!important;max-width:100%!important;overflow-x:h
 .auto-courier-field small{
   margin-top:2px!important;
 }
+
+
+/* V28 daily outgoing / first-print statistics */
+.outgoing-today-card{margin-top:16px}
+.section-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px}
+.section-head h3{margin:0 0 4px}
+.outgoing-total{
+  min-width:64px;
+  height:64px;
+  display:grid;
+  place-items:center;
+  border-radius:18px;
+  background:#102a43;
+  color:#fff;
+  font-size:26px;
+}
+.outgoing-store-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px}
+.outgoing-store-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 14px;border:1px solid #e0e7ed;border-radius:12px;background:#f9fbfc}
+.outgoing-store-item b{font-size:22px;color:#102a43}
+.outgoing-report-card{margin-top:18px}
+.outgoing-report-total{margin:14px 0;padding:14px;border-radius:12px;background:#f4f8fb;border:1px solid #dbe5ed;font-size:17px}
+.outgoing-report-total b{font-size:24px;color:#117a65}
+@media(max-width:900px){.outgoing-store-grid{grid-template-columns:repeat(2,minmax(140px,1fr))}}
+@media(max-width:520px){.outgoing-store-grid{grid-template-columns:1fr}.section-head{align-items:flex-start}.outgoing-total{min-width:54px;height:54px;font-size:22px}}

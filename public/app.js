@@ -536,13 +536,50 @@ async function show(v){
   if(v==='permissions')return permissionsView();
   if(v==='users')return usersView();
 }
-async function dashboard(){const c=$('#content');c.innerHTML='<div class="empty">جاري التحميل...</div>';try{state.stats=await api('/dashboard');c.innerHTML=`<div class="page-title"><div><h1>لوحة التحكم</h1><div class="sub">نظرة سريعة على حركة الطلبات</div></div><button class="btn btn-accent" onclick="show('new')">＋ طلب جديد</button></div><div class="grid stats"><div class="stat"><b>${state.stats.today||0}</b><span>طلبات اليوم</span></div><div class="stat"><b>${state.stats.unprinted||0}</b><span>غير مطبوعة</span></div><div class="stat"><b>${state.stats.total||0}</b><span>إجمالي الطلبات</span></div><div class="stat"><b>${state.stats.batches||0}</b><span>دفعات الطباعة</span></div></div><div class="card"><h3>مسار العمل</h3><p class="sub">الموظف يدخل الطلب ← يظهر ضمن غير المطبوع ← تنشئ دفعة طباعة ← 8 بوالص في كل A4.</p></div>`}catch(e){c.innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
+async function dashboard(){
+  const c=$('#content');
+  c.innerHTML='<div class="empty">جاري التحميل...</div>';
 
-function courierAreasList(courier){
-  return String(courier?.areas||'')
-    .split(/[،,;\n]+/)
-    .map(x=>x.trim())
-    .filter(Boolean);
+  try{
+    state.stats=await api('/dashboard');
+    const byStore=state.stats.outgoing_by_store||[];
+
+    c.innerHTML=`
+      <div class="page-title">
+        <div><h1>لوحة التحكم</h1><div class="sub">نظرة سريعة على حركة الطلبات</div></div>
+        <button class="btn btn-accent" onclick="show('new')">＋ طلب جديد</button>
+      </div>
+
+      <div class="grid stats">
+        <div class="stat"><b>${state.stats.outgoing_today||0}</b><span>طلبات خرجت اليوم</span></div>
+        <div class="stat"><b>${state.stats.today||0}</b><span>طلبات أضيفت اليوم</span></div>
+        <div class="stat"><b>${state.stats.unprinted||0}</b><span>غير مطبوعة</span></div>
+        <div class="stat"><b>${state.stats.total||0}</b><span>إجمالي الطلبات</span></div>
+      </div>
+
+      <div class="card outgoing-today-card">
+        <div class="section-head">
+          <div><h3>طلبات خرجت اليوم حسب المتجر</h3><div class="sub">الحسبة تعتمد على أول طباعة للطلب، وليس تاريخ إضافته</div></div>
+          <b class="outgoing-total">${state.stats.outgoing_today||0}</b>
+        </div>
+
+        ${byStore.length?`
+          <div class="outgoing-store-grid">
+            ${byStore.map(x=>`
+              <div class="outgoing-store-item">
+                <span>${esc(x.store_name||'متجر غير محدد')}</span>
+                <b>${Number(x.outgoing_count||0)}</b>
+              </div>`).join('')}
+          </div>`:'<div class="empty">لا توجد طلبات خرجت اليوم حتى الآن</div>'}
+      </div>
+
+      <div class="card">
+        <h3>مسار العمل</h3>
+        <p class="sub">الموظف يدخل الطلب ← يظهر ضمن غير المطبوع ← تنشئ دفعة طباعة ← أول طباعة تعتبر تاريخ خروج الشحنة.</p>
+      </div>`;
+  }catch(e){
+    c.innerHTML=`<div class="empty">${esc(e.message)}</div>`;
+  }
 }
 
 function autoCourierForText(couriers,text){
@@ -1226,10 +1263,102 @@ async function batchesView(){
 async function reportsView(){
   const c=$('#content');
   const stores=await getActiveStores();
-  c.innerHTML=`<div class="page-title"><div><h1>الكشوفات وExcel</h1><div class="sub">كشف عام أو كشف لمتجر محدد</div></div></div><div class="card"><div class="toolbar"><select id="reportStore" class="select"><option value="">كل المتاجر</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><input id="fd" type="date" class="input"><input id="td" type="date" class="input"><button id="rr" class="btn btn-primary">عرض</button><button id="rp" class="btn btn-outline">طباعة كشف</button><button id="rx" class="btn btn-accent">تنزيل Excel/CSV</button></div><div id="reportTable"></div></div>`;
-  const today=new Date().toISOString().slice(0,10);$('#fd').value=today;$('#td').value=today;
-  async function load(){const p=new URLSearchParams({from_date:$('#fd').value,to_date:$('#td').value});if($('#reportStore').value)p.set('store_id',$('#reportStore').value);const d=await api('/orders?'+p);state.orders=d.orders;renderOrdersTable('#reportTable',state.orders,false)}
-  $('#rr').onclick=load;$('#rp').onclick=()=>printReport(state.orders);$('#rx').onclick=()=>downloadCsv(state.orders);$('#reportStore').onchange=load;await load()
+
+  c.innerHTML=`
+    <div class="page-title">
+      <div><h1>الكشوفات وExcel</h1><div class="sub">كشوف الطلبات + عدد الشحنات التي خرجت فعليًا حسب أول طباعة</div></div>
+    </div>
+
+    <div class="card">
+      <h3>كشف الطلبات</h3>
+      <div class="toolbar">
+        <select id="reportStore" class="select">
+          <option value="">كل المتاجر</option>
+          ${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}
+        </select>
+        <input id="fd" type="date" class="input">
+        <input id="td" type="date" class="input">
+        <button id="rr" class="btn btn-primary">عرض</button>
+        <button id="rp" class="btn btn-outline">طباعة كشف</button>
+        <button id="rx" class="btn btn-accent">تنزيل Excel/CSV</button>
+      </div>
+      <div id="reportTable"></div>
+    </div>
+
+    <div class="card outgoing-report-card">
+      <h3>الشحنات الخارجة حسب الطباعة</h3>
+      <div class="sub">كل طلب يُحسب مرة واحدة فقط بتاريخ أول طباعة له</div>
+
+      <div class="toolbar">
+        <select id="outgoingStore" class="select">
+          <option value="">كل المتاجر</option>
+          ${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}
+        </select>
+        <input id="ofd" type="date" class="input">
+        <input id="otd" type="date" class="input">
+        <button id="outgoingToday" class="btn btn-soft">اليوم</button>
+        <button id="outgoingYesterday" class="btn btn-soft">أمس</button>
+        <button id="outgoingLoad" class="btn btn-primary">عرض</button>
+      </div>
+
+      <div id="outgoingSummary"></div>
+    </div>`;
+
+  const today=new Date().toISOString().slice(0,10);
+  $('#fd').value=today;
+  $('#td').value=today;
+  $('#ofd').value=today;
+  $('#otd').value=today;
+
+  async function load(){
+    const p=new URLSearchParams({from_date:$('#fd').value,to_date:$('#td').value});
+    if($('#reportStore').value)p.set('store_id',$('#reportStore').value);
+    const d=await api('/orders?'+p);
+    state.orders=d.orders;
+    renderOrdersTable('#reportTable',state.orders,false);
+  }
+
+  async function loadOutgoing(){
+    const p=new URLSearchParams();
+    if($('#ofd').value)p.set('from_date',$('#ofd').value);
+    if($('#otd').value)p.set('to_date',$('#otd').value);
+    if($('#outgoingStore').value)p.set('store_id',$('#outgoingStore').value);
+
+    const d=await api('/outgoing-report?'+p.toString());
+    const rows=d.rows||[];
+
+    $('#outgoingSummary').innerHTML=`
+      <div class="outgoing-report-total">إجمالي الشحنات الخارجة: <b>${d.total||0}</b></div>
+      ${rows.length?`
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>التاريخ</th><th>المتجر</th><th>عدد الطلبات الخارجة</th></tr></thead>
+            <tbody>
+              ${rows.map(r=>`<tr><td>${esc(r.print_date||'')}</td><td>${esc(r.store_name||'متجر غير محدد')}</td><td><b>${Number(r.orders_count||0)}</b></td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`:'<div class="empty">لا توجد شحنات خارجة في هذه الفترة</div>'}`;
+  }
+
+  $('#rr').onclick=load;
+  $('#rp').onclick=()=>printReport(state.orders);
+  $('#rx').onclick=()=>downloadCsv(state.orders);
+  $('#reportStore').onchange=load;
+
+  $('#outgoingLoad').onclick=loadOutgoing;
+  $('#outgoingStore').onchange=loadOutgoing;
+  $('#outgoingToday').onclick=()=>{$('#ofd').value=today;$('#otd').value=today;loadOutgoing()};
+  $('#outgoingYesterday').onclick=()=>{
+    const d=new Date();
+    d.setDate(d.getDate()-1);
+    const y=d.toISOString().slice(0,10);
+    $('#ofd').value=y;
+    $('#otd').value=y;
+    loadOutgoing();
+  };
+
+  await load();
+  await loadOutgoing();
 }
 function printReport(orders){const w=window.open('','_blank');w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>كشف CORVEX SPORT</title><style>@page{size:A4 landscape;margin:8mm}body{font-family:Tahoma,Arial}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #aaa;padding:5px;text-align:right}h2{margin:0 0 10px}</style></head><body><h2>كشف طلبات CORVEX SPORT</h2><table><thead><tr><th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>التاريخ</th></tr></thead><tbody>${orders.map(o=>`<tr><td>${o.order_code}</td><td>${esc(o.store_name||'—')}</td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td>${esc(o.area)}</td><td>${esc(o.detailed_address)}</td><td>${money(o.amount)}</td><td>${esc(o.order_notes)}</td><td>${esc(o.created_by_name||'')}</td><td>${fmtDate(o.created_at)}</td></tr>`).join('')}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()}
 function downloadCsv(orders){const rows=[['رقم البوليصة','المتجر','اسم المستلم','رقم الهاتف','المحافظة','العنوان التفصيلي','قيمة الطرد','ملاحظات الطلب','الموظف','تاريخ الإدخال'],...orders.map(o=>[o.order_code,o.store_name||'',o.recipient_name,o.phone,o.area,o.detailed_address,o.amount,o.order_notes,o.created_by_name||'',o.created_at])];const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`corvex-orders-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(a.href)}
