@@ -789,27 +789,45 @@ function parseSmart(text){
     address=[address,...extras].filter(Boolean).join(' - ');
   }
 
-  // If a locality is not in the dictionary, the first plain line(s) immediately
-  // after the phone are still the address until product/detail content begins.
+  // Delivery/contact timing is never an address.
+  const isTimingOrContactInstruction=line=>{
+    const n=normalizeArabic(String(line||''));
+    return /(?:بعد|قبل)\s*(?:الساعه|ساعة|ساعه)|(?:التسليم|التوصيل|دوام|الدوام|اتصل|اتصال|تواصل|رن|يرن)/.test(n);
+  };
+
+  // An explicit address cue such as شارع/دوار/منطقة wins wherever it appears,
+  // even when the customer placed it before the phone.
+  if(!address){
+    for(let i=0;i<lines.length;i++){
+      if(used.has(i)||phoneFrom(lines[i])||isPriceLine(lines[i]))continue;
+      const n=normalizeArabic(lines[i]);
+      const detailLike=containsAny(n,PRODUCT_WORDS)||isColorLine(lines[i])||isQuantityLine(lines[i])||
+        /وزن|الوزن|وزني|مقاس|المقاس|الطول|طولي/.test(n);
+      if(!detailLike&&!isTimingOrContactInstruction(lines[i])&&hasStrongAddressCue(lines[i])){
+        address=lines[i];
+        area=splitAreaAddress(lines[i]).area||'عمان';
+        used.add(i);
+        break;
+      }
+    }
+  }
+
+  // If the locality has no known cue, use the first plain line after the phone,
+  // skipping timing/contact instructions and continuing until a real address is found.
   if(!address){
     const firstPhoneIndex=lines.findIndex(x=>!!phoneFrom(x));
-    const positionalAddress=[];
     if(firstPhoneIndex>=0){
       for(let i=firstPhoneIndex+1;i<lines.length;i++){
-        if(used.has(i)||isPriceLine(lines[i]))continue;
+        if(used.has(i)||isPriceLine(lines[i])||isTimingOrContactInstruction(lines[i]))continue;
         const n=normalizeArabic(lines[i]);
         const detailLike=containsAny(n,PRODUCT_WORDS)||isColorLine(lines[i])||isQuantityLine(lines[i])||
           /وزن|الوزن|وزني|مقاس|المقاس|الطول|طولي/.test(n);
         if(detailLike)break;
-        positionalAddress.push({i,line:lines[i]});
-        if(positionalAddress.length>=2)break;
+        address=lines[i];
+        area=splitAreaAddress(lines[i]).area||'عمان';
+        used.add(i);
+        break;
       }
-    }
-    if(positionalAddress.length){
-      address=positionalAddress.map(x=>x.line).join(' - ');
-      const inferred=splitAreaAddress(address);
-      area=inferred.area||'عمان';
-      positionalAddress.forEach(x=>used.add(x.i));
     }
   }
 
