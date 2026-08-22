@@ -287,6 +287,7 @@ export async function onRequest(context) {
         SUM(CASE WHEN printed=0 THEN 1 ELSE 0 END) unprinted,
         SUM(CASE WHEN printed=1 THEN 1 ELSE 0 END) printed,
         SUM(CASE WHEN date(created_at)=date('now') THEN 1 ELSE 0 END) today,
+        SUM(CASE WHEN date(first_printed_at)=date('now') THEN 1 ELSE 0 END) outgoing_today,
         SUM(CASE WHEN delivery_status='delivered' THEN 1 ELSE 0 END) delivered,
         SUM(CASE WHEN delivery_status='delivered_adjusted' THEN 1 ELSE 0 END) delivered_adjusted,
         SUM(CASE WHEN delivery_status='partial' THEN 1 ELSE 0 END) partial,
@@ -299,11 +300,56 @@ export async function onRequest(context) {
         COALESCE(SUM(delivered_pieces),0) delivered_pieces,
         COALESCE(SUM(returned_pieces),0) returned_pieces
         FROM orders`).first();
+
       const batchCount = await env.DB.prepare('SELECT COUNT(*) c FROM print_batches').first();
-      return json({ ...stats, batches:Number(batchCount?.c || 0), status_labels: STATUS_LABELS });
+
+      const storeRows = await env.DB.prepare(`SELECT
+        s.id store_id,
+        s.name store_name,
+        COUNT(o.id) outgoing_count
+        FROM stores s
+        LEFT JOIN orders o ON o.store_id=s.id AND date(o.first_printed_at)=date('now')
+        WHERE s.is_active=1
+        GROUP BY s.id,s.name
+        HAVING COUNT(o.id) > 0
+        ORDER BY outgoing_count DESC,s.name ASC`).all();
+
+      return json({
+        ...stats,
+        batches:Number(batchCount?.c || 0),
+        outgoing_by_store:storeRows.results||[],
+        status_labels: STATUS_LABELS
+      });
     }
 
 
+
+
+    if(path==='/outgoing-report'&&method==='GET'){
+      const from=(url.searchParams.get('from_date')||'').trim();
+      const to=(url.searchParams.get('to_date')||'').trim();
+      const storeId=Number(url.searchParams.get('store_id')||0);
+      const where=["o.first_printed_at IS NOT NULL"];
+      const params=[];
+      if(from){where.push("date(o.first_printed_at)>=date(?)");params.push(from)}
+      if(to){where.push("date(o.first_printed_at)<=date(?)");params.push(to)}
+      if(storeId){where.push("o.store_id=?");params.push(storeId)}
+
+      const rows=await env.DB.prepare(`SELECT
+        date(o.first_printed_at) print_date,
+        o.store_id,
+        s.name store_name,
+        COUNT(*) orders_count
+        FROM orders o
+        LEFT JOIN stores s ON s.id=o.store_id
+        WHERE ${where.join(' AND ')}
+        GROUP BY date(o.first_printed_at),o.store_id,s.name
+        ORDER BY print_date DESC,orders_count DESC`).bind(...params).all();
+
+      const total=await env.DB.prepare(`SELECT COUNT(*) c FROM orders o WHERE ${where.join(' AND ')}`).bind(...params).first();
+
+      return json({rows:rows.results||[],total:Number(total?.c||0)});
+    }
 
     if(path==='/couriers'&&method==='GET'){
       const r=await env.DB.prepare(`SELECT c.*,
