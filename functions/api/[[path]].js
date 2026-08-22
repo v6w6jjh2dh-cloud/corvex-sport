@@ -159,6 +159,33 @@ async function ensureBusinessSchema(env) {
   await env.DB.prepare(`INSERT INTO couriers(name,username,phone,address,delivered_commission,returned_commission,areas,notes,is_active)
     SELECT 'مندوب','','','','0','0','','مندوب افتراضي للتوزيع التلقائي',1
     WHERE NOT EXISTS (SELECT 1 FROM couriers WHERE name='مندوب')`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS store_settlements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    settlement_code TEXT NOT NULL UNIQUE,
+    store_id INTEGER NOT NULL,
+    orders_count INTEGER NOT NULL DEFAULT 0,
+    delivered_count INTEGER NOT NULL DEFAULT 0,
+    refused_count INTEGER NOT NULL DEFAULT 0,
+    collected_amount REAL NOT NULL DEFAULT 0,
+    delivery_fees REAL NOT NULL DEFAULT 0,
+    store_due REAL NOT NULL DEFAULT 0,
+    created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`).run();
+
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS store_settlement_orders (
+    settlement_id INTEGER NOT NULL,
+    order_id INTEGER NOT NULL,
+    store_due REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY(settlement_id,order_id)
+  )`).run();
+
+  const osi=await env.DB.prepare("PRAGMA table_info(orders)").all();
+  const osc=new Set((osi.results||[]).map(r=>r.name));
+  if(!osc.has('store_settled')){
+    await env.DB.prepare('ALTER TABLE orders ADD COLUMN store_settled INTEGER NOT NULL DEFAULT 0').run();
+  }
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_orders_store_settled ON orders(store_settled)').run();
 }
 
 const DEFAULT_REGION_GROUPS = [{"name":"عمان الغربية","governorate":"عمان","regions":["تلاع العلي","خلدا","المدينة الرياضية","شارع الجامعة","الصويفية","عبدون","الجبيهة","شفا بدران","صويلح","الدوار الثامن","الدوار السابع","الدوار السادس","الدوار الخامس","الدوار الرابع","الدوار الثالث","الدوار الثاني","الدوار الأول","وادي صقرة","الرابية","الشميساني","جبل عمان","مرج الحمام","البيادر","المدينة الصناعية","طريق المطار","مكة مول","تاج مول","ناعور","ضاحية المفرق","ضاحية الرشيد","عرجان","ماحص","الفحيص","عين الباشا","البقعة","شارع الأردن","حي المنصور","أبو نصير","صافوط","شارع المدينة المنورة","عمان","أم السماق","المدينة الطبية","البنيات","الجندويل","شارع مكة","دابوق","أم أذينة","دير غبار","الجاردنز","دوار الداخليه","دوار الواحة","ضاحية الامير راشد","وادي الحداده"]},{"name":"عمان الشرقية","governorate":"عمان","regions":["طبربور","الهاشمي الشمالي","الهاشمي الجنوبي","ماركا الشمالية","ماركا الجنوبية","أم نوارة","المنارة","جبل النصر","أبو علندا","المقابلين","ضاحية الياسمين","اليادودة","خريبة السوق","سحاب","المستنده","الأشرفية","وسط البلد","رأس العين","جبل التاج","حي نزال","الذراع الغربي","جبل اللويبدة","شارع الإذاعة والتلفزيون","جبل الجوفة","القويسمة","منطقة مجهولة","جبل الحديد","الوحدات","النزهة","شارع الإستقلال","رغدان","المحطة","المصدار","جبل الحسين","ضاحية الأقصى","جبل المريخ","جبل القصور","الجبل الأخضر","جاوا","الجويدة","ضاحية الأمير حسن","العبدلي","جبل النظيف","جبل الزهور","وادي الرمم","شارع الحرية","ضاحية الحاج حسن","الموقر","طريق الحزام","صالحية العابد","جبل القلعة","مخيم الحسين","ضاحية الاستقلال","دوار الشرق الاوسط","دوار المشاغل","حي عدن","حي ام تينه","كلية حطين","دوار الجمرك","الرجم الشامي","اللبن","أم الحيران"]},{"name":"الزرقاء","governorate":"الزرقاء","regions":["حي حمزة","حي الأحمد","حي نصار","شومر","التطوير الحضري","القادسية","جريبا","الجبل الشمالي","مخيم شلنر","المشيرفة","البيبسي","إسكان هاشم","حي الحسين","العراتفة","حي الجندي","المنتزهات","عوجان","جبل الأمير حسن","جبل الأميرة رحمة","جبل الأبيض","ضاحية مكة","ضاحية الأميرة هيا","زواهرة","جبل طارق","الجامعة الهاشمية","الزرقاء الجديدة","الزرقاء وسط البلد","الرصيفة","وادي الحجر","جبل الأمير طلال","فندق الجوابرة","ضاحية المدينة المنورة","شارع 16","جبل الأمير فيصل","شارع الكرامة","شارع 36","مستشفى الزرقاء الحكومي","جبل المغير","الغويرية","مدينة الشرق","جناعة","حي رمزي","حي معصوم","جبل الزيتون","حي الرشيد","الزرقاء","العالوك"]},{"name":"إربد","governorate":"إربد","regions":["لواء الكورة","جديتا","الحصن","الحي الشرقي","الحي الجنوبي","كفريوبا","الخيرية","شارع فلسطين","البارحة","جامعة العلوم والتكنلوجيا","جامعة اليرموك","المزار الشمالي","إربد","كفر أسد","الوسطية","زحر","دوقرة","كفر عوان","كفر راكب","أشرفية إربد","كفرالما","دير أبو سعيد","دير السعنة","إربد كفريوبا","بيت يافا","حوفا الوسطية","كفر ابيل","خراج إربد","قم إربد","قميم","البلد إربد","شارع إيدون","شارع الرشيد","مستشفى بديعة","حي التركمان","شارع الهاشمي إربد","مجمع الغور القديم","مجمع الغور الجديد","المركزية","الأحداث","حي الطويل","حي القصيل","ضيضون","النعيمة","حوفا","حبكا","مخيم الحصن","الصريح","ايدون","دوار العيادات","قصر العيادات","قصر العوادين","إربد شارع الجامعة","إربد مول","حي الراهبات","دوار اللوازم","دوار اليوسفي","كلية غرناطة","مستشفى الراهبات","كارفور إربد","ضاحية الحسين إربد","علياء إربد","حي الأطباء","حي المهندسين","أربيلا مول","دوار القبة","مجمع عمان الجديد","دوار الثقافة","شارع البتراء إربد","حدائق الملك عبد الله إربد","المغير إربد","بشرى","حي المطلع","شارع القدس إربد","بيت رأس إربد","حي المطارق","حنينا إربد","بني كنانة","إم قيس","المنصورة إربد","ملكا","ابدر","حاتم إربد","سمر إربد","حب رأس إربد","كفر سوم","يوبلا","حرتا","حميمة إربد","كفر جايز","عالعال","حكما","حوارة","المدينة الصناعية إربد","شارع الثلاثين إربد","السنبلة إربد","بلاط الشهيد","حديقة الزهراء","فوعرا","مخيم إربد","إم الجدايل","حديقة تونس - تونس","بردا - إربد","ميدان الشهداء","دوار الدرة","المجمع الشمالي - إربد","حور - إربد","كتم","زبدة","صما - إربد","سال","دوار سال الصغير","دوار سال الكبير","سيتي سينتر - إربد","دوار البيضة - إربد","دوار الـ M.K - إربد","سحم إربد","مستشفى الأميرة بسمة"]},{"name":"جرش","governorate":"جرش","regions":["نادرة","ساكب","مخيم غزة","تل الرمان","المصطبة","سلحوب","جرش","الكتة","قفقفا","مستشفى الأميرة هيا","برما","بليلا","كفر خل","ريمون","إم بطيمة","جامعة جرش","دبين","سوق","فندق غصن الزيتون","جبة","حلاوة","هاشمية عجلون","خربة الوهدانة","سليخات","عنجرة","رأس منيف","الزراعة","راجب","بيرين"]},{"name":"عجلون","governorate":"عجلون","regions":["عبين","كفرنجة","عجلون"]},{"name":"المفرق","governorate":"المفرق","regions":["الضليل","مخيم الزعتري","إم الجمال","الدفيانة","المفرق","الهاشمية","بلعما","الازرق","الحلابات","المنطقة الحره","البادية الشمالية"]},{"name":"السلط","governorate":"البلقاء","regions":["السلط","الكماليه","السرو","ماحص","زي","العارضه","الفجيص","الرميمين","اليزيديه","علان","عيرا","وادي الحور","يرقا","ام الجوزه","بدر الجديدة"]},{"name":"الرمثا","governorate":"إربد","regions":["البويضه","الطرة","الشجرة","عمراوة","الذنيبه"]},{"name":"وادي رم","governorate":"العقبة","regions":["وادي رم","الديسي"]},{"name":"البترا","governorate":"معان","regions":["البترا"]},{"name":"وادي موسى","governorate":"معان","regions":["وادي موسى"]},{"name":"الأغوار الجنوبية","governorate":"الأغوار الجنوبية","regions":["الغور الصافي","لواء الجيزة","الأغوار الجنوبية","الكرامة","الرامة","ام الرصاص","وادي عربة","الاغوار الجنوبية"]},{"name":"الكرك","governorate":"الكرك","regions":["القصر","الكرك","الحسينية","المزار الجنوبي","الفج","المريغه","وادي ابن حماد","الزغيه","ام رمان","الوسيه","منشية ابو حمور","الصبيحات","زحوم","المامونيه","مدين","مرود","النجاصه","العدنانيه","المحموديه","عزرة","عيتون"]},{"name":"الطفيله","governorate":"الطفيلة","regions":["الطفيلة","القادسيه","الحسا","مخفر الشهداء","البربيطه","عفرا","اللعبان","ابو بنا","شيبظم","العيص","عابدر","الحرير","المعطن","ارحاب","مجادل","عيمه","العين البيضا","السلع"]},{"name":"العقبة","governorate":"العقبة","regions":["القويره","العقبة"]},{"name":"معان","governorate":"معان","regions":["الشوبك","معان"]},{"name":"مأدبا","governorate":"مأدبا","regions":["مأدبا","زيزياء","ذيبان","مليح","ماعين","ام العمد","ام البساتين"]},{"name":"الصحراوي","governorate":"الصحراوي","regions":["القطرانة","الحسينية","سد السلطاني","ارينبة الغربية","ارينبة الشرقية","الحسا","الصحراوي"]},{"name":"الاغوار الشمالية","governorate":"الأغوار الشمالية","regions":["ديرعلا","الشونة الشمالية","الشونة الجنوبية","الاغوار الشمالية","البحر الميت"]}];
@@ -391,6 +418,50 @@ export async function onRequest(context) {
       return json({ok:true,deleted:true});
     }
 
+
+    if(path==='/courier-custody'&&method==='GET'){
+      const cid=Number(url.searchParams.get('courier_id')||0);
+      if(!cid)return json({error:'حدد المندوب'},400);
+
+      const courier=await env.DB.prepare('SELECT * FROM couriers WHERE id=?').bind(cid).first();
+      if(!courier)return json({error:'المندوب غير موجود'},404);
+
+      const summary=await env.DB.prepare(`SELECT
+        COUNT(*) assigned_count,
+        COALESCE(SUM(amount),0) assigned_value,
+        SUM(CASE WHEN delivery_status IN ('delivered','delivered_adjusted') THEN 1 ELSE 0 END) delivered_count,
+        SUM(CASE WHEN delivery_status IN ('refused_fee_paid','refused_no_fee','canceled_before_arrival') THEN 1 ELSE 0 END) refused_count,
+        SUM(CASE WHEN delivery_status='pending' THEN 1 ELSE 0 END) pending_count,
+        COALESCE(SUM(CASE WHEN delivery_status='pending' THEN amount ELSE 0 END),0) pending_value,
+        COALESCE(SUM(CASE WHEN delivery_status IN ('delivered','delivered_adjusted') THEN cash_collected ELSE 0 END),0) cash_collected
+        FROM orders
+        WHERE courier_id=? AND first_printed_at IS NOT NULL`).bind(cid).first();
+
+      return json({courier,summary});
+    }
+
+    if(path==='/courier-settlements'&&method==='GET'){
+      const cid=Number(url.searchParams.get('courier_id')||0);
+      const sql=`SELECT cs.*,c.name courier_name,u.display_name created_by_name
+        FROM courier_settlements cs
+        LEFT JOIN couriers c ON c.id=cs.courier_id
+        LEFT JOIN users u ON u.id=cs.created_by
+        ${cid?'WHERE cs.courier_id=?':''}
+        ORDER BY cs.id DESC LIMIT 300`;
+      const rows=cid?await env.DB.prepare(sql).bind(cid).all():await env.DB.prepare(sql).all();
+      return json({settlements:rows.results||[]});
+    }
+
+    const courierSettlementMatch=path.match(/^\/courier-settlements\/(\d+)$/);
+    if(courierSettlementMatch&&method==='GET'){
+      const settlement=await env.DB.prepare(`SELECT cs.*,c.name courier_name,u.display_name created_by_name
+        FROM courier_settlements cs
+        LEFT JOIN couriers c ON c.id=cs.courier_id
+        LEFT JOIN users u ON u.id=cs.created_by
+        WHERE cs.id=?`).bind(Number(courierSettlementMatch[1])).first();
+      return json({settlement});
+    }
+
     if(path==='/courier-eligible-orders'&&method==='GET'){
       const cid=Number(url.searchParams.get('courier_id')||0);
       const r=await env.DB.prepare(`${orderSelectSql("WHERE o.courier_id=? AND o.courier_settled=0 AND o.delivery_status!='pending'")} ORDER BY o.id DESC`).bind(cid).all();
@@ -463,6 +534,112 @@ export async function onRequest(context) {
       await env.DB.prepare(`INSERT INTO actor_permissions(actor_type,actor_id,permissions_json) VALUES(?,?,?)
         ON CONFLICT(actor_type,actor_id) DO UPDATE SET permissions_json=excluded.permissions_json`).bind(type,id,JSON.stringify(perms)).run();
       return json({ok:true});
+    }
+
+
+    if(path==='/store-account'&&method==='GET'){
+      const sid=Number(url.searchParams.get('store_id')||0);
+      if(!sid)return json({error:'حدد المتجر'},400);
+
+      const store=await env.DB.prepare('SELECT * FROM stores WHERE id=?').bind(sid).first();
+      if(!store)return json({error:'المتجر غير موجود'},404);
+
+      const summary=await env.DB.prepare(`SELECT
+        COUNT(*) total_count,
+        SUM(CASE WHEN first_printed_at IS NOT NULL THEN 1 ELSE 0 END) outgoing_count,
+        SUM(CASE WHEN delivery_status IN ('delivered','delivered_adjusted') THEN 1 ELSE 0 END) delivered_count,
+        SUM(CASE WHEN delivery_status IN ('refused_fee_paid','refused_no_fee','canceled_before_arrival') THEN 1 ELSE 0 END) refused_count,
+        SUM(CASE WHEN delivery_status='pending' THEN 1 ELSE 0 END) pending_count,
+        COALESCE(SUM(CASE WHEN delivery_status IN ('delivered','delivered_adjusted') THEN cash_collected ELSE 0 END),0) collected_amount,
+        COALESCE(SUM(CASE WHEN delivery_status IN ('delivered','delivered_adjusted','refused_fee_paid') THEN delivery_fee ELSE 0 END),0) delivery_fees
+        FROM orders
+        WHERE store_id=?`).bind(sid).first();
+
+      return json({store,summary});
+    }
+
+    if(path==='/store-settlement-eligible'&&method==='GET'){
+      const sid=Number(url.searchParams.get('store_id')||0);
+      if(!sid)return json({orders:[]});
+
+      const rows=await env.DB.prepare(
+        `${orderSelectSql("WHERE o.store_id=? AND o.store_settled=0 AND o.delivery_status!='pending'")} ORDER BY o.id DESC`
+      ).bind(sid).all();
+
+      return json({orders:rows.results||[]});
+    }
+
+    if(path==='/store-settlements'&&method==='GET'){
+      const sid=Number(url.searchParams.get('store_id')||0);
+      const sql=`SELECT ss.*,s.name store_name,u.display_name created_by_name
+        FROM store_settlements ss
+        LEFT JOIN stores s ON s.id=ss.store_id
+        LEFT JOIN users u ON u.id=ss.created_by
+        ${sid?'WHERE ss.store_id=?':''}
+        ORDER BY ss.id DESC LIMIT 300`;
+      const rows=sid?await env.DB.prepare(sql).bind(sid).all():await env.DB.prepare(sql).all();
+      return json({settlements:rows.results||[]});
+    }
+
+    if(path==='/store-settlements'&&method==='POST'){
+      const b=await readBody(request);
+      const sid=Number(b.store_id||0);
+      const ids=Array.isArray(b.order_ids)?[...new Set(b.order_ids.map(Number).filter(Boolean))]:[];
+      if(!sid||!ids.length)return json({error:'اختر الطلبات'},400);
+
+      const ph=ids.map(()=>'?').join(',');
+      const rows=await env.DB.prepare(
+        `${orderSelectSql(`WHERE o.id IN (${ph}) AND o.store_id=? AND o.store_settled=0 AND o.delivery_status!='pending'`)} ORDER BY o.id`
+      ).bind(...ids,sid).all();
+
+      const orders=rows.results||[];
+      if(!orders.length)return json({error:'لا توجد طلبات قابلة للمحاسبة'},400);
+
+      let delivered=0,refused=0,collected=0,fees=0,due=0;
+      const vals=[];
+
+      for(const o of orders){
+        const isDelivered=['delivered','delivered_adjusted'].includes(o.delivery_status);
+        const isFeeRefused=o.delivery_status==='refused_fee_paid';
+
+        if(isDelivered)delivered++;
+        else refused++;
+
+        const cash=isDelivered?Number(o.cash_collected||0):0;
+        const fee=(isDelivered||isFeeRefused)?Number(o.delivery_fee||0):0;
+        const orderDue=Math.max(0,cash-fee);
+
+        collected+=cash;
+        fees+=fee;
+        due+=orderDue;
+        vals.push([o.id,orderDue]);
+      }
+
+      const code='SS-'+Date.now();
+      const result=await env.DB.prepare(`INSERT INTO store_settlements(
+        settlement_code,store_id,orders_count,delivered_count,refused_count,
+        collected_amount,delivery_fees,store_due,created_by
+      ) VALUES(?,?,?,?,?,?,?,?,?)`)
+        .bind(code,sid,orders.length,delivered,refused,collected,fees,due,me.id).run();
+
+      for(const [oid,orderDue] of vals){
+        await env.DB.prepare('INSERT INTO store_settlement_orders(settlement_id,order_id,store_due) VALUES(?,?,?)')
+          .bind(result.meta.last_row_id,oid,orderDue).run();
+        await env.DB.prepare('UPDATE orders SET store_settled=1 WHERE id=?').bind(oid).run();
+      }
+
+      return json({
+        settlement:{
+          id:result.meta.last_row_id,
+          settlement_code:code,
+          orders_count:orders.length,
+          delivered_count:delivered,
+          refused_count:refused,
+          collected_amount:collected,
+          delivery_fees:fees,
+          store_due:due
+        }
+      });
     }
 
     if (path === '/stores' && method === 'GET') {
