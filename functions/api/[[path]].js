@@ -917,6 +917,51 @@ export async function onRequest(context) {
       if (!order) return json({error:'الطلب غير موجود'},404);
       return json({order});
     }
+    if (orderMatch && method === 'DELETE') {
+      if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة لحذف الطلب'},403);
+
+      const id = Number(orderMatch[1]);
+      const order = await env.DB.prepare('SELECT id,order_code FROM orders WHERE id=?').bind(id).first();
+      if (!order) return json({error:'الطلب غير موجود'},404);
+
+      // Remove relation rows first so a hard delete does not leave orphan references.
+      const tableRows = await env.DB.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('print_batch_orders','courier_settlement_orders','store_settlement_orders','delivery_company_settlement_orders')"
+      ).all();
+      const tables = new Set((tableRows.results||[]).map(r=>r.name));
+
+      let batchIds = [];
+      if (tables.has('print_batch_orders')) {
+        const br = await env.DB.prepare('SELECT DISTINCT batch_id FROM print_batch_orders WHERE order_id=?').bind(id).all();
+        batchIds = (br.results||[]).map(r=>Number(r.batch_id)).filter(Boolean);
+        await env.DB.prepare('DELETE FROM print_batch_orders WHERE order_id=?').bind(id).run();
+      }
+      if (tables.has('courier_settlement_orders')) {
+        await env.DB.prepare('DELETE FROM courier_settlement_orders WHERE order_id=?').bind(id).run();
+      }
+      if (tables.has('store_settlement_orders')) {
+        await env.DB.prepare('DELETE FROM store_settlement_orders WHERE order_id=?').bind(id).run();
+      }
+      if (tables.has('delivery_company_settlement_orders')) {
+        await env.DB.prepare('DELETE FROM delivery_company_settlement_orders WHERE order_id=?').bind(id).run();
+      }
+
+      await env.DB.prepare('DELETE FROM orders WHERE id=?').bind(id).run();
+
+      // Keep print-batch counters accurate after deleting an order.
+      for (const bid of batchIds) {
+        const count = await env.DB.prepare('SELECT COUNT(*) c FROM print_batch_orders WHERE batch_id=?').bind(bid).first();
+        const c = Number(count?.c||0);
+        if (c === 0) {
+          await env.DB.prepare('DELETE FROM print_batches WHERE id=?').bind(bid).run();
+        } else {
+          await env.DB.prepare('UPDATE print_batches SET order_count=? WHERE id=?').bind(c,bid).run();
+        }
+      }
+
+      return json({ok:true,id,order_code:order.order_code});
+    }
+
     if (orderMatch && method === 'PUT') {
       const b = await readBody(request);
       const id = Number(orderMatch[1]);
@@ -945,9 +990,11 @@ export async function onRequest(context) {
       const deliveredPieces = Math.max(0, Number(b.delivered_pieces || 0));
       const returnedPieces = Math.max(0, Number(b.returned_pieces || 0));
       const note = String(b.settlement_note || '').trim();
+      const printed = Number(b.printed) === 1 ? 1 : 0;
 
       await env.DB.prepare(`UPDATE orders SET
         delivery_status=?,
+        printed=?,
         delivery_fee=?,
         delivered_amount=?,
         cash_collected=?,
@@ -958,7 +1005,7 @@ export async function onRequest(context) {
         settled_at=CASE WHEN ?='pending' THEN NULL ELSE datetime('now') END,
         updated_at=datetime('now')
         WHERE id=?`)
-        .bind(status, deliveryFee, deliveredAmount, cashCollected, costOfGoods,
+        .bind(status, printed, deliveryFee, deliveredAmount, cashCollected, costOfGoods,
           deliveredPieces, returnedPieces, note, status, id).run();
 
       const order = await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(id).first();
@@ -978,6 +1025,45 @@ export async function onRequest(context) {
       await env.DB.prepare('INSERT INTO users(username,display_name,password_hash,role) VALUES(?,?,?,?)')
         .bind(String(b.username).trim(),String(b.display_name).trim(),hash,b.role==='admin'?'admin':'staff').run();
       return json({ok:true},201);
+    }
+
+    const userMatch = path.match(/^\/users\/(\d+)$/);
+    if (userMatch && method === 'PUT') {
+      if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة'},403);
+
+      const id = Number(userMatch[1]);
+      const b = await readBody(request);
+      const existing = await env.DB.prepare('SELECT id,username,display_name,role,is_active FROM users WHERE id=?').bind(id).first();
+      if (!existing) return json({error:'المستخدم غير موجود'},404);
+
+      const username = String(b.username||'').trim();
+      const displayName = String(b.display_name||'').trim();
+      const role = b.role === 'admin' ? 'admin' : 'staff';
+      const isActive = Number(b.is_active) === 0 ? 0 : 1;
+      const password = String(b.password||'');
+
+      if (!username || !displayName) return json({error:'الاسم واسم المستخدم مطلوبان'},400);
+      if (password && password.length < 6) return json({error:'كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل'},400);
+
+      const duplicate = await env.DB.prepare('SELECT id FROM users WHERE username=? AND id<>?').bind(username,id).first();
+      if (duplicate) return json({error:'اسم المستخدم مستخدم لحساب آخر'},400);
+
+      // Do not allow the currently logged-in admin to accidentally disable or demote their own account.
+      if (Number(me.id) === id && (isActive === 0 || role !== 'admin')) {
+        return json({error:'لا يمكنك إيقاف أو إزالة صلاحية المدير من حسابك الحالي'},400);
+      }
+
+      if (password) {
+        const hash = await hashPassword(password);
+        await env.DB.prepare('UPDATE users SET username=?,display_name=?,password_hash=?,role=?,is_active=? WHERE id=?')
+          .bind(username,displayName,hash,role,isActive,id).run();
+      } else {
+        await env.DB.prepare('UPDATE users SET username=?,display_name=?,role=?,is_active=? WHERE id=?')
+          .bind(username,displayName,role,isActive,id).run();
+      }
+
+      const user = await env.DB.prepare('SELECT id,username,display_name,role,is_active,created_at FROM users WHERE id=?').bind(id).first();
+      return json({user});
     }
 
     if (path === '/print-batches' && method === 'POST') {
