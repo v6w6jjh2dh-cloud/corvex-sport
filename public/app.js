@@ -296,7 +296,7 @@ function parseSmart(text){
   }
 
   if(!name){
-    name = 'مجهول';
+    name = 'لا يوجد';
   }
 
   // 4) المحافظة والعنوان - نفحص كل سطر قبل أي تصنيف منتجات
@@ -353,7 +353,7 @@ function parseSmart(text){
     if(phoneFrom(line)) continue;
 
     // لا نكرر الاسم المعروف
-    if(name !== 'مجهول' && line === name) continue;
+    if(name !== 'لا يوجد' && line === name) continue;
 
     // لا نكرر سطر العنوان/المحافظة
     const pa = splitAreaAddress(line);
@@ -423,8 +423,9 @@ function renderShell(){
           <div class="nav-group">
             <button class="nav-parent" data-nav-toggle="ordersMenu">▤ الطلبات <span>⌄</span></button>
             <div id="ordersMenu" class="nav-sub">
-              ${can('orders_add')?'<button data-view="new">＋ إضافة طلب</button>':''}
+              ${can('orders_view')?'<button data-view="orders">جميع الطلبات</button>':''}
               ${can('orders_view')?'<button data-view="store-orders">طلبات المتاجر</button>':''}
+              ${can('orders_add')?'<button data-view="new">＋ إضافة طلب</button>':''}
             </div>
           </div>`:''}
 
@@ -506,15 +507,48 @@ async function show(v){
   if(v==='users')return usersView();
 }
 async function dashboard(){const c=$('#content');c.innerHTML='<div class="empty">جاري التحميل...</div>';try{state.stats=await api('/dashboard');c.innerHTML=`<div class="page-title"><div><h1>لوحة التحكم</h1><div class="sub">نظرة سريعة على حركة الطلبات</div></div><button class="btn btn-accent" onclick="show('new')">＋ طلب جديد</button></div><div class="grid stats"><div class="stat"><b>${state.stats.today||0}</b><span>طلبات اليوم</span></div><div class="stat"><b>${state.stats.unprinted||0}</b><span>غير مطبوعة</span></div><div class="stat"><b>${state.stats.total||0}</b><span>إجمالي الطلبات</span></div><div class="stat"><b>${state.stats.batches||0}</b><span>دفعات الطباعة</span></div></div><div class="card"><h3>مسار العمل</h3><p class="sub">الموظف يدخل الطلب ← يظهر ضمن غير المطبوع ← تنشئ دفعة طباعة ← 8 بوالص في كل A4.</p></div>`}catch(e){c.innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
+
+function courierAreasList(courier){
+  return String(courier?.areas||'')
+    .split(/[،,;\n]+/)
+    .map(x=>x.trim())
+    .filter(Boolean);
+}
+
+function autoCourierForText(couriers,text){
+  const n=normalizeArabic(text||'');
+  let best=null;
+  let bestLen=-1;
+
+  for(const courier of (couriers||[])){
+    if(!courier.is_active || courier.name==='مندوب') continue;
+    for(const area of courierAreasList(courier)){
+      const a=normalizeArabic(area);
+      if(a && n.includes(a) && a.length>bestLen){
+        best=courier;
+        bestLen=a.length;
+      }
+    }
+  }
+
+  if(best) return best;
+  return (couriers||[]).find(c=>c.is_active && c.name==='مندوب') || null;
+}
+
 async function newOrder(){
   const c=$('#content');
+
   let stores=[];
+  let couriers=[];
   try{
-    const sd=await api('/stores');
+    const [sd,cd]=await Promise.all([api('/stores'),api('/couriers')]);
     stores=(sd.stores||[]).filter(s=>s.is_active);
+    couriers=(cd.couriers||[]).filter(x=>x.is_active);
   }catch(e){}
 
-  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">الصق الطلب كامل أو عبّئ الحقول يدويًا • Smart Parser V11</div></div></div>
+  const fallbackCourier=couriers.find(x=>x.name==='مندوب')||null;
+
+  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">الصق الطلب كامل أو عبّئ الحقول يدويًا</div></div></div>
   <div class="card">
     <div class="store-picker-box">
       <div class="field">
@@ -534,41 +568,84 @@ async function newOrder(){
       <div class="smart-actions"><button id="parse" class="btn btn-accent">⚡ تعبئة تلقائية</button><button id="clearRaw" class="btn btn-outline">مسح</button></div>
     </div>
     <br>
+
     <div class="grid form-grid">
-      <div class="field"><label>اسم المستلم</label><input id="name" class="input" placeholder="اسم الزبون"></div>
+      <div class="field">
+        <label>اسم المستلم</label>
+        <input id="name" class="input" placeholder="اسم الزبون" value="">
+      </div>
+
+      <div class="field auto-courier-field">
+        <label>مندوب التوصيل</label>
+        <input id="courierNameAuto" class="input auto-courier-input" value="${esc(fallbackCourier?.name||'مندوب')}" readonly>
+        <input id="courierIdAuto" type="hidden" value="${fallbackCourier?.id||''}">
+        <small id="courierReason" class="sub">يتحدد تلقائيًا حسب المنطقة</small>
+      </div>
+
       <div class="field"><label>رقم الهاتف</label><input id="phone" class="input" inputmode="tel" placeholder="07xxxxxxxx"></div>
       <div class="field"><label>المحافظة</label><input id="area" class="input" placeholder="عمان / إربد / عجلون..."></div>
       <div class="field"><label>قيمة الطلب</label><input id="amount" class="input" inputmode="decimal" placeholder="0.00"></div>
       <div class="field full"><label>العنوان التفصيلي</label><textarea id="address" class="textarea" placeholder="العنوان الكامل"></textarea></div>
       <div class="field full"><label>ملاحظات الطلب / التجهيز</label><textarea id="notes" class="textarea" placeholder="الصنف، اللون، المقاس، الوزن، أي ملاحظات للموظف الذي يجهز الطلب"></textarea></div>
     </div>
+
     <div class="actions"><button id="saveOrder" class="btn btn-primary">حفظ الطلب</button><button id="saveNext" class="btn btn-accent">حفظ وإضافة طلب جديد</button></div>
   </div>`;
 
-  $('#parse').onclick=()=>{const p=parseSmart($('#raw').value);$('#name').value=p.name||'مجهول';if(p.phone)$('#phone').value=p.phone;$('#amount').value=p.amount||'';$('#area').value=p.area||'';$('#address').value=p.address||'';$('#notes').value=p.notes||'';toast('تم الفرز، راجع الحقول قبل الحفظ')};
-  $('#clearRaw').onclick=()=>{$('#raw').value=''};
-  $('#quickAddStore').onclick=()=>show('stores');
+  const refreshCourier=()=>{
+    const text=[$('#raw')?.value,$('#area')?.value,$('#address')?.value].filter(Boolean).join(' ');
+    const matched=autoCourierForText(couriers,text);
+    $('#courierNameAuto').value=matched?.name||'مندوب';
+    $('#courierIdAuto').value=matched?.id||'';
+    $('#courierReason').textContent=(matched && matched.name!=='مندوب')?'تم اختياره تلقائيًا حسب المنطقة':'لا يوجد مندوب مخصص للمنطقة — تم اختيار مندوب';
+  };
+
+  $('#parse').onclick=()=>{
+    const p=parseSmart($('#raw').value);
+    $('#name').value=p.name||'لا يوجد';
+    if(p.phone)$('#phone').value=p.phone;
+    $('#amount').value=p.amount||'';
+    $('#area').value=p.area||'';
+    $('#address').value=p.address||'';
+    $('#notes').value=p.notes||'';
+    refreshCourier();
+    toast('تم الفرز، راجع الحقول قبل الحفظ');
+  };
+
+  $('#raw').addEventListener('input',refreshCourier);
+  $('#area').addEventListener('input',refreshCourier);
+  $('#address').addEventListener('input',refreshCourier);
+  $('#clearRaw').onclick=()=>{$('#raw').value='';refreshCourier()};
+  $('#quickAddStore').onclick=()=>show('store-add');
 
   async function save(next){
     try{
       if(!$('#store').value){toast('اختر المتجر صاحب الطلب');return}
-      const d=await api('/orders',{method:'POST',body:JSON.stringify({
-        store_id:$('#store').value,
-        recipient_name:$('#name').value,
-        phone:$('#phone').value,
-        area:$('#area').value,
-        detailed_address:$('#address').value,
-        amount:$('#amount').value,
-        order_notes:$('#notes').value,
-        raw_text:$('#raw').value
-      })});
+      refreshCourier();
+
+      const d=await api('/orders',{
+        method:'POST',
+        body:JSON.stringify({
+          store_id:$('#store').value,
+          courier_id:$('#courierIdAuto').value,
+          recipient_name:$('#name').value.trim()||'لا يوجد',
+          phone:$('#phone').value,
+          area:$('#area').value,
+          detailed_address:$('#address').value,
+          amount:$('#amount').value,
+          order_notes:$('#notes').value,
+          raw_text:$('#raw').value
+        })
+      });
+
       toast(`تم حفظ الطلب رقم ${d.order.order_code}`);
-      if(next)newOrder();else show('orders')
+      if(next)newOrder();else show('orders');
     }catch(e){toast(e.message)}
   }
 
   $('#saveOrder').onclick=()=>save(false);
   $('#saveNext').onclick=()=>save(true);
+  refreshCourier();
 }
 
 async function editOrder(id){
@@ -604,7 +681,7 @@ async function editOrder(id){
 
           <div class="edit-field">
             <label>اسم المستلم</label>
-            <input id="editName" class="input" value="${esc(o.recipient_name||'مجهول')}">
+            <input id="editName" class="input" value="${esc(o.recipient_name||'لا يوجد')}">
           </div>
 
           <div class="edit-field">

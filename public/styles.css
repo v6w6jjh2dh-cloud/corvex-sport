@@ -1012,3 +1012,15 @@ html,body,#app,.shell{width:100%!important;max-width:100%!important;overflow-x:h
   .courier-actions{width:100%}
   .courier-actions .btn{flex:1}
 }
+
+
+/* V25 automatic courier */
+.auto-courier-input{
+  background:#f5f8fa!important;
+  font-weight:900!important;
+  color:#102a43!important;
+  cursor:default!important;
+}
+.auto-courier-field small{
+  margin-top:2px!important;
+}
