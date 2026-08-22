@@ -678,7 +678,7 @@ function classifyNoteLine(line){
 
 
 const PRODUCT_COST_RULES = [
-  {name:'بنطلون جيوب سحاب',cost:2.30,terms:['بنطلون جيوب سحاب','بنطلون بجيوب سحاب']},
+  {name:'بنطلون جيوب سحاب',cost:2.30,terms:['بنطلون جيوب سحاب','بنطلون بجيوب سحاب','جيوب سحاب']},
   {name:'بنطلون رياضة سحاب',cost:2.70,terms:['بنطلون رياضه سحاب','بنطلون رياضي سحاب','بنطلون رياضة سحاب']},
   {name:'بنطلون تركي',cost:2.70,terms:['بنطلون تركي','تركي']},
   {name:'بنطلون زرار',cost:2.20,terms:['بنطلون زرار','بنطلون زر','زرار']},
@@ -714,6 +714,15 @@ function calculateGoodsCost(text){
     if(!rule)continue;
     const quantity=quantityFromProductSegment(segment);
     items.push({name:rule.name,quantity,unitCost:rule.cost,total:Number((quantity*rule.cost).toFixed(2))});
+  }
+  if(items.length===1 && items[0].quantity===1){
+    const wordCounts={واحد:1,واحده:1,اثنين:2,اتنين:2,ثنتين:2,قطعتين:2,ثلاث:3,ثلاثه:3,اربعه:4,خمس:5,سته:6};
+    const colorCount=normalized.match(/(?:^|\s)(\d+|واحد|واحده|اثنين|اتنين|ثنتين|ثلاث|ثلاثه|اربعه|خمس|سته)\s*(?:ال)?الوان/);
+    if(colorCount){
+      const q=Number(colorCount[1])||wordCounts[colorCount[1]]||1;
+      items[0].quantity=q;
+      items[0].total=Number((q*items[0].unitCost).toFixed(2));
+    }
   }
   const total=Number(items.reduce((sum,x)=>sum+x.total,0).toFixed(2));
   return {total,items};
@@ -1136,7 +1145,7 @@ async function newOrder(){
 
   const fallbackCourier=couriers.find(x=>x.name==='مندوب')||null;
 
-  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">Smart Parser V57 • Cost + Net Profit</div></div></div>
+  c.innerHTML=`<div class="page-title"><div><h1>إضافة طلب</h1><div class="sub">Smart Parser V59 • AI Cost Fallback</div></div></div>
   <div class="card">
     <div class="store-picker-box">
       <div class="field">
@@ -1153,7 +1162,7 @@ async function newOrder(){
 
     <div class="smart-box">
       <div class="field"><label>الصق الطلب هنا</label><textarea id="raw" class="textarea" placeholder="0772207993\nعلجون عرجان\n3 بلايز ريبوك\nالوزن 100\n15 شامل التوصيل"></textarea></div>
-      <div class="smart-actions"><button id="parse" class="btn btn-accent">⚡ تعبئة تلقائية</button><button id="clearRaw" class="btn btn-outline">مسح</button></div>
+      <div class="smart-actions"><button id="parse" class="btn btn-accent">⚡ تعبئة تلقائية</button><button id="aiParse" class="btn btn-primary">✨ تحليل ذكي</button><button id="clearRaw" class="btn btn-outline">مسح</button></div><div id="aiParseStatus" class="sub" style="margin-top:8px"></div>
     </div>
     <br>
 
@@ -1189,19 +1198,43 @@ async function newOrder(){
     $('#courierReason').textContent=(matched && matched.name!=='مندوب')?'تم اختياره تلقائيًا حسب المنطقة':'لا يوجد مندوب مخصص للمنطقة — تم اختيار مندوب';
   };
 
+  const applyParsedOrder=p=>{
+    $('#name').value=p.name||p.recipient_name||'لا يوجد';
+    if(p.phone)$('#phone').value=canonicalJordanPhone(p.phone);
+    $('#amount').value=p.amount||'';
+    $('#area').value=p.area||p.governorate||'';
+    $('#address').value=p.address||p.detailed_address||'';
+    $('#notes').value=p.notes||'';
+    const cost=p.cost??p.cost_of_goods??0;
+    $('#goodsCost').value=money(cost);
+    $('#goodsCostBreakdown').textContent=p.costItems?costBreakdownText(p.costItems):(p.items?.length?p.items.map(x=>`${x.quantity} × ${x.name} = ${money(x.total_cost)}`).join(' • '):'لم يتم التعرف على صنف له كوست تلقائي');
+    refreshCourier();
+  };
+
+  const runAiParse=async({automatic=false}={})=>{
+    const text=$('#raw').value.trim();
+    if(!text){if(!automatic)toast('الصق الطلب أولاً');return}
+    const btn=$('#aiParse'),status=$('#aiParseStatus');
+    btn.disabled=true;btn.textContent='جاري التحليل...';status.textContent='الذكاء الاصطناعي يحلل الطلب';
+    try{
+      const d=await api('/ai-parse-order',{method:'POST',body:JSON.stringify({text})});
+      applyParsedOrder(d.parsed||{});
+      status.textContent='تم التحليل الذكي — راجع البيانات قبل الحفظ';
+      toast('تم التحليل الذكي');
+    }catch(e){
+      status.textContent=e.message||'تعذر التحليل الذكي';
+      if(!automatic)toast(e.message);
+    }finally{btn.disabled=false;btn.textContent='✨ تحليل ذكي'}
+  };
+
   $('#parse').onclick=()=>{
     const p=parseSmart($('#raw').value);
-    $('#name').value=p.name||'لا يوجد';
-    if(p.phone)$('#phone').value=p.phone;
-    $('#amount').value=p.amount||'';
-    $('#area').value=p.area||'';
-    $('#address').value=p.address||'';
-    $('#notes').value=p.notes||'';
-    $('#goodsCost').value=money(p.cost||0);
-    $('#goodsCostBreakdown').textContent=costBreakdownText(p.costItems||[]);
-    refreshCourier();
+    applyParsedOrder(p);
+    $('#aiParseStatus').textContent='';
     toast('تم الفرز، راجع الحقول قبل الحفظ');
+    if(Number(p.cost||0)===0)runAiParse({automatic:true});
   };
+  $('#aiParse').onclick=()=>runAiParse();
 
   $('#raw').addEventListener('input',refreshCourier);
   $('#area').addEventListener('input',refreshCourier);
