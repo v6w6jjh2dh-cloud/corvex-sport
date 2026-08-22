@@ -972,9 +972,9 @@ export async function onRequest(context) {
       const max = await env.DB.prepare('SELECT COALESCE(MAX(order_code), 4400) AS m FROM orders').first();
       const code = Number(max?.m || 4400) + 1;
 
-      const result = await env.DB.prepare(`INSERT INTO orders(order_code,recipient_name,phone,area,detailed_address,amount,order_notes,raw_text,created_by,store_id,courier_id)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-        .bind(code, name, phone, String(b.area||'').trim(), String(b.detailed_address||'').trim(), Number(b.amount||0), String(b.order_notes||'').trim(), String(b.raw_text||''), me.id, storeId, courierId||null).run();
+      const result = await env.DB.prepare(`INSERT INTO orders(order_code,recipient_name,phone,area,detailed_address,amount,order_notes,raw_text,cost_of_goods,created_by,store_id,courier_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .bind(code, name, phone, String(b.area||'').trim(), String(b.detailed_address||'').trim(), Number(b.amount||0), String(b.order_notes||'').trim(), String(b.raw_text||''), Math.max(0,Number(b.cost_of_goods||0)), me.id, storeId, courierId||null).run();
 
       const order = await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(result.meta.last_row_id).first();
       return json({ order }, 201);
@@ -1042,8 +1042,8 @@ export async function onRequest(context) {
       const store = await env.DB.prepare('SELECT id FROM stores WHERE id=? AND is_active=1').bind(storeId).first();
       if (!store) return json({error:'المتجر غير موجود أو موقوف'},400);
 
-      await env.DB.prepare(`UPDATE orders SET recipient_name=?,phone=?,area=?,detailed_address=?,amount=?,order_notes=?,store_id=?,courier_id=?,courier_settled=CASE WHEN courier_id IS NOT ? THEN 0 ELSE courier_settled END,updated_at=datetime('now') WHERE id=?`)
-        .bind(String(b.recipient_name||'').trim(), normalizePhone(b.phone), String(b.area||'').trim(), String(b.detailed_address||'').trim(), Number(b.amount||0), String(b.order_notes||'').trim(), storeId, Number(b.courier_id||0)||null, Number(b.courier_id||0)||null, id).run();
+      await env.DB.prepare(`UPDATE orders SET recipient_name=?,phone=?,area=?,detailed_address=?,amount=?,order_notes=?,cost_of_goods=?,store_id=?,courier_id=?,courier_settled=CASE WHEN courier_id IS NOT ? THEN 0 ELSE courier_settled END,updated_at=datetime('now') WHERE id=?`)
+        .bind(String(b.recipient_name||'').trim(), normalizePhone(b.phone), String(b.area||'').trim(), String(b.detailed_address||'').trim(), Number(b.amount||0), String(b.order_notes||'').trim(), Math.max(0,Number(b.cost_of_goods||0)), storeId, Number(b.courier_id||0)||null, Number(b.courier_id||0)||null, id).run();
       const order = await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(id).first();
       return json({order});
     }
