@@ -945,29 +945,19 @@ export async function onRequest(context) {
       const store = await env.DB.prepare('SELECT id FROM stores WHERE id=? AND is_active=1').bind(storeId).first();
       if (!store) return json({error:'المتجر غير موجود أو موقوف'},400);
 
-      // Prevent an identical order from being entered twice during the same Jordan calendar day.
-      // The courier and employee are intentionally ignored: matching the customer's full order
-      // specification is enough to treat the second submission as a duplicate.
-      const incomingSpec = {
-        recipient_name: name,
-        phone,
-        area: String(b.area||'').trim(),
-        detailed_address: String(b.detailed_address||'').trim(),
-        amount: Number(b.amount||0),
-        order_notes: String(b.order_notes||'').trim()
-      };
-      const todayCandidates = await env.DB.prepare(`
-        SELECT id,order_code,recipient_name,phone,area,detailed_address,amount,order_notes
+      // One phone number may be entered only once per store in any rolling 48-hour window.
+      // A matching number in another store remains allowed.
+      const duplicate = await env.DB.prepare(`
+        SELECT id,order_code,created_at
         FROM orders
         WHERE store_id=? AND phone=?
-          AND date(created_at,'+3 hours')=date('now','+3 hours')
+          AND datetime(created_at) >= datetime('now','-48 hours')
         ORDER BY id DESC
-        LIMIT 50
-      `).bind(storeId,phone).all();
-      const duplicate = (todayCandidates.results||[]).find(row=>sameOrderSpecification(row,incomingSpec));
+        LIMIT 1
+      `).bind(storeId,phone).first();
       if (duplicate) {
         return json({
-          error:`هذا الطلب مكرر اليوم وموجود مسبقًا بالكود #${duplicate.order_code}`,
+          error:`رقم الهاتف موجود في طلب سابق لهذا المتجر خلال آخر 48 ساعة، بالكود #${duplicate.order_code}`,
           duplicate:true,
           duplicate_order_id:duplicate.id,
           duplicate_order_code:duplicate.order_code
