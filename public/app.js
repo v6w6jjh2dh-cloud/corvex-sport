@@ -86,6 +86,8 @@ const JORDAN_GOVERNORATES = {
   "العقبة": ["العقبة", "القويرة", "وادي رم", "الديسة", "الريشة", "الحميمة", "رحمة", "القريقرة", "وادي عربة", "بئر مذكور", "بير مذكور", "الريشة العقبة", "الحميمة العقبة", "الشامية", "القرية", "المنطقة الصناعية العقبة", "الشاطئ الجنوبي", "الرميلة العقبة", "الخامسة العقبة", "التاسعة العقبة", "العاشرة العقبة"]
 };
 
+JORDAN_GOVERNORATES["عمان"].push("زيزيا", "الزيزيا");
+
 
 function placeAliases(p){
   const n = normalizeArabic(p);
@@ -259,6 +261,7 @@ const EXPLICIT_GOVERNORATES = [
 
 
 const PRIORITY_LOCAL_ALIASES = [
+  ['عمان',['منطقة بدر الجديدة','منطقه بدر الجديده','بدر الجديدة','بدر الجديده','زيزيا','الزيزيا','الجاردنز','جاردنز']],
   ['الزرقاء',['جبل فيصل','ضاحية الأمير حسن','ضاحية الامير حسن','الازرق الشمالي','الأزرق الشمالي','عوجان الرصيفه','عوجان الرصيفة','الرصيفه','الرصيفة']],
   ['عمان',['سحاب','القويسمة','القويسمه','شارع الإذاعة والتلفزيون','شارع الاذاعه والتلفزيون','شارع الاذاعة والتلفزيون','شارع الاذاعه و التلفزيون','شارع الاذاعة و التلفزيون','ناعور','اسكان الكهرباء','إسكان الكهرباء']],
   ['جرش',['مخيم جرش','مخيم غزة','مخيم غزه']],
@@ -1184,7 +1187,7 @@ async function newOrder(){
           store_id:$('#store').value,
           courier_id:$('#courierIdAuto').value,
           recipient_name:$('#name').value.trim()||'لا يوجد',
-          phone:$('#phone').value,
+          phone:canonicalJordanPhone($('#phone').value),
           area:$('#area').value,
           detailed_address:$('#address').value,
           amount:$('#amount').value,
@@ -1241,7 +1244,7 @@ async function editOrder(id){
 
           <div class="edit-field">
             <label>رقم الهاتف</label>
-            <input id="editPhone" class="input" inputmode="tel" value="${esc(o.phone||'')}">
+            <input id="editPhone" class="input" inputmode="tel" value="${esc(canonicalJordanPhone(o.phone||''))}">
           </div>
 
           <div class="edit-field">
@@ -1372,7 +1375,7 @@ async function editOrder(id){
             store_id:$('#editStore').value,
             courier_id:$('#editCourier').value,
             recipient_name:$('#editName').value,
-            phone:$('#editPhone').value,
+            phone:canonicalJordanPhone($('#editPhone').value),
             area:$('#editArea').value,
             detailed_address:$('#editAddress').value,
             amount:$('#editAmount').value,
@@ -2480,6 +2483,11 @@ async function storeShipmentsView(storeId){
           <button id="storeShipmentApply" class="btn btn-accent">عرض النتائج</button>
         </div>
       </div>
+      <div class="actions no-print" style="margin:0 0 14px;align-items:center">
+        <span id="storeShipmentCount" class="pill" style="background:#e9eff4;color:#102a43">0 طلب</span>
+        <button id="storeShipmentSelectAll" class="btn btn-soft">تحديد الكل</button>
+        <button id="storeShipmentPrintSelected" class="btn btn-accent">طباعة المحدد معًا</button>
+      </div>
       <div id="storeShipmentsTable"></div><div id="storeAccountingArea"></div>
     </div>`;
 
@@ -2491,7 +2499,9 @@ async function storeShipmentsView(storeId){
     if($('#storeShipmentStatus')?.value)p.set('status',$('#storeShipmentStatus').value);
     if($('#storeShipmentPrinted')?.value!=='')p.set('printed',$('#storeShipmentPrinted').value);
     const d=await api('/orders?'+p.toString());
-    renderOrdersTable('#storeShipmentsTable',d.orders||[],false);
+    const orders=d.orders||[];
+    $('#storeShipmentCount').textContent=orders.length+' طلب';
+    renderOrdersTable('#storeShipmentsTable',orders,true);
   };
 
   $('#storeShipmentSearch').onclick=()=>{
@@ -2500,6 +2510,23 @@ async function storeShipmentsView(storeId){
   };
   $('#storeShipmentApply').onclick=load;
   $('#storeShipmentQ').onkeydown=e=>{if(e.key==='Enter')load()};
+  $('#storeShipmentSelectAll').onclick=()=>{
+    const boxes=[...document.querySelectorAll('#storeShipmentsTable .rowcheck')];
+    const shouldCheck=boxes.some(x=>!x.checked);
+    boxes.forEach(x=>x.checked=shouldCheck);
+    const all=$('#storeShipmentsTable #allcheck');
+    if(all)all.checked=shouldCheck;
+  };
+  $('#storeShipmentPrintSelected').onclick=async()=>{
+    const ids=[...document.querySelectorAll('#storeShipmentsTable .rowcheck:checked')].map(x=>Number(x.dataset.id));
+    if(!ids.length)return toast('حدد طلباً واحداً على الأقل');
+    try{
+      const r=await api('/print-batches',{method:'POST',body:JSON.stringify({order_ids:ids})});
+      openPrintWindow(r.orders,`دفعة ${r.batch.store_name||''} - ${r.batch.batch_code}`);
+      toast(`تم تجهيز ${r.batch.order_count} طلب للطباعة`);
+      setTimeout(load,600);
+    }catch(e){toast(e.message)}
+  };
   await load();
 }
 
