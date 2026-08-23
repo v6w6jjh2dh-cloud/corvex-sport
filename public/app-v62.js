@@ -1,7 +1,7 @@
 const state={token:localStorage.getItem('corvex_token')||'',user:null,view:'dashboard',orders:[],selected:new Set(),stats:{},batches:[],regionGroups:[],dynamicPlaceToGov:new Map(),dynamicPlaces:[]};
 const $=s=>document.querySelector(s);const app=$('#app');
 function toast(msg){const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2400)}
-async function api(path,opts={}){const headers={'content-type':'application/json',...(opts.headers||{})};if(state.token)headers.authorization=`Bearer ${state.token}`;const r=await fetch('/api'+path,{...opts,headers});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'حدث خطأ');return d}
+async function api(path,opts={}){const headers={'content-type':'application/json',...(opts.headers||{})};if(state.token)headers.authorization=`Bearer ${state.token}`;const r=await fetch('/api'+path,{...opts,headers});const d=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(d.error||'حدث خطأ');Object.assign(e,d,{status:r.status});throw e}return d}
 
 function can(p){
   return state.user?.role==='admin'||(state.user?.permissions||[]).includes(p);
@@ -159,7 +159,8 @@ const DETAIL_WORDS = [
 ].map(normalizeArabic);
 
 const PRICE_WORDS = [
-  'شامل التوصيل','مع التوصيل','السعر','سعر','المجموع','دينار','د.ا','jd','jod'
+  'شامل السعر','السعر شامل','شامل التوصيل','مع التوصيل','وتوصيل','و توصيل',
+  'السعر','سعر','المجموع','دينار','دنانير','د.ا','jd','jod'
 ].map(normalizeArabic);
 
 
@@ -240,22 +241,34 @@ function phoneFrom(line){
   return phonesFrom(line)[0] || '';
 }
 
-function isPriceLine(line){
-  const raw = normalizeDigits(line);
-  const n = normalizeArabic(raw);
-  return /\d/.test(raw) && containsAny(n, PRICE_WORDS);
+function priceFrom(line){
+  const n=normalizeArabic(String(line||''));
+  if(!/\d/.test(n))return '';
+
+  const number='(-?\\d+(?:\\.\\d+)?)';
+  const currency='(?:دينار|دنانير|د\\s*ا|jd|jod)';
+  const afterNumber=new RegExp(number+'\\s*(?:'+currency+'\\s*)?(?:شامل(?:\\s+السعر)?(?:\\s+و?\\s*التوصيل)?|مع\\s+التوصيل|و\\s*توصيل)(?=\\s|$)');
+  const beforeNumber=new RegExp('(?:السعر|سعر|المجموع|شامل\\s+السعر(?:\\s+و?\\s*التوصيل)?|شامل\\s+التوصيل|مع\\s+التوصيل)(?:\\s+شامل\\s+السعر)?(?:\\s+و?\\s*التوصيل)?[^0-9-]{0,24}'+number);
+  const withCurrency=new RegExp(number+'\\s*'+currency+'(?=\\s|$)');
+
+  const match=n.match(afterNumber)||n.match(beforeNumber)||n.match(withCurrency);
+  return match ? match[1] : '';
 }
 
-function priceFrom(line){
-  if(!isPriceLine(line)) return '';
-  const nums = normalizeDigits(line).match(/\d+(?:\.\d+)?/g) || [];
-  return nums.length ? nums[0] : '';
+function isPriceLine(line){
+  return priceFrom(line)!=='';
+}
+
+function isReturnOrderText(value){
+  const n=normalizeArabic(String(value||''));
+  return /(?:^|\s)(?:مرتجع|ارجاع)(?:\s|$)/.test(n);
 }
 
 function instructionFromPriceLine(line){
   let raw=normalizeDigits(String(line||''));
-  raw=raw.replace(/(?:السعر\s*)?\d+(?:\.\d+)?\s*(?:دنانير|دينار|د\.?ا|jd|jod)?\s*(?:شامل|مع)\s*التوصيل/ig,' ');
-  raw=raw.replace(/(?:السعر\s*)?(?:شامل|مع)\s*التوصيل\s*\d+(?:\.\d+)?\s*(?:دنانير|دينار|د\.?ا|jd|jod)?/ig,' ');
+  raw=raw.replace(/(?:السعر\s*)?-?\d+(?:\.\d+)?\s*(?:دنانير|دينار|د\.?ا|jd|jod)?\s*(?:شامل(?:\s+السعر)?(?:\s+و?\s*التوصيل)?|مع\s+التوصيل|و\s*توصيل)/ig,' ');
+  raw=raw.replace(/(?:السعر|سعر|المجموع|شامل\s+السعر|شامل\s+التوصيل|مع\s+التوصيل)(?:\s+شامل\s+السعر)?(?:\s+و?\s*التوصيل)?\s*-?\d+(?:\.\d+)?\s*(?:دنانير|دينار|د\.?ا|jd|jod)?/ig,' ');
+  raw=raw.replace(/شامل\s+السعر|شامل\s+التوصيل|مع\s+التوصيل|(?:و\s*)?التوصيل|(?:و\s*)?توصيل|المجموع|السعر|سعر|دنانير|دينار/ig,' ');
   raw=raw.replace(/[💥🌼⭐🚨✨❤❤️]/gu,' ');
   raw=raw.replace(/^[\s،,.:;!_\/\\و-]+/,'').replace(/\s+/g,' ').trim();
   return raw;
@@ -915,6 +928,7 @@ function parseSmart(text){
     noteRows.push(line);
   }
 
+  if(amount!=='' && isReturnOrderText(text))amount=String(-Math.abs(Number(amount)||0));
   const goodsCost=calculateGoodsCost(text);
   return {name,phone,area,address,amount,notes:noteRows.join('\n'),cost:goodsCost.total,costItems:goodsCost.items};
 }
@@ -1188,7 +1202,7 @@ async function newOrder(){
         <small id="courierReason" class="sub">يتحدد تلقائيًا حسب المنطقة</small>
       </div>
 
-      <div class="field"><label>رقم الهاتف</label><input id="phone" class="input" inputmode="tel" placeholder="07xxxxxxxx"></div>
+      <div class="field"><label>رقم الهاتف</label><input id="phone" class="input" inputmode="tel" placeholder="07xxxxxxxx"><div id="duplicateNotice" hidden style="margin-top:8px;padding:8px;border:1px solid #f0b429;border-radius:10px;background:#fff8e1"><small id="duplicateText" style="display:block;margin-bottom:7px;color:#7a4b00"></small><button id="approveDuplicate" type="button" class="btn btn-soft" style="padding:7px 10px;font-size:13px">موافقة — إدخال كتبديل</button></div></div>
       <div class="field"><label>المحافظة</label><input id="area" class="input" placeholder="عمان / إربد / عجلون..."></div>
       <div class="field"><label>قيمة الطلب</label><input id="amount" class="input" inputmode="decimal" placeholder="0.00"></div>
       <div class="field full"><label>العنوان التفصيلي</label><textarea id="address" class="textarea" placeholder="العنوان الكامل"></textarea></div>
@@ -1218,13 +1232,21 @@ async function newOrder(){
     toast('تم الفرز، راجع الحقول قبل الحفظ');
   };
 
+  let duplicateOverride=false;
+  let pendingDuplicateNext=false;
+  const resetDuplicateApproval=()=>{
+    duplicateOverride=false;
+    if($('#duplicateNotice'))$('#duplicateNotice').hidden=true;
+  };
   $('#raw').addEventListener('input',refreshCourier);
   $('#area').addEventListener('input',refreshCourier);
   $('#address').addEventListener('input',refreshCourier);
+  $('#phone').addEventListener('input',resetDuplicateApproval);
   $('#clearRaw').onclick=()=>{$('#raw').value='';refreshCourier()};
   const rememberedStore=localStorage.getItem('corvex_selected_store')||'';
   if(rememberedStore && stores.some(s=>String(s.id)===rememberedStore))$('#store').value=rememberedStore;
   $('#store').onchange=()=>{
+    resetDuplicateApproval();
     if($('#store').value)localStorage.setItem('corvex_selected_store',$('#store').value);
     else localStorage.removeItem('corvex_selected_store');
   };
@@ -1247,16 +1269,32 @@ async function newOrder(){
           detailed_address:$('#address').value,
           amount:$('#amount').value,
           order_notes:$('#notes').value,
-          raw_text:$('#raw').value
+          raw_text:$('#raw').value,
+          duplicate_override_reason:duplicateOverride?'exchange':''
         })
       });
 
       learnAcceptedArabicName($('#name').value);
       toast(`تم حفظ الطلب رقم ${d.order.order_code}`);
       if(next)newOrder();else show('orders');
-    }catch(e){toast(e.message)}
+    }catch(e){
+      if(e.duplicate){
+        pendingDuplicateNext=next;
+        $('#duplicateText').textContent=e.message;
+        $('#duplicateNotice').hidden=false;
+        $('#duplicateNotice').scrollIntoView({behavior:'smooth',block:'center'});
+        toast('الرقم مكرر — وافق فقط إذا كان الطلب تبديل');
+        return;
+      }
+      toast(e.message);
+    }
   }
 
+  $('#approveDuplicate').onclick=()=>{
+    duplicateOverride=true;
+    $('#duplicateNotice').hidden=true;
+    save(pendingDuplicateNext);
+  };
   $('#saveOrder').onclick=()=>save(false);
   $('#saveNext').onclick=()=>save(true);
   refreshCourier();
@@ -1847,7 +1885,8 @@ function labelHtml(o){
   const noteColumns=[];
   for(let i=0;i<noteLines.length;i+=6)noteColumns.push(noteLines.slice(i,i+6));
   const notesHtml=noteColumns.map(col=>`<div class="note-column">${col.map(line=>`<div class="note-line">${esc(line)}</div>`).join('')}</div>`).join('');
-  const hasReturn=phraseMatch(normalizeArabic(String(o.order_notes||'')+' '+String(o.raw_text||'')),'تبديل');
+  const returnText=String(o.order_notes||'')+' '+String(o.raw_text||'');
+  const hasReturn=['تبديل','استبدال','مرتجع','ارجاع','إرجاع'].some(x=>phraseMatch(returnText,x));
   const returnAlert=hasReturn?'<div class="return-alert">⚠ يوجد مرتجع</div>':'';
   return `<div class="label"><div class="label-head"><span class="label-code">#${o.order_code}</span><b class="label-brand">CORVEX SPORT</b><span class="label-spacer"></span></div><div class="label-store">اسم المتجر: ${esc(o.store_name||'—')}</div><div class="recipient-date-row"><div><strong>المستلم:</strong> ${esc(o.recipient_name)}</div><strong class="delivery-date">${nextDeliveryDateLabel()}</strong></div><div><strong>الهاتف:</strong> ${esc(o.phone)}</div><div><strong>العنوان:</strong> ${esc(o.area)} ${esc(o.detailed_address)}</div><div><strong>القيمة:</strong> ${money(o.amount)} د.أ</div><div class="note" style="--note-cols:${Math.max(1,noteColumns.length)}">${notesHtml}</div>${returnAlert}</div>`;
 }

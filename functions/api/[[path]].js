@@ -57,6 +57,19 @@ function duplicateText(value = '') {
     .toLowerCase();
 }
 
+function normalizedArabicText(value = '') {
+  return duplicateText(value)
+    .replace(/[إأآٱ]/g,'ا')
+    .replace(/ى/g,'ي')
+    .replace(/ؤ/g,'و')
+    .replace(/ئ/g,'ي')
+    .replace(/ة/g,'ه');
+}
+
+function isReturnOrderText(value = '') {
+  return /(?:^|\s)(?:مرتجع|ارجاع)(?:\s|$)/.test(normalizedArabicText(value));
+}
+
 function sameOrderSpecification(row, input) {
   return duplicateText(row.recipient_name) === duplicateText(input.recipient_name)
     && normalizePhone(row.phone) === normalizePhone(input.phone)
@@ -944,6 +957,7 @@ export async function onRequest(context) {
       const phone = normalizePhone(b.phone);
       const storeId = Number(b.store_id || 0);
       let courierId = Number(b.courier_id || 0);
+      const duplicateOverride = String(b.duplicate_override_reason || '') === 'exchange';
 
       if (!phone) return json({ error:'رقم الهاتف مطلوب' }, 400);
       if (!storeId) return json({ error:'اختر المتجر صاحب الطلب' }, 400);
@@ -961,7 +975,7 @@ export async function onRequest(context) {
         ORDER BY id DESC
         LIMIT 1
       `).bind(storeId,phone).first();
-      if (duplicate) {
+      if (duplicate && !duplicateOverride) {
         return json({
           error:`رقم الهاتف موجود في طلب سابق لهذا المتجر خلال آخر 48 ساعة، بالكود #${duplicate.order_code}`,
           duplicate:true,
@@ -977,10 +991,18 @@ export async function onRequest(context) {
 
       const max = await env.DB.prepare('SELECT COALESCE(MAX(order_code), 4400) AS m FROM orders').first();
       const code = Number(max?.m || 4400) + 1;
+      const orderNotes = String(b.order_notes||'').trim();
+      let rawText = String(b.raw_text||'');
+      let amount = Number(b.amount||0);
+      if (!Number.isFinite(amount)) amount = 0;
+      if (isReturnOrderText(rawText+' '+orderNotes)) amount = -Math.abs(amount);
+      if (duplicateOverride && !/(?:تبديل|استبدال|مرتجع|ارجاع)/.test(normalizedArabicText(rawText+' '+orderNotes))) {
+        rawText = [rawText,'تبديل'].filter(Boolean).join('\n');
+      }
 
       const result = await env.DB.prepare(`INSERT INTO orders(order_code,recipient_name,phone,area,detailed_address,amount,order_notes,raw_text,cost_of_goods,created_by,store_id,courier_id)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .bind(code, name, phone, String(b.area||'').trim(), String(b.detailed_address||'').trim(), Number(b.amount||0), String(b.order_notes||'').trim(), String(b.raw_text||''), Math.max(0,Number(b.cost_of_goods||0)), me.id, storeId, courierId||null).run();
+        .bind(code, name, phone, String(b.area||'').trim(), String(b.detailed_address||'').trim(), amount, orderNotes, rawText, Math.max(0,Number(b.cost_of_goods||0)), me.id, storeId, courierId||null).run();
 
       const order = await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(result.meta.last_row_id).first();
       return json({ order }, 201);
@@ -1154,6 +1176,8 @@ export async function onRequest(context) {
 أسعار الكوست الثابتة وترتيب المطابقة:
 بنطلون جيوب سحاب 2.30؛ بنطلون رياضة سحاب 2.70؛ بنطلون تركي 2.70؛ بنطلون زرار 2.20؛ بنطلون جيوب 2.20؛ تيشيرت سادة تريكو 2.50؛ بجامة جاكار أو ترينغ أو تريننغ 4.25؛ تيشيرت بولو تريكو أو بولو ترند أو تيشيرت بولو أو بولو 3.50.
 عبارة مثل "ثلاث الألوان" مع صنف واحد تعني غالبًا 3 قطع. "جيوب سحاب" تعني بنطلون جيوب سحاب.
+اقرأ قيمة الطلب من صيغ مثل: السعر 17، 17 شامل السعر، 17 شامل التوصيل، 17 وتوصيل، والسعر شامل التوصيل 17.
+إذا وردت كلمة مرتجع أو إرجاع أو ارجاع، اجعل amount سالبًا بالقيمة نفسها؛ مثال 17 تصبح -17.
 لا تخمّن كوست لصنف غير موجود في القائمة؛ اجعله صفرًا.`;
 
       let aiResponse;
@@ -1177,10 +1201,12 @@ export async function onRequest(context) {
       let parsed;
       try{parsed=JSON.parse(outputText)}catch{return json({error:'وصلت نتيجة غير مفهومة من التحليل الذكي'},502)}
       parsed.cost_of_goods=Math.max(0,Number(parsed.cost_of_goods||0));
-      parsed.amount=Math.max(0,Number(parsed.amount||0));
       const normalizedOrder=duplicateText(rawText)
         .replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه')
         .replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+      parsed.amount=Number(parsed.amount||0);
+      if(!Number.isFinite(parsed.amount))parsed.amount=0;
+      parsed.amount=isReturnOrderText(rawText)?-Math.abs(parsed.amount):Math.max(0,parsed.amount);
       const wordQuantityMap={واحد:1,واحده:1,اثنين:2,اتنين:2,ثنتين:2,ثلاث:3,ثلاثه:3,اربعه:4,خمس:5,سته:6};
       const colorQuantity=normalizedOrder.match(/(?:^|\s)(\d+|واحد|واحده|اثنين|اتنين|ثنتين|ثلاث|ثلاثه|اربعه|خمس|سته)\s*(?:ال)?الوان/);
       if(Array.isArray(parsed.items)&&parsed.items.length===1&&colorQuantity){
