@@ -10,14 +10,36 @@ export async function onRequestGet(context) {
   const token = url.searchParams.get('hub.verify_token');
   const challenge = url.searchParams.get('hub.challenge');
 
-  if (!env.META_VERIFY_TOKEN) {
+  // Support the intended secret name plus a shorter alias in case the
+  // Cloudflare dashboard entry was saved with the truncated-looking name.
+  const verifyToken = env.META_VERIFY_TOKEN || env.META_VERIFY;
+
+  // Simple health response so we can verify the Pages Function is deployed.
+  if (!mode && !token && !challenge) {
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        service: 'corvex-meta-webhook',
+        verifyTokenConfigured: Boolean(verifyToken),
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      },
+    );
+  }
+
+  if (!verifyToken) {
     return new Response('META_VERIFY_TOKEN is not configured', { status: 500 });
   }
 
-  if (mode === 'subscribe' && token === env.META_VERIFY_TOKEN) {
+  if (mode === 'subscribe' && token === verifyToken) {
     return new Response(challenge || '', {
       status: 200,
-      headers: { 'content-type': 'text/plain; charset=utf-8' },
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'no-store',
+      },
     });
   }
 
