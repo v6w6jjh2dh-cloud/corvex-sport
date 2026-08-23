@@ -249,7 +249,7 @@ function priceFrom(line){
   const currency='(?:دينار|دنانير|د\\s*ا|jd|jod)';
   const afterNumber=new RegExp(number+'\\s*(?:'+currency+'\\s*)?(?:شامل(?:\\s+السعر)?(?:\\s+و?\\s*التوصيل)?|مع\\s+التوصيل|و\\s*توصيل)(?=\\s|$)');
   const beforeNumber=new RegExp('(?:السعر|سعر|المجموع|شامل\\s+السعر(?:\\s+و?\\s*التوصيل)?|شامل\\s+التوصيل|مع\\s+التوصيل)(?:\\s+شامل\\s+السعر)?(?:\\s+و?\\s*التوصيل)?[^0-9-]{0,24}'+number);
-  const withCurrency=new RegExp(number+'\\s*'+currency+'(?=\\s|$)');
+  const withCurrency=new RegExp(number+'\\s*'+currency+'(?=\\s|$|مرتجع|ارجاع|استرجاع)');
 
   const match=n.match(afterNumber)||n.match(beforeNumber)||n.match(withCurrency);
   return match ? match[1] : '';
@@ -261,11 +261,12 @@ function isPriceLine(line){
 
 function isReturnOrderText(value){
   const n=normalizeArabic(String(value||''));
-  return /(?:^|\s)(?:مرتجع|ارجاع)(?:\s|$)/.test(n);
+  return /(?:مرتجع|ارجاع|استرجاع)/.test(n);
 }
 
 function instructionFromPriceLine(line){
   let raw=normalizeDigits(String(line||''));
+  raw=raw.replace(/-?\d+(?:\.\d+)?\s*(?:دنانير|دينار|د\.?ا|jd|jod)/ig,' ');
   raw=raw.replace(/(?:السعر\s*)?-?\d+(?:\.\d+)?\s*(?:دنانير|دينار|د\.?ا|jd|jod)?\s*(?:شامل(?:\s+السعر)?(?:\s+و?\s*التوصيل)?|مع\s+التوصيل|و\s*توصيل)/ig,' ');
   raw=raw.replace(/(?:السعر|سعر|المجموع|شامل\s+السعر|شامل\s+التوصيل|مع\s+التوصيل)(?:\s+شامل\s+السعر)?(?:\s+و?\s*التوصيل)?\s*-?\d+(?:\.\d+)?\s*(?:دنانير|دينار|د\.?ا|jd|jod)?/ig,' ');
   raw=raw.replace(/شامل\s+السعر|شامل\s+التوصيل|مع\s+التوصيل|(?:و\s*)?التوصيل|(?:و\s*)?توصيل|المجموع|السعر|سعر|دنانير|دينار/ig,' ');
