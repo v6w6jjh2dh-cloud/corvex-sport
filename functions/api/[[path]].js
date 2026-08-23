@@ -1332,6 +1332,11 @@ export async function onRequest(context) {
     }
 
     if (path === '/users' && method === 'GET') {
+      // Self-heal the users schema even if the browser skipped an earlier migration.
+      const usersInfo=await env.DB.prepare("PRAGMA table_info(users)").all();
+      if(!(usersInfo.results||[]).some(column=>column.name==='deleted_at')){
+        await env.DB.prepare('ALTER TABLE users ADD COLUMN deleted_at TEXT').run();
+      }
       const rows = await env.DB.prepare('SELECT id,username,display_name,role,is_active,created_at FROM users WHERE deleted_at IS NULL ORDER BY id DESC').all();
       return json({users:rows.results||[]});
     }
