@@ -176,6 +176,38 @@ async function ensureBusinessSchema(env) {
     PRIMARY KEY(actor_type,actor_id)
   )`).run();
 
+  const userInfo=await env.DB.prepare("PRAGMA table_info(users)").all();
+  const userCols=new Set((userInfo.results||[]).map(r=>r.name));
+  if(!userCols.has('deleted_at')){
+    await env.DB.prepare('ALTER TABLE users ADD COLUMN deleted_at TEXT').run();
+  }
+
+  // Preserve the old combined reports permission after splitting the screens.
+  const permissionRows=await env.DB.prepare("SELECT actor_type,actor_id,permissions_json FROM actor_permissions WHERE actor_type='user'").all();
+  for(const row of (permissionRows.results||[])){
+    let permissions=[];
+    try{permissions=JSON.parse(row.permissions_json||'[]')}catch{}
+    if(permissions.includes('reports')&&!permissions.includes('tracking_readonly')){
+      permissions=[...new Set([...permissions,'profits','delivery_reconcile'])];
+      await env.DB.prepare('UPDATE actor_permissions SET permissions_json=? WHERE actor_type=? AND actor_id=?')
+        .bind(JSON.stringify(permissions),row.actor_type,row.actor_id).run();
+    }
+  }
+
+  // Read-only tracking account for the delivery company.
+  const nanaHash=await hashPassword('123123');
+  let nana=await env.DB.prepare("SELECT id FROM users WHERE lower(username)=lower('Nana') LIMIT 1").first();
+  if(nana){
+    await env.DB.prepare("UPDATE users SET username='Nana',display_name='Nana',password_hash=?,role='staff',is_active=1,deleted_at=NULL WHERE id=?")
+      .bind(nanaHash,nana.id).run();
+  }else{
+    const inserted=await env.DB.prepare("INSERT INTO users(username,display_name,password_hash,role,is_active) VALUES('Nana','Nana',?,'staff',1)")
+      .bind(nanaHash).run();
+    nana={id:inserted.meta.last_row_id};
+  }
+  await env.DB.prepare("INSERT INTO actor_permissions(actor_type,actor_id,permissions_json) VALUES('user',?,?) ON CONFLICT(actor_type,actor_id) DO UPDATE SET permissions_json=excluded.permissions_json")
+    .bind(nana.id,JSON.stringify(['orders_view','reports','tracking_readonly'])).run();
+
   // V26 performance: verify counts first; seed only if defaults are actually missing.
   const expectedGroups = DEFAULT_REGION_GROUPS.length;
   const expectedRegions = DEFAULT_REGION_GROUPS.reduce((n,g)=>n+g.regions.length,0);
@@ -272,9 +304,10 @@ const DEFAULT_REGION_GROUPS = [{"name":"عمان الغربية","governorate":"
 
 
 const ALL_PERMISSIONS = [
-  'dashboard','stores','orders_add','orders_view','orders_edit','orders_status',
+  'dashboard','stores','stores_delete','orders_add','orders_view','orders_edit','orders_delete','orders_status',
   'couriers','couriers_add','couriers_edit','couriers_delete','couriers_accounting',
-  'print','batches','reports','regions','regions_edit','users','permissions'
+  'print','batches','reports','profits','delivery_reconcile','regions','regions_edit',
+  'users','users_delete','permissions','tracking_readonly'
 ];
 
 async function permissionsFor(env,actorType,actorId){
@@ -414,6 +447,34 @@ export async function onRequest(context) {
       await env.DB.prepare('DELETE FROM sessions WHERE token=?').bind(token).run();
       return json({ ok:true });
     }
+
+    const myPermissions=await userPermissions(env,me);
+    const permitted=permission=>me.role==='admin'||myPermissions.includes(permission);
+    const trackingOnly=me.role!=='admin'&&myPermissions.includes('tracking_readonly');
+
+    // Tracking accounts are read-only at the API level, not merely hidden in the interface.
+    if(trackingOnly){
+      const allowedTrackingRead=method==='GET'&&(
+        path==='/orders'||path==='/stores'||path==='/outgoing-report'
+      );
+      if(!allowedTrackingRead)return json({error:'هذا الحساب مخصص للمتابعة والبحث فقط'},403);
+    }
+
+    if(path==='/dashboard'&&method==='GET'&&!permitted('dashboard'))return json({error:'لا تملك صلاحية لوحة التحكم'},403);
+    if(path==='/outgoing-report'&&method==='GET'&&!permitted('reports'))return json({error:'لا تملك صلاحية الكشوفات'},403);
+    if(path==='/orders'&&method==='GET'&&!permitted('orders_view')&&!permitted('reports')&&!permitted('profits'))return json({error:'لا تملك صلاحية عرض الطلبات'},403);
+    if(path==='/orders'&&method==='POST'&&!permitted('orders_add'))return json({error:'لا تملك صلاحية إضافة الطلبات'},403);
+    if(path==='/orders/bulk-status'&&method==='PUT'&&!permitted('orders_status'))return json({error:'لا تملك صلاحية تغيير الحالات'},403);
+    if(path==='/stores'&&method==='GET'&&!permitted('stores')&&!permitted('orders_view')&&!permitted('reports'))return json({error:'لا تملك صلاحية عرض المتاجر'},403);
+    if(path==='/stores'&&method==='POST'&&!permitted('stores'))return json({error:'لا تملك صلاحية إضافة المتاجر'},403);
+    if(/^\/stores\/\d+$/.test(path)&&method==='PUT'&&!permitted('stores'))return json({error:'لا تملك صلاحية تعديل المتاجر'},403);
+    if(/^\/stores\/\d+$/.test(path)&&method==='DELETE'&&!permitted('stores_delete'))return json({error:'لا تملك صلاحية حذف المتاجر'},403);
+    if(/^\/orders\/\d+$/.test(path)&&method==='DELETE'&&!permitted('orders_delete'))return json({error:'لا تملك صلاحية حذف الطلبات'},403);
+    if(/^\/orders\/\d+$/.test(path)&&method==='PUT'&&!permitted('orders_edit'))return json({error:'لا تملك صلاحية تعديل الطلبات'},403);
+    if(path==='/users'&&method==='GET'&&!permitted('users')&&!permitted('users_delete'))return json({error:'لا تملك صلاحية المستخدمين'},403);
+    if(path==='/users'&&method==='POST'&&!permitted('users'))return json({error:'لا تملك صلاحية إضافة المستخدمين'},403);
+    if(/^\/users\/\d+$/.test(path)&&method==='PUT'&&!permitted('users'))return json({error:'لا تملك صلاحية تعديل المستخدمين'},403);
+    if(/^\/users\/\d+$/.test(path)&&method==='DELETE'&&!permitted('users_delete'))return json({error:'لا تملك صلاحية حذف المستخدمين'},403);
 
     if (path === '/dashboard' && method === 'GET') {
       const stats = await env.DB.prepare(`SELECT
@@ -946,6 +1007,20 @@ export async function onRequest(context) {
       return json({store});
     }
 
+    if (storeMatch && method === 'DELETE') {
+      const id=Number(storeMatch[1]);
+      const store=await env.DB.prepare('SELECT id,name FROM stores WHERE id=?').bind(id).first();
+      if(!store)return json({error:'المتجر غير موجود'},404);
+      const usage=await env.DB.prepare('SELECT COUNT(*) c FROM orders WHERE store_id=?').bind(id).first();
+      const ordersCount=Number(usage?.c||0);
+      if(ordersCount){
+        await env.DB.prepare('UPDATE stores SET is_active=0 WHERE id=?').bind(id).run();
+      }else{
+        await env.DB.prepare('DELETE FROM stores WHERE id=?').bind(id).run();
+      }
+      return json({ok:true,id,archived:ordersCount>0,orders_count:ordersCount});
+    }
+
     if (path === '/orders' && method === 'GET') {
       const result = await listOrders(url, env);
       return json({ orders: result.results || [] });
@@ -1015,8 +1090,6 @@ export async function onRequest(context) {
       return json({order});
     }
     if (orderMatch && method === 'DELETE') {
-      if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة لحذف الطلب'},403);
-
       const id = Number(orderMatch[1]);
       const order = await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
       if (!order) return json({error:'الطلب غير موجود'},404);
@@ -1259,12 +1332,10 @@ export async function onRequest(context) {
     }
 
     if (path === '/users' && method === 'GET') {
-      if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة'},403);
-      const rows = await env.DB.prepare('SELECT id,username,display_name,role,is_active,created_at FROM users ORDER BY id DESC').all();
+      const rows = await env.DB.prepare('SELECT id,username,display_name,role,is_active,created_at FROM users WHERE deleted_at IS NULL ORDER BY id DESC').all();
       return json({users:rows.results||[]});
     }
     if (path === '/users' && method === 'POST') {
-      if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة'},403);
       const b = await readBody(request);
       const username = String(b.username||'').trim();
       const displayName = String(b.display_name||'').trim();
@@ -1282,8 +1353,6 @@ export async function onRequest(context) {
 
     const userMatch = path.match(/^\/users\/(\d+)$/);
     if (userMatch && method === 'PUT') {
-      if (me.role !== 'admin') return json({error:'صلاحية مدير مطلوبة'},403);
-
       const id = Number(userMatch[1]);
       const b = await readBody(request);
       const existing = await env.DB.prepare('SELECT id,username,display_name,role,is_active FROM users WHERE id=?').bind(id).first();
@@ -1317,6 +1386,21 @@ export async function onRequest(context) {
 
       const user = await env.DB.prepare('SELECT id,username,display_name,role,is_active,created_at FROM users WHERE id=?').bind(id).first();
       return json({user});
+    }
+
+    if (userMatch && method === 'DELETE') {
+      const id=Number(userMatch[1]);
+      if(Number(me.id)===id)return json({error:'لا يمكنك حذف حسابك الحالي'},400);
+      const target=await env.DB.prepare('SELECT id,username,role,is_active FROM users WHERE id=? AND deleted_at IS NULL').bind(id).first();
+      if(!target)return json({error:'المستخدم غير موجود'},404);
+      if(target.role==='admin'&&Number(target.is_active)===1){
+        const admins=await env.DB.prepare("SELECT COUNT(*) c FROM users WHERE role='admin' AND is_active=1 AND deleted_at IS NULL").first();
+        if(Number(admins?.c||0)<=1)return json({error:'لا يمكن حذف آخر مدير فعال'},400);
+      }
+      await env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(id).run();
+      await env.DB.prepare("DELETE FROM actor_permissions WHERE actor_type='user' AND actor_id=?").bind(id).run();
+      await env.DB.prepare("UPDATE users SET username='deleted_'||id||'_'||username,is_active=0,deleted_at=datetime('now') WHERE id=?").bind(id).run();
+      return json({ok:true,id});
     }
 
     if (path === '/print-batches' && method === 'POST') {

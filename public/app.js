@@ -6,6 +6,15 @@ async function api(path,opts={}){const headers={'content-type':'application/json
 function can(p){
   return state.user?.role==='admin'||(state.user?.permissions||[]).includes(p);
 }
+function isTrackingOnly(){
+  return state.user?.role!=='admin'&&(state.user?.permissions||[]).includes('tracking_readonly');
+}
+function homeView(){
+  if(can('dashboard'))return 'dashboard';
+  if(can('orders_view'))return 'orders';
+  if(can('reports'))return 'reports';
+  return 'orders';
+}
 async function loadRegionIndex(force=false){
   try{
     if(!force){
@@ -939,18 +948,18 @@ async function boot(){
   try{
     const me=await api('/me');
     state.user=me.user;
-    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v50')!=='1'){
-      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v50','1')}catch{}
+    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v64')!=='1'){
+      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v64','1')}catch{}
     }
     renderShell();
-    await show('dashboard')
+    await show(homeView())
   }catch{localStorage.removeItem('corvex_token');state.token='';renderLogin()}
 }
 function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);
-    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v50')!=='1'){
-      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v50','1')}catch{}
+    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v64')!=='1'){
+      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v64','1')}catch{}
     }
-    renderShell();show('dashboard')}catch(e){toast(e.message)}}}
+    renderShell();show(homeView())}catch(e){toast(e.message)}}}
 function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>تهيئة CORVEX SPORT</h1><p>أنشئ أول حساب مدير</p></div><div class="field"><label>الاسم الظاهر</label><input id="sd" class="input" value="Admin"></div><br><div class="field"><label>اسم المستخدم</label><input id="su" class="input" value="admin"></div><br><div class="field"><label>كلمة المرور</label><input id="sp" type="password" class="input"></div><button id="setupBtn" class="btn btn-accent" style="width:100%;margin-top:18px">إنشاء النظام</button></div></div>`;$('#setupBtn').onclick=async()=>{try{await api('/setup',{method:'POST',body:JSON.stringify({display_name:$('#sd').value,username:$('#su').value,password:$('#sp').value})});toast('تمت التهيئة');renderLogin()}catch(e){toast(e.message)}}}
 function renderShell(){
   app.innerHTML=`<div class="shell">
@@ -978,7 +987,7 @@ function renderShell(){
             <button class="nav-parent" data-nav-toggle="ordersMenu">▤ الطلبات <span>⌄</span></button>
             <div id="ordersMenu" class="nav-sub">
               ${can('orders_view')?'<button data-view="orders">جميع الطلبات</button>':''}
-              ${can('orders_view')?'<button data-view="store-orders">طلبات المتاجر</button>':''}
+              ${can('orders_view')&&!isTrackingOnly()?'<button data-view="store-orders">طلبات المتاجر</button>':''}
               ${state.user?.role==='admin'?'<button data-view="deleted-orders">الطلبات المحذوفة</button>':''}
               ${can('orders_add')?'<button data-view="new">＋ إضافة طلب</button>':''}
             </div>
@@ -995,8 +1004,8 @@ function renderShell(){
 
           ${can('print')?'<button data-view="print">▣ جاهز للطباعة</button>':''}
           ${can('batches')?'<button data-view="batches">↻ دفعات الطباعة</button>':''}
-          ${can('reports')?'<button data-view="daily-profits">💰 الأرباح اليومية</button>':''}
-          ${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}${can('reports')?'<button data-view="delivery-reconcile">⇄ تسوية شركة التوصيل</button>':''}
+          ${can('profits')?'<button data-view="daily-profits">💰 الأرباح اليومية</button>':''}
+          ${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}${can('delivery_reconcile')?'<button data-view="delivery-reconcile">⇄ تسوية شركة التوصيل</button>':''}
           ${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}
           ${can('users')?'<button data-view="users">♟ المستخدمون</button>':''}
           ${can('permissions')?'<button data-view="permissions">⚙ الصلاحيات</button>':''}
@@ -1036,7 +1045,7 @@ function renderShell(){
     };
   }
 
-  $('#topLogoHome').onclick=()=>show('dashboard');
+  $('#topLogoHome').onclick=()=>show(homeView());
 
   $('#logout').onclick=async()=>{
     try{await api('/logout',{method:'POST'})}catch{}
@@ -1047,6 +1056,7 @@ function renderShell(){
   };
 }
 async function show(v){
+  if(isTrackingOnly()&&!['orders','reports'].includes(v))v=homeView();
   state.view=v;
   document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   if(v==='dashboard')return dashboard();
@@ -1770,87 +1780,46 @@ async function openOutcome(id){
   }
 }
 
-function renderOrdersTable(sel,orders,selectable=true){const el=$(sel);if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>الطباعة</th><th>التاريخ</th>${state.user?.role==='admin'?'<th>حذف</th>':''}</tr></thead><tbody>${orders.map(o=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td class="code"><button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button></td><td><b>${esc(o.store_name||'—')}</b></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td class="address-cell"><button type="button" class="address-preview" data-address="${encodeURIComponent([o.area,o.detailed_address].filter(Boolean).join(' - '))}" aria-label="عرض العنوان كامل">${esc(o.area||'—')}<span class="address-short">${o.detailed_address?` • ${esc(String(o.detailed_address).replace(/\s+/g,' ').trim())}`:''}</span></button></td><td>${money(o.amount)}</td><td class="notes-cell"><button type="button" class="notes-preview" data-notes="${encodeURIComponent(o.order_notes||'')}" aria-label="عرض الملاحظات كاملة">${esc((o.order_notes||'').replace(/\s+/g,' ').trim()||'—')}</button></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td><select class="select print-status-select" data-order-id="${o.id}" style="min-width:105px"><option value="1" ${o.printed?'selected':''}>مطبوع</option><option value="0" ${!o.printed?'selected':''}>غير مطبوع</option></select></td><td>${fmtDate(o.created_at)}</td>${state.user?.role==='admin'?`<td><button type="button" class="btn btn-danger delete-order-btn" data-delete-order="${o.id}" data-order-code="${o.order_code}">حذف</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
+function renderOrdersTable(sel,orders,selectable=true){
+  const el=$(sel);
+  if(!orders.length){el.innerHTML='<div class="empty">لا توجد طلبات</div>';return}
+  const allowEdit=can('orders_edit')&&!isTrackingOnly();
+  const allowDelete=can('orders_delete')&&!isTrackingOnly();
+  const allowPrintChange=can('print')&&!isTrackingOnly();
+  el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr>${selectable?'<th><input id="allcheck" class="check" type="checkbox"></th>':''}<th>رقم الطلب</th><th>الكود</th><th>المتجر</th><th>الاسم</th><th>الهاتف</th><th>المحافظة / العنوان</th><th>القيمة</th><th>الملاحظات</th><th>الموظف</th><th>الحالة</th><th>الطباعة</th><th>التاريخ</th>${allowDelete?'<th>حذف</th>':''}</tr></thead><tbody>${orders.map((o,index)=>`<tr>${selectable?`<td><input class="rowcheck check" type="checkbox" data-id="${o.id}"></td>`:''}<td><b>${index+1}</b></td><td class="code">${allowEdit?`<button type="button" class="order-code-link" data-edit-order="${o.id}">${o.order_code}</button>`:`<span>${o.order_code}</span>`}</td><td><b>${esc(o.store_name||'—')}</b></td><td>${esc(o.recipient_name)}</td><td>${esc(o.phone)}</td><td class="address-cell"><button type="button" class="address-preview" data-address="${encodeURIComponent([o.area,o.detailed_address].filter(Boolean).join(' - '))}" aria-label="عرض العنوان كامل">${esc(o.area||'—')}<span class="address-short">${o.detailed_address?` • ${esc(String(o.detailed_address).replace(/\s+/g,' ').trim())}`:''}</span></button></td><td>${money(o.amount)}</td><td class="notes-cell"><button type="button" class="notes-preview" data-notes="${encodeURIComponent(o.order_notes||'')}" aria-label="عرض الملاحظات كاملة">${esc((o.order_notes||'').replace(/\s+/g,' ').trim()||'—')}</button></td><td>${esc(o.created_by_name||'')}</td><td>${deliveryBadge(o)}</td><td>${allowPrintChange?`<select class="select print-status-select" data-order-id="${o.id}" style="min-width:105px"><option value="1" ${o.printed?'selected':''}>مطبوع</option><option value="0" ${!o.printed?'selected':''}>غير مطبوع</option></select>`:`<span class="badge ${o.printed?'badge-ok':'badge-warn'}">${o.printed?'مطبوع':'غير مطبوع'}</span>`}</td><td>${fmtDate(o.created_at)}</td>${allowDelete?`<td><button type="button" class="btn btn-danger delete-order-btn" data-delete-order="${o.id}" data-order-code="${o.order_code}">حذف</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
+  document.querySelectorAll('.order-code-link').forEach(btn=>{btn.onclick=()=>editOrder(Number(btn.dataset.editOrder));});
   document.querySelectorAll('.delete-order-btn').forEach(btn=>{
     btn.onclick=async()=>{
-      const id=Number(btn.dataset.deleteOrder);
-      const code=btn.dataset.orderCode||id;
-      if(!confirm(`حذف الطلب #${code} نهائيًا؟\nسيختفي من عدادات الطلبات والكشوفات.`)) return;
-
-      btn.disabled=true;
-      btn.textContent='جاري الحذف...';
-      try{
-        await api('/orders/'+id,{method:'DELETE'});
-        state.orders=(state.orders||[]).filter(o=>Number(o.id)!==id);
-        const row=btn.closest('tr');
-        if(row) row.remove();
-        toast(`تم حذف الطلب #${code}`);
-      }catch(e){
-        btn.disabled=false;
-        btn.textContent='حذف';
-        toast(e.message);
-      }
+      const id=Number(btn.dataset.deleteOrder),code=btn.dataset.orderCode||id;
+      if(!confirm(`حذف الطلب #${code}؟\nيمكن للمدير استرجاعه خلال 48 ساعة.`))return;
+      btn.disabled=true;btn.textContent='جاري الحذف...';
+      try{await api('/orders/'+id,{method:'DELETE'});state.orders=(state.orders||[]).filter(o=>Number(o.id)!==id);btn.closest('tr')?.remove();toast(`تم حذف الطلب #${code}`)}
+      catch(e){btn.disabled=false;btn.textContent='حذف';toast(e.message)}
     };
   });
   document.querySelectorAll('.print-status-select').forEach(sel=>{sel.onchange=async()=>{sel.disabled=true;try{await api('/orders/'+sel.dataset.orderId+'/printed',{method:'PUT',body:JSON.stringify({printed:Number(sel.value)})});toast('تم تغيير حالة الطباعة')}catch(e){toast(e.message)}finally{sel.disabled=false}}});
-
   let infoPopover=document.querySelector('#infoPopover');
-  if(!infoPopover){
-    infoPopover=document.createElement('div');
-    infoPopover.id='infoPopover';
-    infoPopover.className='notes-popover';
-    document.body.appendChild(infoPopover);
-  }
-
-  const hideInfoPopover=()=>{
-    infoPopover.classList.remove('show');
-    document.querySelectorAll('.notes-preview.open,.address-preview.open').forEach(x=>x.classList.remove('open'));
-  };
-
+  if(!infoPopover){infoPopover=document.createElement('div');infoPopover.id='infoPopover';infoPopover.className='notes-popover';document.body.appendChild(infoPopover)}
+  const hideInfoPopover=()=>{infoPopover.classList.remove('show');document.querySelectorAll('.notes-preview.open,.address-preview.open').forEach(x=>x.classList.remove('open'))};
   const bindInfoPreview=(selector,dataKey)=>{
     document.querySelectorAll(selector).forEach(btn=>{
       const showInfo=()=>{
-        const text=decodeURIComponent(btn.dataset[dataKey]||'')||'لا توجد معلومات';
-        infoPopover.textContent=text;
-        const r=btn.getBoundingClientRect();
-        const maxW=Math.min(420,window.innerWidth-24);
-        infoPopover.style.maxWidth=maxW+'px';
-        infoPopover.classList.add('show');
-        btn.classList.add('open');
-
-        const pw=infoPopover.offsetWidth;
-        const ph=infoPopover.offsetHeight;
-        let left=Math.max(12,Math.min(window.innerWidth-pw-12,r.left+r.width/2-pw/2));
-        let top=r.bottom+8;
-        if(top+ph>window.innerHeight-12) top=Math.max(12,r.top-ph-8);
-
-        infoPopover.style.left=left+'px';
-        infoPopover.style.top=top+'px';
+        const text=decodeURIComponent(btn.dataset[dataKey]||'')||'لا توجد معلومات';infoPopover.textContent=text;
+        const r=btn.getBoundingClientRect(),maxW=Math.min(420,window.innerWidth-24);infoPopover.style.maxWidth=maxW+'px';infoPopover.classList.add('show');btn.classList.add('open');
+        const pw=infoPopover.offsetWidth,ph=infoPopover.offsetHeight;infoPopover.style.left=Math.max(12,Math.min(window.innerWidth-pw-12,r.left+r.width/2-pw/2))+'px';
+        let top=r.bottom+8;if(top+ph>window.innerHeight-12)top=Math.max(12,r.top-ph-8);infoPopover.style.top=top+'px';
       };
-
-      btn.addEventListener('mouseenter',showInfo);
-      btn.addEventListener('mouseleave',()=>{if(!btn.classList.contains('open')) hideInfoPopover()});
-      btn.addEventListener('click',e=>{
-        e.stopPropagation();
-        const wasOpen=btn.classList.contains('open');
-        hideInfoPopover();
-        if(!wasOpen) showInfo();
-      });
+      btn.addEventListener('mouseenter',showInfo);btn.addEventListener('mouseleave',()=>{if(!btn.classList.contains('open'))hideInfoPopover()});
+      btn.addEventListener('click',e=>{e.stopPropagation();const wasOpen=btn.classList.contains('open');hideInfoPopover();if(!wasOpen)showInfo()});
     });
   };
-
-  bindInfoPreview('.notes-preview','notes');
-  bindInfoPreview('.address-preview','address');
-
+  bindInfoPreview('.notes-preview','notes');bindInfoPreview('.address-preview','address');
   if(!window.__corvexInfoBound){
-    document.addEventListener('click',e=>{
-      if(!e.target.closest('.notes-preview') && !e.target.closest('.address-preview') && !e.target.closest('#infoPopover')) hideInfoPopover();
-    });
-    window.addEventListener('scroll',hideInfoPopover,true);
-    window.addEventListener('resize',hideInfoPopover);
-    window.__corvexInfoBound=true;
+    document.addEventListener('click',e=>{if(!e.target.closest('.notes-preview')&&!e.target.closest('.address-preview')&&!e.target.closest('#infoPopover'))hideInfoPopover()});
+    window.addEventListener('scroll',hideInfoPopover,true);window.addEventListener('resize',hideInfoPopover);window.__corvexInfoBound=true;
   }
-  if(selectable){$('#allcheck').onchange=e=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=e.target.checked)}}
+  if(selectable){$('#allcheck').onchange=e=>document.querySelectorAll('.rowcheck').forEach(x=>x.checked=e.target.checked)}
+}
 async function printView(){
   const c=$('#content');
   const stores=await getActiveStores();
@@ -2269,14 +2238,14 @@ async function dailyProfitsView(){
       card.querySelector('.profit-net').textContent=money(net);
       sales+=amount;costs+=cost;fees+=fee;
     });
-    $('#profitSummary').innerHTML=`<div class="accounting-stats" style="margin:14px 0"><div><span>المبيعات الفعلية</span><b>${money(sales)}</b></div><div><span>كوست البضاعة</span><b>${money(costs)}</b></div><div><span>أجور التوصيل</span><b>${money(fees)}</b></div><div><span>صافي الربح</span><b>${money(sales-costs-fees)}</b></div></div>`;
+    $('#profitSummary').innerHTML=`<div class="accounting-stats" style="margin:14px 0"><div><span>إجمالي الفواتير / المستلم</span><b>${money(sales)}</b></div><div><span>إجمالي كوست البضاعة</span><b>${money(costs)}</b></div><div><span>إجمالي أجور التوصيل</span><b>${money(fees)}</b></div><div><span>صافي الربح</span><b>${money(sales-costs-fees)}</b></div></div>`;
   };
 
   const load=async()=>{
     const p=new URLSearchParams({statuses:'delivered,delivered_adjusted,partial',date_basis:'settled',from_date:$('#profitDate').value,to_date:$('#profitDate').value});
     if($('#profitStore').value)p.set('store_id',$('#profitStore').value);
     const d=await api('/orders?'+p.toString()),orders=d.orders||[];
-    $('#profitOrders').innerHTML=orders.length?orders.map(o=>`
+    const cardsHtml=orders.map(o=>`
       <div class="card profit-order-card" data-id="${o.id}" data-status="${o.delivery_status}" style="margin:12px 0;padding:14px">
         <div class="section-head"><div><b>#${o.order_code} — ${esc(o.store_name||'')}</b><div class="sub">${esc(o.recipient_name||'لا يوجد')} • ${esc(o.phone||'')} • ${deliveryBadge(o)}</div></div><button class="btn btn-soft profit-ai" data-id="${o.id}">✨ حساب الكوست بالذكاء</button></div>
         <div class="grid form-grid" style="margin-top:12px">
@@ -2287,18 +2256,37 @@ async function dailyProfitsView(){
         </div>
         <div class="sub" style="white-space:pre-line;margin:10px 0">${esc(o.order_notes||'')}</div>
         <button class="btn btn-accent profit-save" data-id="${o.id}">حفظ الحساب</button>
-      </div>`).join(''):'<div class="empty">لا توجد طلبات مسلّمة بهذا التاريخ</div>';
+      </div>`).join('');
+    $('#profitOrders').innerHTML=orders.length?cardsHtml+`<div class="actions" style="justify-content:center;margin-top:18px"><button id="profitAiAll" class="btn btn-primary" style="min-width:260px">✨ حساب كل الطلبات وجمع الإجماليات</button></div>`:'<div class="empty">لا توجد طلبات مسلّمة بهذا التاريخ</div>';
+
+    const analyzeOne=async(card,o)=>{
+      const d=await api('/ai-parse-order',{method:'POST',body:JSON.stringify({text:o.raw_text||o.order_notes||''})});
+      card.querySelector('.profit-cost').value=money(d.parsed?.cost_of_goods||0);
+      recalc();
+    };
 
     document.querySelectorAll('.profit-order-card input').forEach(x=>x.oninput=recalc);
     document.querySelectorAll('.profit-ai').forEach(btn=>btn.onclick=async()=>{
       const card=btn.closest('.profit-order-card'),o=orders.find(x=>Number(x.id)===Number(btn.dataset.id));
       btn.disabled=true;btn.textContent='جاري التحليل...';
-      try{
-        const d=await api('/ai-parse-order',{method:'POST',body:JSON.stringify({text:o.raw_text||o.order_notes||''})});
-        card.querySelector('.profit-cost').value=money(d.parsed?.cost_of_goods||0);
-        recalc();toast('تم حساب الكوست — راجعه ثم احفظ');
-      }catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent='✨ حساب الكوست بالذكاء'}
+      try{await analyzeOne(card,o);toast('تم حساب الكوست — راجعه ثم احفظ')}
+      catch(e){toast(e.message)}
+      finally{btn.disabled=false;btn.textContent='✨ حساب الكوست بالذكاء'}
     });
+
+    if($('#profitAiAll'))$('#profitAiAll').onclick=async()=>{
+      const btn=$('#profitAiAll');btn.disabled=true;
+      let done=0,failed=0;
+      for(const o of orders){
+        btn.textContent=`جاري حساب ${done+failed+1} من ${orders.length}...`;
+        const card=document.querySelector(`.profit-order-card[data-id="${o.id}"]`);
+        try{await analyzeOne(card,o);done++}catch{failed++}
+      }
+      recalc();
+      btn.disabled=false;btn.textContent='✨ حساب كل الطلبات وجمع الإجماليات';
+      toast(failed?`تم حساب ${done} طلب وتعذر ${failed}`:`تم حساب وجمع ${done} طلب`);
+    };
+
     document.querySelectorAll('.profit-save').forEach(btn=>btn.onclick=async()=>{
       const card=btn.closest('.profit-order-card'),o=orders.find(x=>Number(x.id)===Number(btn.dataset.id));
       btn.disabled=true;
@@ -2318,7 +2306,6 @@ async function dailyProfitsView(){
   $('#loadProfits').onclick=load;$('#profitStore').onchange=load;$('#profitDate').onchange=load;
   await load();
 }
-
 async function reportsView(){
   const c=$('#content');
   const stores=await getActiveStores();
@@ -2615,10 +2602,11 @@ async function regionsView(){
 }
 
 const PERMISSION_LABELS={
- dashboard:'لوحة التحكم',stores:'المتاجر',orders_add:'إضافة طلب',orders_view:'عرض الطلبات',orders_edit:'تعديل الطلب',
- orders_status:'تغيير حالة الطلب',couriers:'عرض المناديب',couriers_add:'إضافة مندوب',couriers_edit:'تعديل مندوب',
+ dashboard:'لوحة التحكم',stores:'المتاجر',stores_delete:'حذف متجر',orders_add:'إضافة طلب',orders_view:'عرض الطلبات',orders_edit:'تعديل الطلب',
+ orders_delete:'حذف الطلب',orders_status:'تغيير حالة الطلب',couriers:'عرض المناديب',couriers_add:'إضافة مندوب',couriers_edit:'تعديل مندوب',
  couriers_delete:'حذف مندوب',couriers_accounting:'محاسبة / تسكير حساب المناديب',print:'جاهز للطباعة',batches:'دفعات الطباعة',
- reports:'الكشوفات والتقارير',regions:'عرض المناطق',regions_edit:'تعديل المناطق',users:'المستخدمون',permissions:'الصلاحيات'
+ reports:'الكشوفات وExcel',profits:'الأرباح اليومية',delivery_reconcile:'تسوية شركة التوصيل',regions:'عرض المناطق',regions_edit:'تعديل المناطق',
+ users:'المستخدمون',users_delete:'حذف المستخدمين',permissions:'الصلاحيات',tracking_readonly:'متابعة شركة التوصيل — عرض فقط'
 };
 async function permissionsView(){
   const c=$('#content'),d=await api('/permissions');
@@ -2642,6 +2630,7 @@ async function storesView(){
   const c=$('#content');
   let d;
   try{d=await api('/stores')}catch(e){toast(e.message);return}
+  const stores=(d.stores||[]).filter(s=>Number(s.is_active)!==0);
 
   c.innerHTML=`
     <div class="page-title">
@@ -2649,16 +2638,29 @@ async function storesView(){
       <button class="btn btn-accent" onclick="show('store-add')">＋ إضافة متجر</button>
     </div>
     <div class="store-browser">
-      ${(d.stores||[]).length?(d.stores||[]).map(s=>`
-        <button class="store-browser-card" data-store-open="${s.id}">
-          <div class="store-browser-name">${esc(s.name)}</div>
-          <div class="store-browser-meta">${Number(s.orders_count||0)} شحنة${s.phone?' • '+esc(s.phone):''}</div>
-          ${s.contact_name?`<div class="store-browser-contact">${esc(s.contact_name)}</div>`:''}
-          <div class="store-browser-arrow">عرض الشحنات ←</div>
-        </button>`).join(''):'<div class="empty">لا يوجد متاجر</div>'}
+      ${stores.length?stores.map(s=>`
+        <div class="store-browser-card" style="display:block;position:relative">
+          <button type="button" data-store-open="${s.id}" style="appearance:none;border:0;background:transparent;width:100%;text-align:inherit;padding:0;color:inherit">
+            <div class="store-browser-name">${esc(s.name)}</div>
+            <div class="store-browser-meta">${Number(s.orders_count||0)} شحنة${s.phone?' • '+esc(s.phone):''}</div>
+            ${s.contact_name?`<div class="store-browser-contact">${esc(s.contact_name)}</div>`:''}
+            <div class="store-browser-arrow">عرض الشحنات ←</div>
+          </button>
+          ${can('stores_delete')&&!isTrackingOnly()?`<button type="button" class="btn btn-danger delete-store-btn" data-store-delete="${s.id}" data-store-name="${encodeURIComponent(s.name||'')}" style="margin-top:10px">حذف المتجر</button>`:''}
+        </div>`).join(''):'<div class="empty">لا يوجد متاجر</div>'}
     </div>`;
 
   document.querySelectorAll('[data-store-open]').forEach(b=>b.onclick=()=>storeShipmentsView(Number(b.dataset.storeOpen)));
+  document.querySelectorAll('[data-store-delete]').forEach(b=>b.onclick=async()=>{
+    const name=decodeURIComponent(b.dataset.storeName||'');
+    if(!confirm(`حذف متجر "${name}"؟ سيتم إخفاؤه مع الاحتفاظ بطلباته القديمة.`))return;
+    b.disabled=true;
+    try{
+      const result=await api('/stores/'+b.dataset.storeDelete,{method:'DELETE'});
+      toast(result.archived?'تم إخفاء المتجر وحفظ طلباته القديمة':'تم حذف المتجر');
+      storesView();
+    }catch(e){b.disabled=false;toast(e.message)}
+  });
 }
 
 async function storeAddView(){
@@ -2715,8 +2717,6 @@ async function storeShipmentsView(storeId){
               <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="delivered_adjusted"><span>تم التسليم وتعديل قيمة</span></label>
               <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="refused_fee_paid"><span>رفض ودفع أجور</span></label>
               <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="refused_no_fee"><span>رفض وعدم دفع أجور</span></label>
-              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="canceled_before_arrival"><span>ملغي قبل الوصول</span></label>
-              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="partial"><span>استلام جزئي</span></label>
             </div>
           </details>
           <select id="storeShipmentPrinted" class="select">
@@ -3005,6 +3005,7 @@ function openUserEdit(user){
       <div class="actions" style="margin-top:16px">
         <button type="button" id="saveUserEdit" class="btn btn-primary">حفظ التعديل</button>
         <button type="button" class="btn btn-soft user-edit-close">إلغاء</button>
+        ${can('users_delete')&&Number(state.user?.id)!==Number(user.id)?'<button type="button" id="deleteUserEdit" class="btn btn-danger">حذف المستخدم</button>':''}
       </div>
     </div>`;
 
@@ -3019,6 +3020,18 @@ function openUserEdit(user){
   };
   overlay.onclick=e=>{if(e.target===overlay)close()};
   overlay.querySelectorAll('.user-edit-close').forEach(x=>x.onclick=close);
+
+  const deleteUserBtn=$('#deleteUserEdit');
+  if(deleteUserBtn)deleteUserBtn.onclick=async()=>{
+    if(!confirm('حذف هذا المستخدم نهائيًا من قائمة الحسابات؟'))return;
+    deleteUserBtn.disabled=true;
+    try{
+      await api('/users/'+user.id,{method:'DELETE'});
+      toast('تم حذف المستخدم');
+      close();
+      usersView();
+    }catch(e){deleteUserBtn.disabled=false;toast(e.message)}
+  };
 
   $('#saveUserEdit').onclick=async()=>{
     const btn=$('#saveUserEdit');
