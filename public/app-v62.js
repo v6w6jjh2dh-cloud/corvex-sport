@@ -948,16 +948,16 @@ async function boot(){
   try{
     const me=await api('/me');
     state.user=me.user;
-    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v65')!=='1'){
-      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v65','1')}catch{}
+    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v66')!=='1'){
+      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v66','1')}catch{}
     }
     renderShell();
     await show(homeView())
   }catch{localStorage.removeItem('corvex_token');state.token='';renderLogin()}
 }
 function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);
-    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v65')!=='1'){
-      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v65','1')}catch{}
+    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v66')!=='1'){
+      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v66','1')}catch{}
     }
     renderShell();show(homeView())}catch(e){toast(e.message)}}}
 function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>تهيئة CORVEX SPORT</h1><p>أنشئ أول حساب مدير</p></div><div class="field"><label>الاسم الظاهر</label><input id="sd" class="input" value="Admin"></div><br><div class="field"><label>اسم المستخدم</label><input id="su" class="input" value="admin"></div><br><div class="field"><label>كلمة المرور</label><input id="sp" type="password" class="input"></div><button id="setupBtn" class="btn btn-accent" style="width:100%;margin-top:18px">إنشاء النظام</button></div></div>`;$('#setupBtn').onclick=async()=>{try{await api('/setup',{method:'POST',body:JSON.stringify({display_name:$('#sd').value,username:$('#su').value,password:$('#sp').value})});toast('تمت التهيئة');renderLogin()}catch(e){toast(e.message)}}}

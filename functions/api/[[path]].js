@@ -1337,6 +1337,17 @@ export async function onRequest(context) {
       if(!(usersInfo.results||[]).some(column=>column.name==='deleted_at')){
         await env.DB.prepare('ALTER TABLE users ADD COLUMN deleted_at TEXT').run();
       }
+      // Guarantee the delivery-company tracking account even if an older client skipped /migrate.
+      let trackingUser=await env.DB.prepare("SELECT id FROM users WHERE lower(username)=lower('Nana') AND deleted_at IS NULL LIMIT 1").first();
+      if(!trackingUser){
+        const trackingHash=await hashPassword('123123');
+        const created=await env.DB.prepare("INSERT INTO users(username,display_name,password_hash,role,is_active) VALUES('Nana','Nana',?,'staff',1)")
+          .bind(trackingHash).run();
+        trackingUser={id:created.meta.last_row_id};
+      }
+      await env.DB.prepare("INSERT INTO actor_permissions(actor_type,actor_id,permissions_json) VALUES('user',?,?) ON CONFLICT(actor_type,actor_id) DO UPDATE SET permissions_json=excluded.permissions_json")
+        .bind(trackingUser.id,JSON.stringify(['orders_view','reports','tracking_readonly'])).run();
+
       const rows = await env.DB.prepare('SELECT id,username,display_name,role,is_active,created_at FROM users WHERE deleted_at IS NULL ORDER BY id DESC').all();
       return json({users:rows.results||[]});
     }
