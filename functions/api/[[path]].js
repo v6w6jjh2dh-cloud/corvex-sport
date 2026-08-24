@@ -87,7 +87,20 @@ function sameOrderSpecification(row, input) {
 function orderSelectSql(where = '') {
   const deliveryDate=`CASE WHEN o.first_printed_at IS NULL THEN NULL WHEN strftime('%w',o.first_printed_at,'+3 hours')='4' THEN date(o.first_printed_at,'+3 hours','+2 days') ELSE date(o.first_printed_at,'+3 hours','+1 day') END`;
   const firstPrintDate=`CASE WHEN o.first_printed_at IS NULL THEN NULL ELSE date(o.first_printed_at,'+3 hours') END`;
-  return `SELECT o.*, ${deliveryDate} AS delivery_date, ${firstPrintDate} AS first_print_date, u.display_name AS created_by_name, s.name AS store_name, s.phone AS store_phone FROM orders o LEFT JOIN users u ON u.id=o.created_by LEFT JOIN stores s ON s.id=o.store_id ${where}`;
+  const companyCashNet=`CASE
+    WHEN o.delivery_company_settled=1
+      AND o.delivery_status IN ('delivered','delivered_adjusted','partial','refused_fee_paid')
+      AND COALESCE(o.delivery_fee,0)>0
+      AND ABS(COALESCE(o.cash_collected,0)-COALESCE(o.delivered_amount,0))<0.001
+      THEN COALESCE(o.cash_collected,0)-COALESCE(o.delivery_fee,0)
+    WHEN o.delivery_company_settled=1
+      AND o.delivery_status='refused_no_fee'
+      AND COALESCE(o.cash_collected,0)=0
+      AND COALESCE(o.delivery_fee,0)>0
+      THEN -COALESCE(o.delivery_fee,0)
+    ELSE COALESCE(o.cash_collected,0)
+  END`;
+  return `SELECT o.*, ${deliveryDate} AS delivery_date, ${firstPrintDate} AS first_print_date, ${companyCashNet} AS company_cash_net, u.display_name AS created_by_name, s.name AS store_name, s.phone AS store_phone FROM orders o LEFT JOIN users u ON u.id=o.created_by LEFT JOIN stores s ON s.id=o.store_id ${where}`;
 }
 
 async function ensureBusinessSchema(env) {
@@ -809,12 +822,16 @@ export async function onRequest(context) {
         const noFee=status==='refused_no_fee';
         const importedFee=Math.max(0,Number(row.delivery_fee||0));
         const deliveryFee=(delivered||partial||feePaid||noFee)?Number(importedFee||order.delivery_fee||2):0;
-        const cashCollected=(delivered||partial||feePaid)?importedAmount:0;
+        const grossCollected=(delivered||partial||feePaid)?importedAmount:0;
+        const cashCollected=(delivered||partial||feePaid)
+          ?Math.max(0,grossCollected-deliveryFee)
+          :(noFee?-deliveryFee:0);
 
         accepted.push({
           order,
           status,
           importedAmount,
+          grossCollected,
           cashCollected,
           deliveryFee,
           note:String(row.note||'').trim(),
@@ -825,13 +842,14 @@ export async function onRequest(context) {
 
       if(!accepted.length)return json({error:'لا توجد طلبات مطابقة لاعتمادها'},400);
 
-      let deliveredCount=0,refusedCount=0,pendingCount=0,collected=0,fees=0;
+      let deliveredCount=0,refusedCount=0,pendingCount=0,collected=0,fees=0,netDue=0;
       for(const x of accepted){
         if(['delivered','delivered_adjusted','partial'].includes(x.status))deliveredCount++;
         else if(['refused_fee_paid','refused_no_fee','canceled_before_arrival'].includes(x.status))refusedCount++;
         else pendingCount++;
-        collected+=x.cashCollected;
+        collected+=x.grossCollected;
         fees+=x.deliveryFee;
+        netDue+=x.cashCollected;
       }
 
       const code='DC-'+Date.now();
@@ -839,7 +857,7 @@ export async function onRequest(context) {
         settlement_code,store_id,source_name,matched_count,unmatched_count,duplicate_count,
         delivered_count,refused_count,pending_count,collected_amount,delivery_fees,net_due,created_by
       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .bind(code,storeId,sourceName,accepted.length,unmatched,duplicate,deliveredCount,refusedCount,pendingCount,collected,fees,collected-fees,me.id).run();
+        .bind(code,storeId,sourceName,accepted.length,unmatched,duplicate,deliveredCount,refusedCount,pendingCount,collected,fees,netDue,me.id).run();
       const settlementId=settlementRes.meta.last_row_id;
 
       const statements=[];

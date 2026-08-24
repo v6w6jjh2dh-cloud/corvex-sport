@@ -1392,7 +1392,7 @@ async function editOrder(id){
 
           <div class="edit-field">
             <label>الكاش المستلم من شركة التوصيل</label>
-            <input id="editCash" class="input" inputmode="decimal" value="${Number(o.cash_collected||0)}">
+            <input id="editCash" class="input" inputmode="decimal" value="${companyCashAfterDelivery(o)}">
           </div>
 
           <div class="edit-field">
@@ -1455,8 +1455,9 @@ async function editOrder(id){
     const syncCash=()=>{
       const status=$('#editStatus').value;
       const delivered=Number($('#editDeliveredAmount').value||0);
-      if(['delivered','delivered_adjusted'].includes(status) && Number(o.cash_collected||0)===0){
-        $('#editCash').value=Math.max(0,delivered-2);
+      if(['delivered','delivered_adjusted','partial'].includes(status) && Number(o.cash_collected||0)===0){
+        const fee=Number($('#editDeliveryFee').value||0);
+        $('#editCash').value=Math.max(0,delivered-fee);
       }
       calcProfit();
     };
@@ -1596,14 +1597,18 @@ const DELIVERY_STATUS_LABELS={
   refused_fee_paid:'رفض ودفع أجور',
   refused_no_fee:'رفض وعدم دفع أجور',
   canceled_before_arrival:'ملغي قبل الوصول',
-  partial:'استلام جزئي'
+  partial:'تسليم جزئي'
 };
 
 function deliveryBadge(o){
   const s=o.delivery_status||'pending';
-  const ok=['delivered','delivered_adjusted'].includes(s);
-  const warn=['pending','partial'].includes(s);
+  const ok=['delivered','delivered_adjusted','partial'].includes(s);
+  const warn=s==='pending';
   return `<span class="badge ${ok?'badge-ok':warn?'badge-warn':'badge-danger'}">${DELIVERY_STATUS_LABELS[s]||s}</span>`;
+}
+
+function companyCashAfterDelivery(o){
+  return Number(o.company_cash_net??o.cash_collected??0);
 }
 
 async function openOutcome(id){
@@ -1668,7 +1673,7 @@ async function openOutcome(id){
 
         <div class="field">
           <label>الكاش المستلم من شركة التوصيل</label>
-          <input id="outCash" class="input" inputmode="decimal" value="${Number(o.cash_collected||0)}">
+          <input id="outCash" class="input" inputmode="decimal" value="${companyCashAfterDelivery(o)}">
         </div>
 
         <div class="field">
@@ -1726,7 +1731,7 @@ async function openOutcome(id){
       const amount=Number(card.querySelector('#outDeliveredAmount').value||0);
       const cashInput=card.querySelector('#outCash');
       const existing=Number(o.cash_collected||0);
-      if(existing===0 && ['delivered','delivered_adjusted'].includes(status)){
+      if(existing===0 && ['delivered','delivered_adjusted','partial'].includes(status)){
         cashInput.value=Math.max(0, amount-Number(card.querySelector('#outDeliveryFee').value||0));
       }
       calc();
