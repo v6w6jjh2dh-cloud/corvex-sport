@@ -2193,8 +2193,8 @@ async function deliveryReconcileView(){
 
       previewRows=(d.rows||[]).map((x,i)=>({...x,raw_status:rows[i]?.raw_status||'',raw_date:rows[i]?.shipment_date||'',status:rows[i]?.status||'',delivery_fee:Number(x.delivery_fee??rows[i]?.delivery_fee??0)}));
       const settlementRank=row=>{
-        const partial=row.status==='partial'||/(مرتجع|جزئي|جزء)/.test(normalizeArabic(row.raw_status||''));
-        if(row.match_type==='matched')return partial?1:0;
+        const special=row.status==='partial'||row.status==='delivered_adjusted'||/(مرتجع|جزئي|جزء|تعديل قيم)/.test(normalizeArabic(row.raw_status||''));
+        if(row.match_type==='matched')return special?1:0;
         if(row.match_type==='duplicate')return 2;
         return 3;
       };
