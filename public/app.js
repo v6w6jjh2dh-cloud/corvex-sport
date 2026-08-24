@@ -1883,9 +1883,21 @@ async function batchesView(){
 
 let deliveryPdfJsPromise=null;
 async function loadDeliveryPdfJs(){
+  if(globalThis.pdfjsLib)return globalThis.pdfjsLib;
   if(!deliveryPdfJsPromise){
-    const base='https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/legacy/build/';
-    deliveryPdfJsPromise=import(base+'pdf.min.mjs').then(mod=>{mod.GlobalWorkerOptions.workerSrc=base+'pdf.worker.min.mjs';return mod});
+    deliveryPdfJsPromise=new Promise((resolve,reject)=>{
+      const base='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/';
+      const script=document.createElement('script');
+      script.src=base+'pdf.min.js';
+      script.async=true;
+      script.onload=()=>{
+        if(!globalThis.pdfjsLib)return reject(new Error('تعذر تشغيل قارئ PDF على هذا المتصفح'));
+        globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc=base+'pdf.worker.min.js';
+        resolve(globalThis.pdfjsLib);
+      };
+      script.onerror=()=>reject(new Error('تعذر تحميل قارئ PDF؛ تحقق من اتصال الإنترنت'));
+      document.head.appendChild(script);
+    });
   }
   return deliveryPdfJsPromise;
 }
