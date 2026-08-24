@@ -103,6 +103,23 @@ function orderSelectSql(where = '') {
   return `SELECT o.*, ${deliveryDate} AS delivery_date, ${firstPrintDate} AS first_print_date, ${companyCashNet} AS company_cash_net, u.display_name AS created_by_name, s.name AS store_name, s.phone AS store_phone FROM orders o LEFT JOIN users u ON u.id=o.created_by LEFT JOIN stores s ON s.id=o.store_id ${where}`;
 }
 
+async function ensurePartialProfitColumns(env) {
+  const info=await env.DB.prepare("PRAGMA table_info(orders)").all();
+  const cols=new Set((info.results||[]).map(r=>r.name));
+  const wanted=[
+    ['partial_cost_reviewed',"INTEGER NOT NULL DEFAULT 0"],
+    ['partial_received_items',"TEXT NOT NULL DEFAULT ''"]
+  ];
+  for(const [name,type] of wanted){
+    if(cols.has(name))continue;
+    try{
+      await env.DB.prepare(`ALTER TABLE orders ADD COLUMN ${name} ${type}`).run();
+    }catch(error){
+      if(!/duplicate column name/i.test(String(error?.message||error)))throw error;
+    }
+  }
+}
+
 async function ensureBusinessSchema(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS stores (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -787,6 +804,7 @@ export async function onRequest(context) {
     }
 
     if(path==='/delivery-reconcile/commit'&&method==='POST'){
+      await ensurePartialProfitColumns(env);
       const b=await readBody(request);
       const storeId=Number(b.store_id||0);
       const sourceName=String(b.source_name||'').trim();
@@ -1203,6 +1221,7 @@ export async function onRequest(context) {
 
 
     if (path === '/orders/bulk-status' && method === 'PUT') {
+      await ensurePartialProfitColumns(env);
       const b=await readBody(request);
       const ids=[...new Set((Array.isArray(b.order_ids)?b.order_ids:[]).map(Number).filter(x=>x>0))].slice(0,500);
       const allowed=new Set(Object.keys(STATUS_LABELS));
@@ -1239,6 +1258,7 @@ export async function onRequest(context) {
 
     const outcomeMatch = path.match(/^\/orders\/(\d+)\/outcome$/);
     if (outcomeMatch && method === 'PUT') {
+      await ensurePartialProfitColumns(env);
       const id = Number(outcomeMatch[1]);
       const b = await readBody(request);
       const allowed = new Set(Object.keys(STATUS_LABELS));
