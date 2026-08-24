@@ -1606,7 +1606,8 @@ function deliveryBadge(o){
   const s=o.delivery_status||'pending';
   const ok=['delivered','delivered_adjusted','partial'].includes(s);
   const warn=s==='pending';
-  return `<span class="badge ${ok?'badge-ok':warn?'badge-warn':'badge-danger'}">${DELIVERY_STATUS_LABELS[s]||s}</span>`;
+  const partial=s==='partial'||s==='delivered_adjusted';
+  return `<span class="badge ${ok?'badge-ok':warn?'badge-warn':'badge-danger'} ${partial?'badge-partial':''}">${DELIVERY_STATUS_LABELS[s]||s}</span>`;
 }
 
 function companyCashAfterDelivery(o){
@@ -2336,7 +2337,7 @@ async function dailyProfitsView(){
   const stores=await getActiveStores();
   const today=new Date().toISOString().slice(0,10);
   c.innerHTML=`
-    <div class="page-title"><div><h1>الأرباح اليومية</h1><div class="sub">طلبات تم التسليم والتسليم الجزئي فقط</div></div></div>
+    <div class="page-title"><div><h1>الأرباح اليومية</h1><div class="sub">الطلب الجزئي لا يدخل الإجمالي قبل مراجعة كوست القطع المستلمة</div></div></div>
     <div class="card">
       <div class="toolbar">
         <input id="profitDate" type="date" class="input" value="${today}">
@@ -2349,16 +2350,19 @@ async function dailyProfitsView(){
 
   const recalc=()=>{
     const cards=[...document.querySelectorAll('.profit-order-card')];
-    let sales=0,costs=0,fees=0;
+    let sales=0,costs=0,fees=0,pendingReview=0;
     cards.forEach(card=>{
       const amount=Number(card.querySelector('.profit-amount').value||0);
       const cost=Number(card.querySelector('.profit-cost').value||0);
       const fee=Number(card.querySelector('.profit-fee').value||0);
       const net=amount-cost-fee;
       card.querySelector('.profit-net').textContent=money(net);
+      const reviewed=card.dataset.status!=='partial'||card.dataset.reviewed==='1';
+      card.classList.toggle('profit-review-pending',!reviewed);
+      if(!reviewed){pendingReview++;return}
       sales+=amount;costs+=cost;fees+=fee;
     });
-    $('#profitSummary').innerHTML=`<div class="accounting-stats" style="margin:14px 0"><div><span>إجمالي الفواتير / المستلم</span><b>${money(sales)}</b></div><div><span>إجمالي كوست البضاعة</span><b>${money(costs)}</b></div><div><span>إجمالي أجور التوصيل</span><b>${money(fees)}</b></div><div><span>صافي الربح</span><b>${money(sales-costs-fees)}</b></div></div>`;
+    $('#profitSummary').innerHTML=`<div class="accounting-stats" style="margin:14px 0"><div><span>إجمالي الفواتير / المستلم</span><b>${money(sales)}</b></div><div><span>إجمالي كوست البضاعة</span><b>${money(costs)}</b></div><div><span>إجمالي أجور التوصيل</span><b>${money(fees)}</b></div><div><span>صافي الربح المعتمد</span><b>${money(sales-costs-fees)}</b></div></div>${pendingReview?`<div class="partial-summary-warning">⚠️ يوجد ${pendingReview} طلب جزئي لا يدخل الإجمالي حتى مراجعة الكوست وحفظه.</div>`:''}`;
   };
 
   const load=async()=>{
@@ -2366,16 +2370,23 @@ async function dailyProfitsView(){
     if($('#profitStore').value)p.set('store_id',$('#profitStore').value);
     const d=await api('/orders?'+p.toString()),orders=d.orders||[];
     const cardsHtml=orders.map(o=>`
-      <div class="card profit-order-card" data-id="${o.id}" data-status="${o.delivery_status}" style="margin:12px 0;padding:14px">
-        <div class="section-head"><div><b>#${o.order_code} — ${esc(o.store_name||'')}</b><div class="sub">${esc(o.recipient_name||'لا يوجد')} • ${esc(o.phone||'')} • ${deliveryBadge(o)}</div></div><button class="btn btn-soft profit-ai" data-id="${o.id}">✨ حساب الكوست بالذكاء</button></div>
+      <div class="card profit-order-card" data-id="${o.id}" data-status="${o.delivery_status}" data-reviewed="${o.delivery_status==='partial'?Number(o.partial_cost_reviewed||0):1}" style="margin:12px 0;padding:14px">
+        <div class="section-head"><div><b>#${o.order_code} — ${esc(o.store_name||'')}</b><div class="sub">${esc(o.recipient_name||'لا يوجد')} • ${esc(o.phone||'')} • ${deliveryBadge(o)}</div></div>${o.delivery_status==='partial'?`<span class="badge ${o.partial_cost_reviewed?'badge-ok':'badge-warn'} partial-review-badge">${o.partial_cost_reviewed?'تمت مراجعة الكوست':'الكوست بحاجة لمراجعة'}</span>`:`<button class="btn btn-soft profit-ai" data-id="${o.id}">✨ حساب الكوست بالذكاء</button>`}</div>
         <div class="grid form-grid" style="margin-top:12px">
           <div class="field"><label>المبلغ المستلم فعليًا</label><input class="input profit-amount" inputmode="decimal" value="${Number(o.delivered_amount||o.amount||0)}"></div>
-          <div class="field"><label>كوست البضاعة</label><input class="input profit-cost" inputmode="decimal" value="${Number(o.cost_of_goods||0)}"></div>
+          <div class="field"><label>${o.delivery_status==='partial'?'كوست القطع المستلمة':'كوست البضاعة'}</label><input class="input profit-cost" inputmode="decimal" value="${o.delivery_status==='partial'&&!o.partial_cost_reviewed?0:Number(o.cost_of_goods||0)}"></div>
           <div class="field"><label>أجور التوصيل</label><input class="input profit-fee" inputmode="decimal" value="${Number(o.delivery_fee||2)}"></div>
-          <div class="field"><label>صافي الربح</label><div style="background:#102a43;color:#fff;border-radius:12px;padding:13px;font-size:24px"><b class="profit-net">0.00</b> د.أ</div></div>
+          <div class="field"><label>${o.delivery_status==='partial'&&!o.partial_cost_reviewed?'صافي الربح (معاينة غير معتمدة)':'صافي الربح'}</label><div style="background:#102a43;color:#fff;border-radius:12px;padding:13px;font-size:24px"><b class="profit-net">0.00</b> د.أ</div></div>
         </div>
-        <div class="sub" style="white-space:pre-line;margin:10px 0">${esc(o.order_notes||'')}</div>
-        <button class="btn btn-accent profit-save" data-id="${o.id}">حفظ الحساب</button>
+        <div class="sub profit-original-notes" style="white-space:pre-line;margin:10px 0"><b>نص الطلب الأصلي:</b><br>${esc(o.order_notes||o.raw_text||'—')}</div>
+        ${o.delivery_status==='partial'?`
+          <div class="partial-cost-review">
+            <b>ما القطع التي تم تسليمها فعليًا؟</b>
+            <div class="sub">اكتب القطع المستلمة فقط، ثم احسب كوستها بالذكاء. كوست الطلب الكامل المسجل: ${money(o.cost_of_goods||0)} د.أ، ولن يُعتمد للطلب الجزئي تلقائيًا. إذا لم تعرف التفاصيل، أدخل كوست المستلم يدويًا.</div>
+            <textarea class="textarea profit-partial-items" placeholder="مثال: قطعتان بنطلون جيوب سحاب">${esc(o.partial_received_items||'')}</textarea>
+            <button type="button" class="btn btn-soft profit-partial-ai" data-id="${o.id}">✨ حساب كوست القطع المكتوبة</button>
+          </div>`:''}
+        <button class="btn btn-accent profit-save" data-id="${o.id}">${o.delivery_status==='partial'?'اعتماد وحفظ حساب الطلب الجزئي':'حفظ الحساب'}</button>
       </div>`).join('');
     $('#profitOrders').innerHTML=orders.length?cardsHtml+`<div class="actions" style="justify-content:center;margin-top:18px"><button id="profitAiAll" class="btn btn-primary" style="min-width:260px">✨ حساب كل الطلبات وجمع الإجماليات</button></div>`:'<div class="empty">لا توجد طلبات مسلّمة بهذا التاريخ</div>';
 
@@ -2394,31 +2405,62 @@ async function dailyProfitsView(){
       finally{btn.disabled=false;btn.textContent='✨ حساب الكوست بالذكاء'}
     });
 
+    document.querySelectorAll('.profit-partial-ai').forEach(btn=>btn.onclick=async()=>{
+      const card=btn.closest('.profit-order-card');
+      const text=card.querySelector('.profit-partial-items').value.trim();
+      if(!text)return toast('اكتب القطع التي تم تسليمها أولًا');
+      btn.disabled=true;btn.textContent='جاري حساب كوست المستلم...';
+      try{
+        const d=await api('/ai-parse-order',{method:'POST',body:JSON.stringify({text})});
+        card.querySelector('.profit-cost').value=money(d.parsed?.cost_of_goods||0);
+        recalc();
+        toast('تم حساب كوست القطع المكتوبة — راجعه ثم اعتمد الحساب');
+      }catch(e){toast(e.message)}
+      finally{btn.disabled=false;btn.textContent='✨ حساب كوست القطع المكتوبة'}
+    });
+
     if($('#profitAiAll'))$('#profitAiAll').onclick=async()=>{
-      const btn=$('#profitAiAll');btn.disabled=true;
+      const btn=$('#profitAiAll');
+      const automaticOrders=orders.filter(o=>o.delivery_status!=='partial');
+      if(!automaticOrders.length)return toast('كل الطلبات جزئية وتحتاج مراجعة يدوية');
+      btn.disabled=true;
       let done=0,failed=0;
-      for(const o of orders){
-        btn.textContent=`جاري حساب ${done+failed+1} من ${orders.length}...`;
+      for(const o of automaticOrders){
+        btn.textContent=`جاري حساب ${done+failed+1} من ${automaticOrders.length}...`;
         const card=document.querySelector(`.profit-order-card[data-id="${o.id}"]`);
         try{await analyzeOne(card,o);done++}catch{failed++}
       }
       recalc();
       btn.disabled=false;btn.textContent='✨ حساب كل الطلبات وجمع الإجماليات';
-      toast(failed?`تم حساب ${done} طلب وتعذر ${failed}`:`تم حساب وجمع ${done} طلب`);
+      const skipped=orders.length-automaticOrders.length;
+      toast(failed?`تم حساب ${done} وتعذر ${failed}`:`تم حساب ${done} طلب${skipped?`، وتجاوز ${skipped} طلب جزئي للمراجعة`:''}`);
     };
 
     document.querySelectorAll('.profit-save').forEach(btn=>btn.onclick=async()=>{
       const card=btn.closest('.profit-order-card'),o=orders.find(x=>Number(x.id)===Number(btn.dataset.id));
+      const isPartial=o.delivery_status==='partial';
+      const amount=Number(card.querySelector('.profit-amount').value||0);
+      const fee=Number(card.querySelector('.profit-fee').value||0);
+      const cost=Number(card.querySelector('.profit-cost').value||0);
+      const partialItems=isPartial?(card.querySelector('.profit-partial-items')?.value||'').trim():'';
+      if(isPartial&&!Number.isFinite(cost))return toast('أدخل كوست القطع المستلمة');
       btn.disabled=true;
       try{
-        const amount=Number(card.querySelector('.profit-amount').value||0);
-        const fee=Number(card.querySelector('.profit-fee').value||0);
         await api('/orders/'+o.id+'/outcome',{method:'PUT',body:JSON.stringify({
           delivery_status:o.delivery_status,printed:Number(o.printed||0),delivered_amount:amount,
-          delivery_fee:fee,cash_collected:Math.max(0,amount-fee),cost_of_goods:Number(card.querySelector('.profit-cost').value||0),
+          delivery_fee:fee,cash_collected:Math.max(0,amount-fee),cost_of_goods:cost,
+          partial_cost_reviewed:isPartial?1:0,partial_received_items:partialItems,
           delivered_pieces:Number(o.delivered_pieces||0),returned_pieces:Number(o.returned_pieces||0),settlement_note:o.settlement_note||''
         })});
-        toast('تم حفظ حساب الطلب');recalc();
+        if(isPartial){
+          card.dataset.reviewed='1';
+          o.partial_cost_reviewed=1;
+          o.partial_received_items=partialItems;
+          const badge=card.querySelector('.partial-review-badge');
+          if(badge){badge.className='badge badge-ok partial-review-badge';badge.textContent='تمت مراجعة الكوست'}
+        }
+        toast(isPartial?'تم اعتماد حساب الطلب الجزئي':'تم حفظ حساب الطلب');
+        recalc();
       }catch(e){toast(e.message)}finally{btn.disabled=false}
     });
     recalc();

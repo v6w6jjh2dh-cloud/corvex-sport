@@ -123,6 +123,8 @@ async function ensureBusinessSchema(env) {
     ['cash_collected', "REAL NOT NULL DEFAULT 0"],
     ['delivered_amount', "REAL NOT NULL DEFAULT 0"],
     ['cost_of_goods', "REAL NOT NULL DEFAULT 0"],
+    ['partial_cost_reviewed', "INTEGER NOT NULL DEFAULT 0"],
+    ['partial_received_items', "TEXT NOT NULL DEFAULT ''"],
     ['delivered_pieces', "INTEGER NOT NULL DEFAULT 0"],
     ['returned_pieces', "INTEGER NOT NULL DEFAULT 0"],
     ['settlement_note', "TEXT NOT NULL DEFAULT ''"],
@@ -874,13 +876,15 @@ export async function onRequest(context) {
             delivered_amount=?,
             cash_collected=?,
             delivery_fee=?,
+            partial_cost_reviewed=CASE WHEN ?='partial' THEN 0 ELSE partial_cost_reviewed END,
+            partial_received_items=CASE WHEN ?='partial' THEN '' ELSE partial_received_items END,
             settlement_note=CASE WHEN ?='' THEN settlement_note ELSE ? END,
             settled_at=CASE WHEN ?='pending' THEN NULL ELSE datetime('now') END,
             delivery_company_settled=?,
             delivery_company_settlement_id=?,
             updated_at=datetime('now')
             WHERE id=?`)
-            .bind(x.status,x.importedAmount,x.cashCollected,x.deliveryFee,x.note,x.note,x.status,finalSettled,settlementId,x.order.id)
+            .bind(x.status,x.importedAmount,x.cashCollected,x.deliveryFee,x.status,x.status,x.note,x.note,x.status,finalSettled,settlementId,x.order.id)
         );
         statements.push(
           env.DB.prepare(`INSERT INTO delivery_company_settlement_orders(
@@ -1214,8 +1218,10 @@ export async function onRequest(context) {
         const fee=['delivered','delivered_adjusted','partial','refused_fee_paid'].includes(status)?Number(o.delivery_fee||2):0;
         const cash=['delivered','delivered_adjusted','partial'].includes(status)?Math.max(0,deliveredAmount-fee):0;
         return env.DB.prepare(`UPDATE orders SET delivery_status=?,delivered_amount=?,delivery_fee=?,cash_collected=?,
+          partial_cost_reviewed=CASE WHEN ?='partial' THEN 0 ELSE partial_cost_reviewed END,
+          partial_received_items=CASE WHEN ?='partial' THEN '' ELSE partial_received_items END,
           settled_at=CASE WHEN ?='pending' THEN NULL ELSE datetime('now') END,updated_at=datetime('now') WHERE id=?`)
-          .bind(status,deliveredAmount,fee,cash,status,o.id);
+          .bind(status,deliveredAmount,fee,cash,status,status,status,o.id);
       });
       for(let i=0;i<statements.length;i+=40)await env.DB.batch(statements.slice(i,i+40));
       return json({ok:true,updated:statements.length,status_label:STATUS_LABELS[status]||status});
@@ -1244,6 +1250,8 @@ export async function onRequest(context) {
       const deliveredAmount = Number(b.delivered_amount || 0);
       const cashCollected = Number(b.cash_collected || 0);
       const costOfGoods = Number(b.cost_of_goods || 0);
+      const partialCostReviewed=status==='partial'&&Number(b.partial_cost_reviewed)===1?1:0;
+      const partialReceivedItems=String(b.partial_received_items||'').trim();
       const deliveredPieces = Math.max(0, Number(b.delivered_pieces || 0));
       const returnedPieces = Math.max(0, Number(b.returned_pieces || 0));
       const note = String(b.settlement_note || '').trim();
@@ -1256,6 +1264,8 @@ export async function onRequest(context) {
         delivered_amount=?,
         cash_collected=?,
         cost_of_goods=?,
+        partial_cost_reviewed=?,
+        partial_received_items=?,
         delivered_pieces=?,
         returned_pieces=?,
         settlement_note=?,
@@ -1263,7 +1273,7 @@ export async function onRequest(context) {
         updated_at=datetime('now')
         WHERE id=?`)
         .bind(status, printed, deliveryFee, deliveredAmount, cashCollected, costOfGoods,
-          deliveredPieces, returnedPieces, note, status, id).run();
+          partialCostReviewed, partialReceivedItems, deliveredPieces, returnedPieces, note, status, id).run();
 
       const order = await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(id).first();
       return json({ order, status_label: STATUS_LABELS[status] || status });
