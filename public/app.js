@@ -1883,10 +1883,17 @@ async function batchesView(){
 
 let deliveryPdfJsPromise=null;
 async function loadDeliveryPdfJs(){
+  if(typeof Promise.withResolvers!=='function'){
+    Promise.withResolvers=function(){
+      let resolve,reject;
+      const promise=new Promise((res,rej)=>{resolve=res;reject=rej});
+      return {promise,resolve,reject};
+    };
+  }
   if(globalThis.pdfjsLib)return globalThis.pdfjsLib;
   if(!deliveryPdfJsPromise){
     deliveryPdfJsPromise=new Promise((resolve,reject)=>{
-      const base='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/';
+      const base='https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/legacy/build/';
       const script=document.createElement('script');
       script.src=base+'pdf.min.js';
       script.async=true;
