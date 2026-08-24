@@ -2022,12 +2022,13 @@ function deliveryHeaderGuess(headers,kind){
 function mapDeliveryCompanyStatus(raw){
   const n=normalizeArabic(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();
   if(!n)return '';
+  if((n.includes('تم التسليم')||n.includes('مسلم'))&&(n.includes('مرتجع')||n.includes('جزئي')||n.includes('جزء')))return 'partial';
   if(n.includes('تم التسليم')||n.includes('مسلم')||n.includes('delivered')||n==='done')return 'delivered';
   if(n.includes('بعد الوصول')||n.includes('لا رد')||n.includes('لارد'))return 'refused_no_fee';
   if((n.includes('رفض')||n.includes('راجع')||n.includes('مرتجع'))&&(n.includes('عدم')||n.includes('بدون')||n.includes('لم يدفع')))return 'refused_no_fee';
   if((n.includes('رفض')||n.includes('راجع')||n.includes('مرتجع'))&&(n.includes('دفع')||n.includes('اجور')||n.includes('أجور')))return 'refused_fee_paid';
   if(n.includes('ملغي')||n.includes('الغاء')||n.includes('إلغاء')||n.includes('cancel'))return 'canceled_before_arrival';
-  if(n.includes('جزئي')||n.includes('partial'))return 'partial';
+  if(n.includes('جزئي')||n.includes('جزء')||n.includes('مرتجع')||n.includes('partial'))return 'partial';
   if(n.includes('قيد')||n.includes('توصيل')||n.includes('pending')||n.includes('out for delivery'))return 'pending';
   return '';
 }
@@ -2039,7 +2040,7 @@ function deliveryStatusOptions(selected=''){
     ['refused_fee_paid','رفض ودفع أجور'],
     ['refused_no_fee','رفض وعدم دفع أجور'],
     ['canceled_before_arrival','ملغي قبل الوصول'],
-    ['partial','استلام جزئي'],
+    ['partial','تم التسليم جزئيًا'],
     ['pending','قيد التوصيل']
   ].map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');
 }
@@ -2191,6 +2192,13 @@ async function deliveryReconcileView(){
       });
 
       previewRows=(d.rows||[]).map((x,i)=>({...x,raw_status:rows[i]?.raw_status||'',raw_date:rows[i]?.shipment_date||'',status:rows[i]?.status||'',delivery_fee:Number(x.delivery_fee??rows[i]?.delivery_fee??0)}));
+      const settlementRank=row=>{
+        const partial=row.status==='partial'||/(مرتجع|جزئي|جزء)/.test(normalizeArabic(row.raw_status||''));
+        if(row.match_type==='matched')return partial?1:0;
+        if(row.match_type==='duplicate')return 2;
+        return 3;
+      };
+      previewRows.sort((a,b)=>settlementRank(a)-settlementRank(b)||Number(a.row_index||0)-Number(b.row_index||0));
       renderDeliveryPreview(d.summary||{});
     }catch(e){toast(e.message)}
   }
