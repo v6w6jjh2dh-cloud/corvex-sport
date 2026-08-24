@@ -1918,6 +1918,16 @@ function deliveryPdfNumber(value){
   const match=normalizeDigits(String(value||'')).replace(/,/g,'.').match(/-?\d+(?:\.\d+)?/);
   return match?Number(match[0]):0;
 }
+function deliveryPdfDate(value){
+  const compact=normalizeDigits(String(value||'')).replace(/\s+/g,'').replace(/[\/.]/g,'-');
+  let match=compact.match(/(20\d{2})-(\d{1,2})-+(\d{1,2})/);
+  if(!match)match=compact.match(/(\d{1,2})-(\d{1,2})-(20\d{2})/);
+  if(!match)return '';
+  let year,month,day;
+  if(match[1].length===4){year=match[1];month=match[2];day=match[3]}
+  else{day=match[1];month=match[2];year=match[3]}
+  return year+'-'+String(Number(month)).padStart(2,'0')+'-'+String(Number(day)).padStart(2,'0');
+}
 function deliveryPdfColumn(items,width,from,to){
   const lines=[];
   for(const item of items.filter(x=>x.x>=width*from&&x.x<width*to).sort((a,b)=>Math.abs(b.y-a.y)>2?b.y-a.y:b.x-a.x)){
@@ -1937,6 +1947,7 @@ async function parseDeliveryPdfFile(file){
     const phones=items.filter(item=>/^(?:00962|962|0)?7\d{8}$/.test(normalizeDigits(item.text).replace(/\D/g,''))).sort((a,b)=>b.y-a.y);
     for(let i=0;i<phones.length;i++){
       const phoneItem=phones[i],nextY=phones[i+1]?.y??-Infinity,band=items.filter(item=>item.y<=phoneItem.y+4&&item.y>nextY+4);
+      const shipmentDate=deliveryPdfDate(deliveryPdfColumn(band,viewport.width,0,.07));
       const statusText=deliveryPdfColumn(band,viewport.width,.265,.385);
       const note=deliveryPdfColumn(band,viewport.width,.62,.75);
       const cash=deliveryPdfNumber(deliveryPdfColumn(band,viewport.width,.07,.145));
@@ -1948,11 +1959,11 @@ async function parseDeliveryPdfFile(file){
         else if(cash===0&&fee>0&&Math.abs(price-fee)<.01)status='refused_fee_paid';
         else if(price>=0)status='delivered';
       }
-      rows.push({__row:rows.length+1,'رقم الهاتف':normalizeDigits(phoneItem.text).replace(/\D/g,''),'الحالة':statusText,'السعر':price,'أجور التوصيل':fee,'ملاحظة':note,__mapped_status:status,__cash:cash,__page:pageNumber});
+      rows.push({__row:rows.length+1,'رقم الهاتف':normalizeDigits(phoneItem.text).replace(/\D/g,''),'تاريخ الشحنة':shipmentDate,'الحالة':statusText,'السعر':price,'أجور التوصيل':fee,'ملاحظة':note,__mapped_status:status,__cash:cash,__page:pageNumber});
     }
   }
   if(!rows.length)throw new Error('لم أجد أرقام هواتف قابلة للقراءة داخل ملف PDF');
-  return {headers:['رقم الهاتف','الحالة','السعر','أجور التوصيل','ملاحظة'],rows};
+  return {headers:['رقم الهاتف','تاريخ الشحنة','الحالة','السعر','أجور التوصيل','ملاحظة'],rows};
 }
 
 function parseDeliveryDelimitedText(text){
@@ -1997,6 +2008,7 @@ function deliveryHeaderGuess(headers,kind){
   const hs=headers.map(h=>({raw:h,n:normalizeArabic(String(h)).toLowerCase()}));
   const tests={
     phone:['هاتف','الهاتف','رقم الهاتف','موبايل','جوال','phone','mobile','tel'],
+    date:['تاريخ الشحنه','تاريخ الشحنة','التاريخ','date'],
     status:['حاله','الحاله','الحالة','status','result','نتيجه','نتيجة'],
     amount:['سعر','السعر','مبلغ','القيمه','القيمة','تحصيل','المحصل','cash','amount','cod','price'],
     fee:['اجور التوصيل','أجور التوصيل','توصيل','delivery fee','fee'],
@@ -2099,6 +2111,7 @@ async function deliveryReconcileView(){
     if(!parsed.headers.length){$('#deliveryMapping').style.display='none';return}
     const options=(selected='')=>'<option value="">— اختر —</option>'+parsed.headers.map(h=>`<option value="${encodeURIComponent(h)}" ${h===selected?'selected':''}>${esc(h)}</option>`).join('');
     const phone=deliveryHeaderGuess(parsed.headers,'phone');
+    const shipmentDate=deliveryHeaderGuess(parsed.headers,'date');
     const status=deliveryHeaderGuess(parsed.headers,'status');
     const amount=deliveryHeaderGuess(parsed.headers,'amount');
     const fee=deliveryHeaderGuess(parsed.headers,'fee');
@@ -2110,6 +2123,7 @@ async function deliveryReconcileView(){
         <h3>تحديد أعمدة الكشف</h3>
         <div class="delivery-map-grid">
           <div class="field"><label>رقم الهاتف *</label><select id="mapPhone" class="select">${options(phone)}</select></div>
+          <div class="field"><label>تاريخ الشحنة</label><select id="mapShipmentDate" class="select">${options(shipmentDate)}</select></div>
           <div class="field"><label>الحالة *</label><select id="mapStatus" class="select">${options(status)}</select></div>
           <div class="field"><label>السعر في الكشف</label><select id="mapAmount" class="select">${options(amount)}</select></div>
           <div class="field"><label>أجور التوصيل</label><select id="mapFee" class="select">${options(fee)}</select></div>
@@ -2151,6 +2165,7 @@ async function deliveryReconcileView(){
     if(!storeId)return toast('اختر المتجر أولاً');
 
     const phoneCol=decodeURIComponent($('#mapPhone').value||'');
+    const shipmentDateCol=decodeURIComponent($('#mapShipmentDate').value||'');
     const statusCol=decodeURIComponent($('#mapStatus').value||'');
     const amountCol=decodeURIComponent($('#mapAmount').value||'');
     const feeCol=decodeURIComponent($('#mapFee').value||'');
@@ -2161,6 +2176,7 @@ async function deliveryReconcileView(){
 
     const rows=parsed.rows.map(r=>({
       phone:r[phoneCol]||'',
+      shipment_date:shipmentDateCol?deliveryPdfDate(r[shipmentDateCol]||''):'',
       status:r.__mapped_status||mapDeliveryCompanyStatus(r[statusCol]),
       raw_status:r[statusCol]||'',
       amount:amountCol?Number(String(r[amountCol]||'0').replace(/[^\d.\-]/g,''))||0:0,
@@ -2174,7 +2190,7 @@ async function deliveryReconcileView(){
         body:JSON.stringify({store_id:storeId,rows})
       });
 
-      previewRows=(d.rows||[]).map((x,i)=>({...x,raw_status:rows[i]?.raw_status||'',status:rows[i]?.status||'',delivery_fee:Number(x.delivery_fee??rows[i]?.delivery_fee??0)}));
+      previewRows=(d.rows||[]).map((x,i)=>({...x,raw_status:rows[i]?.raw_status||'',raw_date:rows[i]?.shipment_date||'',status:rows[i]?.status||'',delivery_fee:Number(x.delivery_fee??rows[i]?.delivery_fee??0)}));
       renderDeliveryPreview(d.summary||{});
     }catch(e){toast(e.message)}
   }
@@ -2194,7 +2210,7 @@ async function deliveryReconcileView(){
       <div class="table-wrap">
         <table class="table delivery-preview-table">
           <thead>
-            <tr><th>#</th><th>الهاتف</th><th>المطابقة</th><th>الطلب</th><th>حالة الكشف</th><th>الحالة المعتمدة</th><th>السعر</th><th>أجور التوصيل</th><th>ملاحظة</th></tr>
+            <tr><th>#</th><th>الهاتف</th><th>تاريخ الشحنة</th><th>المطابقة</th><th>الطلب</th><th>حالة الكشف</th><th>الحالة المعتمدة</th><th>السعر</th><th>أجور التوصيل</th><th>ملاحظة</th></tr>
           </thead>
           <tbody>
             ${previewRows.map((r,i)=>{
@@ -2211,11 +2227,14 @@ async function deliveryReconcileView(){
                 ?'<span class="match-badge match-ok">مطابق</span>'
                 :r.match_type==='duplicate'
                   ?'<span class="match-badge match-warn">مكرر</span>'
-                  :'<span class="match-badge match-bad">غير موجود</span>';
+                  :r.match_type==='date_mismatch'
+                    ?'<span class="match-badge match-warn">تاريخ مختلف</span>'
+                    :'<span class="match-badge match-bad">غير موجود</span>';
 
               return `<tr>
                 <td>${r.row_index}</td>
                 <td>${esc(r.phone||'')}</td>
+                <td>${esc(r.raw_date||r.shipment_date||'—')}</td>
                 <td>${badge}</td>
                 <td>${orderCell}</td>
                 <td>${esc(r.raw_status||'')}</td>

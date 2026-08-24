@@ -735,13 +735,18 @@ export async function onRequest(context) {
       let matched=0,duplicate=0,unmatched=0;
       for(let i=0;i<rows.length;i++){
         const row=rows[i]||{},phone=normalizePhone(row.phone),amount=Math.max(0,Number(row.amount||0)),deliveryFee=Math.max(0,Number(row.delivery_fee||0));
-        const allCandidates=phone?(byPhone.get(phone)||[]):[],candidates=allCandidates.filter(o=>!usedOrderIds.has(Number(o.id)));
+        const shipmentDate=String(row.shipment_date||'').trim();
+        const allCandidates=phone?(byPhone.get(phone)||[]):[];
+        const available=allCandidates.filter(o=>!usedOrderIds.has(Number(o.id)));
+        const candidates=shipmentDate?available.filter(o=>String(o.first_print_date||'')===shipmentDate||String(o.delivery_date||'')===shipmentDate):available;
         let chosen=null;
         if(candidates.length===1)chosen=candidates[0];
         else if(candidates.length>1&&amount>0){const exact=candidates.filter(o=>Math.abs(Math.abs(Number(o.amount||0))-amount)<.01);if(exact.length===1)chosen=exact[0]}
-        if(!phone||allCandidates.length===0){unmatched++;result.push({row_index:i+1,phone,status:String(row.status||''),amount,delivery_fee:deliveryFee,note:String(row.note||''),match_type:'unmatched',candidates:[]})}
-        else if(chosen){usedOrderIds.add(Number(chosen.id));matched++;result.push({row_index:i+1,phone,status:String(row.status||''),amount,delivery_fee:deliveryFee,note:String(row.note||''),match_type:'matched',order:chosen,candidates})}
-        else{duplicate++;result.push({row_index:i+1,phone,status:String(row.status||''),amount,delivery_fee:deliveryFee,note:String(row.note||''),match_type:'duplicate',candidates})}
+        const common={row_index:i+1,phone,shipment_date:shipmentDate,status:String(row.status||''),amount,delivery_fee:deliveryFee,note:String(row.note||'')};
+        if(!phone||allCandidates.length===0){unmatched++;result.push({...common,match_type:'unmatched',candidates:[]})}
+        else if(shipmentDate&&candidates.length===0){unmatched++;result.push({...common,match_type:'date_mismatch',candidates:[]})}
+        else if(chosen){usedOrderIds.add(Number(chosen.id));matched++;result.push({...common,match_type:'matched',order:chosen,candidates})}
+        else{duplicate++;result.push({...common,match_type:'duplicate',candidates})}
       }
 
       return json({rows:result,summary:{total:rows.length,matched,duplicate,unmatched}});
