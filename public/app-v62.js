@@ -2776,15 +2776,36 @@ async function permissionsView(){
     <div class="card">
       <div class="field"><label>نوع الحساب</label><select id="permType" class="select"><option value="user">مستخدم</option><option value="courier">مندوب</option></select></div>
       <div class="field"><label>الحساب</label><select id="permActor" class="select"></select></div>
+      <div id="permActorNotice" class="sub" style="margin:8px 0 12px"></div>
       <div id="permChecks" class="permission-grid">${d.all_permissions.map(p=>`<label class="perm-check"><input type="checkbox" value="${p}"><span>${PERMISSION_LABELS[p]||p}</span></label>`).join('')}</div>
       <button id="savePermissions" class="btn btn-primary">حفظ الصلاحيات</button>
     </div>
   </div>`;
   const saved=(type,id)=>{const r=(d.permissions||[]).find(x=>x.actor_type===type&&Number(x.actor_id)===Number(id));try{return r?JSON.parse(r.permissions_json||'[]'):[]}catch{return []}};
-  const fillActors=()=>{const type=$('#permType').value,list=type==='user'?d.users:d.couriers;$('#permActor').innerHTML=list.map(x=>`<option value="${x.id}">${esc(x.name||x.display_name||x.username)}</option>`).join('');loadChecks()};
-  const loadChecks=()=>{const set=new Set(saved($('#permType').value,$('#permActor').value));document.querySelectorAll('#permChecks input').forEach(x=>x.checked=set.has(x.value))};
+  const selectedActor=()=>{const type=$('#permType').value,list=type==='user'?d.users:d.couriers;return list.find(x=>Number(x.id)===Number($('#permActor').value))};
+  const fillActors=()=>{const type=$('#permType').value,list=type==='user'?d.users:d.couriers;$('#permActor').innerHTML=list.map(x=>`<option value="${x.id}">${esc(x.name||x.display_name||x.username)}${type==='user'&&x.role==='admin'?' — مدير':''}</option>`).join('');loadChecks()};
+  const loadChecks=()=>{const type=$('#permType').value,actor=selectedActor(),isAdmin=type==='user'&&actor?.role==='admin';const set=new Set(isAdmin?d.all_permissions:saved(type,$('#permActor').value));document.querySelectorAll('#permChecks input').forEach(x=>x.checked=set.has(x.value));$('#permActorNotice').innerHTML=isAdmin?'<b style="color:#9a6700">هذا الحساب مدير، لذلك صلاحياته كاملة. عند إزالة أي صلاحية وحفظها سيطلب النظام تحويله إلى موظف لتطبيق التحديد.</b>':'حدد الصلاحيات ثم اضغط حفظ.'};
   $('#permType').onchange=fillActors;$('#permActor').onchange=loadChecks;fillActors();
-  $('#savePermissions').onclick=async()=>{const permissions=[...document.querySelectorAll('#permChecks input:checked')].map(x=>x.value);try{await api('/permissions',{method:'PUT',body:JSON.stringify({actor_type:$('#permType').value,actor_id:$('#permActor').value,permissions})});toast('تم حفظ الصلاحيات');permissionsView()}catch(e){toast(e.message)}};
+  $('#savePermissions').onclick=async()=>{
+    const type=$('#permType').value,id=$('#permActor').value,actor=selectedActor();
+    const permissions=[...document.querySelectorAll('#permChecks input:checked')].map(x=>x.value);
+    let convertAdmin=false;
+    if(type==='user'&&actor?.role==='admin'&&permissions.length<d.all_permissions.length){
+      if(Number(actor.id)===Number(state.user?.id))return toast('لا يمكنك تقييد حساب المدير الذي تستخدمه الآن');
+      if(!confirm(`الحساب «${actor.name||actor.username}» مدير وصلاحياته كاملة.\n\nهل تريد تحويله إلى موظف وتطبيق الصلاحيات المحددة؟`))return;
+      convertAdmin=true;
+    }
+    const btn=$('#savePermissions');btn.disabled=true;
+    try{
+      const result=await api('/permissions',{method:'PUT',body:JSON.stringify({actor_type:type,actor_id:id,permissions,convert_admin_to_staff:convertAdmin})});
+      const stored=new Set(result.permissions||[]);
+      const row=(d.permissions||[]).find(x=>x.actor_type===type&&Number(x.actor_id)===Number(id));
+      if(row)row.permissions_json=JSON.stringify([...stored]);else d.permissions.push({actor_type:type,actor_id:Number(id),permissions_json:JSON.stringify([...stored])});
+      if(type==='user'&&actor&&result.role)actor.role=result.role;
+      loadChecks();
+      toast(`تم حفظ ${stored.size} صلاحية فعليًا`);
+    }catch(e){toast(e.message)}finally{btn.disabled=false}
+  };
 }
 
 async function storesView(){
