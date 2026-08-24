@@ -44,7 +44,7 @@ export async function onRequestGet(context) {
       ok: true,
       service: 'corvex-meta-webhook',
       verifyTokenConfigured: Boolean(verifyToken),
-      pageTokenConfigured: Boolean(getSecret(env, 'META_PAGE_ACCESS_TOKEN')),
+      pageTokenConfigured: Boolean(getSecret(env, 'NASHMI_PAGE_ACCESS_TOKEN', 'META_PAGE_ACCESS_TOKEN')),
       openAIConfigured: Boolean(getSecret(env, 'OPENAI_API_KEY')),
     });
   }
@@ -88,8 +88,8 @@ async function makeReply(env, text) {
 }
 
 async function sendMessengerReply(env, recipientId, text) {
-  const pageToken = getSecret(env, 'META_PAGE_ACCESS_TOKEN');
-  if (!pageToken) throw new Error('META_PAGE_ACCESS_TOKEN missing');
+  const pageToken = getSecret(env, 'NASHMI_PAGE_ACCESS_TOKEN', 'META_PAGE_ACCESS_TOKEN');
+  if (!pageToken) throw new Error('NASHMI_PAGE_ACCESS_TOKEN missing');
 
   const response = await fetch(`https://graph.facebook.com/v26.0/me/messages?access_token=${encodeURIComponent(pageToken)}`, {
     method: 'POST',
