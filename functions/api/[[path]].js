@@ -731,17 +731,32 @@ export async function onRequest(context) {
         byPhone.get(p).push(o);
       }
 
-      const result=[],usedOrderIds=new Set();
+      const result=[],usedOrderIds=new Set(),remainingRows=new Map();
+      const settlementRowKey=row=>{
+        const phone=normalizePhone(row?.phone),shipmentDate=String(row?.shipment_date||'').trim();
+        const amount=Math.max(0,Number(row?.amount||0)).toFixed(2),status=String(row?.status||'').trim();
+        return phone+'|'+shipmentDate+'|'+amount+'|'+status;
+      };
+      for(const row of rows){
+        const key=settlementRowKey(row);
+        remainingRows.set(key,(remainingRows.get(key)||0)+1);
+      }
       let matched=0,duplicate=0,unmatched=0;
       for(let i=0;i<rows.length;i++){
         const row=rows[i]||{},phone=normalizePhone(row.phone),amount=Math.max(0,Number(row.amount||0)),deliveryFee=Math.max(0,Number(row.delivery_fee||0));
-        const shipmentDate=String(row.shipment_date||'').trim();
+        const shipmentDate=String(row.shipment_date||'').trim(),rowKey=settlementRowKey(row);
+        const remainingCount=remainingRows.get(rowKey)||1;
         const allCandidates=phone?(byPhone.get(phone)||[]):[];
         const available=allCandidates.filter(o=>!usedOrderIds.has(Number(o.id)));
         const candidates=shipmentDate?available.filter(o=>String(o.first_print_date||'')===shipmentDate||String(o.delivery_date||'')===shipmentDate):available;
+        const exactAmount=amount>0?candidates.filter(o=>Math.abs(Math.abs(Number(o.amount||0))-amount)<.01):candidates;
         let chosen=null;
         if(candidates.length===1)chosen=candidates[0];
-        else if(candidates.length>1&&amount>0){const exact=candidates.filter(o=>Math.abs(Math.abs(Number(o.amount||0))-amount)<.01);if(exact.length===1)chosen=exact[0]}
+        else if(exactAmount.length===1)chosen=exactAmount[0];
+        else if(exactAmount.length>1&&exactAmount.length===remainingCount){
+          chosen=exactAmount.slice().sort((a,b)=>Number(a.id)-Number(b.id))[0];
+        }
+        remainingRows.set(rowKey,Math.max(0,remainingCount-1));
         const common={row_index:i+1,phone,shipment_date:shipmentDate,status:String(row.status||''),amount,delivery_fee:deliveryFee,note:String(row.note||'')};
         if(!phone||allCandidates.length===0){unmatched++;result.push({...common,match_type:'unmatched',candidates:[]})}
         else if(shipmentDate&&candidates.length===0){unmatched++;result.push({...common,match_type:'date_mismatch',candidates:[]})}
