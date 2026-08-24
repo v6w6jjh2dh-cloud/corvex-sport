@@ -1595,7 +1595,7 @@ async function loadOrders(){
 const DELIVERY_STATUS_LABELS={
   pending:'قيد التوصيل',
   delivered:'تم التسليم',
-  delivered_adjusted:'تم التسليم وتعديل قيمة',
+  delivered_adjusted:'استلام جزئي',
   refused_fee_paid:'رفض ودفع أجور',
   refused_no_fee:'رفض وعدم دفع أجور',
   canceled_before_arrival:'ملغي قبل الوصول',
@@ -2447,7 +2447,6 @@ async function reportsView(){
           <div class="card" style="position:absolute;z-index:20;top:calc(100% + 6px);right:0;width:245px;padding:10px;box-shadow:0 12px 30px rgba(0,0,0,.18)">
             <label class="perm-check"><input class="report-status-check" type="checkbox" value="pending"><span>قيد التوصيل</span></label>
             <label class="perm-check"><input class="report-status-check" type="checkbox" value="delivered"><span>تم التسليم</span></label>
-            <label class="perm-check"><input class="report-status-check" type="checkbox" value="delivered_adjusted"><span>تم التسليم وتعديل قيمة</span></label>
             <label class="perm-check"><input class="report-status-check" type="checkbox" value="refused_fee_paid"><span>رفض ودفع أجور</span></label>
             <label class="perm-check"><input class="report-status-check" type="checkbox" value="refused_no_fee"><span>رفض وعدم دفع أجور</span></label>
             <label class="perm-check"><input class="report-status-check" type="checkbox" value="canceled_before_arrival"><span>ملغي قبل الوصول</span></label>
@@ -2834,7 +2833,6 @@ async function storeShipmentsView(storeId){
             <div class="card" style="position:absolute;z-index:20;top:calc(100% + 6px);right:0;width:245px;padding:10px;box-shadow:0 12px 30px rgba(0,0,0,.18)">
               <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="pending"><span>قيد التوصيل</span></label>
               <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="delivered"><span>تم التسليم</span></label>
-              <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="delivered_adjusted"><span>تم التسليم وتعديل قيمة</span></label>
               <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="refused_fee_paid"><span>رفض ودفع أجور</span></label>
               <label class="perm-check"><input class="store-shipment-status-check" type="checkbox" value="refused_no_fee"><span>رفض وعدم دفع أجور</span></label>
             </div>
@@ -2853,7 +2851,6 @@ async function storeShipmentsView(storeId){
         <select id="storeBulkStatus" class="select" style="min-width:190px">
           <option value="">اختر نتيجة المحدد...</option>
           <option value="delivered">تم التسليم</option>
-          <option value="delivered_adjusted">تم التسليم وتعديل قيمة</option>
           <option value="partial">استلام جزئي</option>
           <option value="refused_fee_paid">رفض ودفع أجور</option>
           <option value="refused_no_fee">رفض وعدم دفع أجور</option>

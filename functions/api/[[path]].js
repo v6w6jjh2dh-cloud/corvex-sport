@@ -136,6 +136,9 @@ async function ensureBusinessSchema(env) {
     }
   }
 
+  // The old adjusted-delivery state represents a partial receipt in the current workflow.
+  await env.DB.prepare("UPDATE orders SET delivery_status='partial' WHERE delivery_status='delivered_adjusted'").run();
+
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_orders_store_id ON orders(store_id)').run();
 
   const batchInfo = await env.DB.prepare("PRAGMA table_info(print_batches)").all();
@@ -340,7 +343,7 @@ async function userPermissions(env,user){
 const STATUS_LABELS = {
   pending: 'قيد التوصيل',
   delivered: 'تم التسليم',
-  delivered_adjusted: 'تم التسليم وتعديل قيمة',
+  delivered_adjusted: 'استلام جزئي',
   refused_fee_paid: 'رفض ودفع أجور',
   refused_no_fee: 'رفض وعدم دفع أجور',
   canceled_before_arrival: 'ملغي قبل الوصول',
@@ -369,8 +372,8 @@ async function listOrders(url, env) {
   if (storeId) { where.push('o.store_id = ?'); params.push(Number(storeId)); }
 
   if (status) {
-    if (status === 'delivered') {
-      where.push("o.delivery_status IN ('delivered','delivered_adjusted')");
+    if (status === 'partial') {
+      where.push("o.delivery_status IN ('partial','delivered_adjusted')");
     } else {
       where.push('o.delivery_status = ?');
       params.push(status);
@@ -380,9 +383,10 @@ async function listOrders(url, env) {
   if (statuses.length) {
     const allowed=new Set(Object.keys(STATUS_LABELS));
     const selected=[...new Set(statuses.filter(x=>allowed.has(x)))];
-    if(selected.length){
-      where.push(`o.delivery_status IN (${selected.map(()=>'?').join(',')})`);
-      params.push(...selected);
+    const expanded=[...new Set(selected.flatMap(x=>x==='partial'?['partial','delivered_adjusted']:[x]))];
+    if(expanded.length){
+      where.push(`o.delivery_status IN (${expanded.map(()=>'?').join(',')})`);
+      params.push(...expanded);
     }
   }
 
@@ -812,11 +816,12 @@ export async function onRequest(context) {
         if(!Object.prototype.hasOwnProperty.call(STATUS_LABELS,status))status='pending';
 
         const importedAmount=Math.max(0,Number(row.amount||0));
+        if(status==='delivered_adjusted')status='partial';
         if(status==='delivered' && importedAmount>0 && Math.abs(importedAmount-Number(order.amount||0))>0.001){
-          status='delivered_adjusted';
+          status='partial';
         }
 
-        const delivered=['delivered','delivered_adjusted'].includes(status);
+        const delivered=status==='delivered';
         const partial=status==='partial';
         const feePaid=status==='refused_fee_paid';
         const noFee=status==='refused_no_fee';
@@ -1197,7 +1202,8 @@ export async function onRequest(context) {
       const b=await readBody(request);
       const ids=[...new Set((Array.isArray(b.order_ids)?b.order_ids:[]).map(Number).filter(x=>x>0))].slice(0,500);
       const allowed=new Set(Object.keys(STATUS_LABELS));
-      const status=String(b.delivery_status||'');
+      let status=String(b.delivery_status||'');
+      if(status==='delivered_adjusted')status='partial';
       if(!ids.length)return json({error:'حدد طلباً واحداً على الأقل'},400);
       if(!allowed.has(status))return json({error:'حالة الطلب غير صحيحة'},400);
       const marks=ids.map(()=>'?').join(',');
@@ -1230,7 +1236,10 @@ export async function onRequest(context) {
       const id = Number(outcomeMatch[1]);
       const b = await readBody(request);
       const allowed = new Set(Object.keys(STATUS_LABELS));
-      const status = allowed.has(String(b.delivery_status || '')) ? String(b.delivery_status) : 'pending';
+      const requestedStatus=String(b.delivery_status||'');
+      const status=requestedStatus==='delivered_adjusted'
+        ?'partial'
+        :(allowed.has(requestedStatus)?requestedStatus:'pending');
       const deliveryFee = Number(b.delivery_fee || 0);
       const deliveredAmount = Number(b.delivered_amount || 0);
       const cashCollected = Number(b.cash_collected || 0);
