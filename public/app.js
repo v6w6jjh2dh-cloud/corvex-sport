@@ -1880,6 +1880,62 @@ async function batchesView(){
   $('#batchStore').onchange=loadBatches;await loadBatches()
 }
 
+
+let deliveryPdfJsPromise=null;
+async function loadDeliveryPdfJs(){
+  if(!deliveryPdfJsPromise){
+    const base='https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/legacy/build/';
+    deliveryPdfJsPromise=import(base+'pdf.min.mjs').then(mod=>{mod.GlobalWorkerOptions.workerSrc=base+'pdf.worker.min.mjs';return mod});
+  }
+  return deliveryPdfJsPromise;
+}
+function deliveryPdfText(value=''){
+  const raw=String(value||'').trim(),presentation=/[\uFB50-\uFDFF\uFE70-\uFEFF]/.test(raw);
+  let valueText=normalizeDigits(raw.normalize('NFKC')).replace(/\s+/g,' ').trim();
+  if(presentation)valueText=[...valueText].reverse().join('');
+  return valueText;
+}
+function deliveryPdfNumber(value){
+  const match=normalizeDigits(String(value||'')).replace(/,/g,'.').match(/-?\d+(?:\.\d+)?/);
+  return match?Number(match[0]):0;
+}
+function deliveryPdfColumn(items,width,from,to){
+  const lines=[];
+  for(const item of items.filter(x=>x.x>=width*from&&x.x<width*to).sort((a,b)=>Math.abs(b.y-a.y)>2?b.y-a.y:b.x-a.x)){
+    let line=lines.find(x=>Math.abs(x.y-item.y)<=2);
+    if(!line){line={y:item.y,parts:[]};lines.push(line)}
+    line.parts.push(item);
+  }
+  return lines.sort((a,b)=>b.y-a.y).map(line=>line.parts.sort((a,b)=>b.x-a.x).map(x=>x.text).join(' ').trim()).filter(Boolean).join(' ').trim();
+}
+async function parseDeliveryPdfFile(file){
+  const pdfjs=await loadDeliveryPdfJs();
+  const document=await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+  const rows=[];
+  for(let pageNumber=1;pageNumber<=document.numPages;pageNumber++){
+    const page=await document.getPage(pageNumber),viewport=page.getViewport({scale:1}),content=await page.getTextContent();
+    const items=(content.items||[]).map(item=>({text:deliveryPdfText(item.str),x:Number(item.transform?.[4]||0),y:Number(item.transform?.[5]||0)})).filter(item=>item.text);
+    const phones=items.filter(item=>/^(?:00962|962|0)?7\d{8}$/.test(normalizeDigits(item.text).replace(/\D/g,''))).sort((a,b)=>b.y-a.y);
+    for(let i=0;i<phones.length;i++){
+      const phoneItem=phones[i],nextY=phones[i+1]?.y??-Infinity,band=items.filter(item=>item.y<=phoneItem.y+4&&item.y>nextY+4);
+      const statusText=deliveryPdfColumn(band,viewport.width,.265,.385);
+      const note=deliveryPdfColumn(band,viewport.width,.62,.75);
+      const cash=deliveryPdfNumber(deliveryPdfColumn(band,viewport.width,.07,.145));
+      const fee=deliveryPdfNumber(deliveryPdfColumn(band,viewport.width,.145,.205));
+      const price=deliveryPdfNumber(deliveryPdfColumn(band,viewport.width,.205,.265));
+      let status=mapDeliveryCompanyStatus(statusText),normalizedStatus=normalizeArabic(statusText);
+      if(!status){
+        if(normalizedStatus.includes('بعد الوصول')||normalizedStatus.includes('لا رد')||normalizedStatus.includes('لارد')||cash<0)status='refused_no_fee';
+        else if(cash===0&&fee>0&&Math.abs(price-fee)<.01)status='refused_fee_paid';
+        else if(price>=0)status='delivered';
+      }
+      rows.push({__row:rows.length+1,'رقم الهاتف':normalizeDigits(phoneItem.text).replace(/\D/g,''),'الحالة':statusText,'السعر':price,'أجور التوصيل':fee,'ملاحظة':note,__mapped_status:status,__cash:cash,__page:pageNumber});
+    }
+  }
+  if(!rows.length)throw new Error('لم أجد أرقام هواتف قابلة للقراءة داخل ملف PDF');
+  return {headers:['رقم الهاتف','الحالة','السعر','أجور التوصيل','ملاحظة'],rows};
+}
+
 function parseDeliveryDelimitedText(text){
   const raw=String(text||'').replace(/^\uFEFF/,'').trim();
   if(!raw)return {headers:[],rows:[]};
@@ -1923,7 +1979,8 @@ function deliveryHeaderGuess(headers,kind){
   const tests={
     phone:['هاتف','الهاتف','رقم الهاتف','موبايل','جوال','phone','mobile','tel'],
     status:['حاله','الحاله','الحالة','status','result','نتيجه','نتيجة'],
-    amount:['مبلغ','القيمه','القيمة','تحصيل','المحصل','cash','amount','cod','price'],
+    amount:['سعر','السعر','مبلغ','القيمه','القيمة','تحصيل','المحصل','cash','amount','cod','price'],
+    fee:['اجور التوصيل','أجور التوصيل','توصيل','delivery fee','fee'],
     note:['ملاحظه','ملاحظات','note','notes','سبب','reason']
   };
   const list=tests[kind]||[];
@@ -1934,9 +1991,10 @@ function deliveryHeaderGuess(headers,kind){
 function mapDeliveryCompanyStatus(raw){
   const n=normalizeArabic(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();
   if(!n)return '';
-  if(n.includes('تم التسليم')||n.includes('تم التسليم')||n.includes('مسلم')||n.includes('delivered')||n==='done')return 'delivered';
-  if((n.includes('رفض')||n.includes('راجع')||n.includes('مرتجع'))&&(n.includes('دفع')||n.includes('اجور')||n.includes('أجور')))return 'refused_fee_paid';
+  if(n.includes('تم التسليم')||n.includes('مسلم')||n.includes('delivered')||n==='done')return 'delivered';
+  if(n.includes('بعد الوصول')||n.includes('لا رد')||n.includes('لارد'))return 'refused_no_fee';
   if((n.includes('رفض')||n.includes('راجع')||n.includes('مرتجع'))&&(n.includes('عدم')||n.includes('بدون')||n.includes('لم يدفع')))return 'refused_no_fee';
+  if((n.includes('رفض')||n.includes('راجع')||n.includes('مرتجع'))&&(n.includes('دفع')||n.includes('اجور')||n.includes('أجور')))return 'refused_fee_paid';
   if(n.includes('ملغي')||n.includes('الغاء')||n.includes('إلغاء')||n.includes('cancel'))return 'canceled_before_arrival';
   if(n.includes('جزئي')||n.includes('partial'))return 'partial';
   if(n.includes('قيد')||n.includes('توصيل')||n.includes('pending')||n.includes('out for delivery'))return 'pending';
@@ -1980,8 +2038,8 @@ async function deliveryReconcileView(){
         </div>
 
         <div class="field">
-          <label>رفع كشف CSV / TXT</label>
-          <input id="deliveryFile" type="file" class="input" accept=".csv,.txt,.tsv,text/csv,text/plain">
+          <label>رفع كشف PDF / CSV / TXT</label>
+          <input id="deliveryFile" type="file" class="input" accept=".pdf,.csv,.txt,.tsv,application/pdf,text/csv,text/plain">
         </div>
 
         <div class="field full">
@@ -2024,6 +2082,7 @@ async function deliveryReconcileView(){
     const phone=deliveryHeaderGuess(parsed.headers,'phone');
     const status=deliveryHeaderGuess(parsed.headers,'status');
     const amount=deliveryHeaderGuess(parsed.headers,'amount');
+    const fee=deliveryHeaderGuess(parsed.headers,'fee');
     const note=deliveryHeaderGuess(parsed.headers,'note');
 
     $('#deliveryMapping').style.display='block';
@@ -2033,7 +2092,8 @@ async function deliveryReconcileView(){
         <div class="delivery-map-grid">
           <div class="field"><label>رقم الهاتف *</label><select id="mapPhone" class="select">${options(phone)}</select></div>
           <div class="field"><label>الحالة *</label><select id="mapStatus" class="select">${options(status)}</select></div>
-          <div class="field"><label>المبلغ المحصل</label><select id="mapAmount" class="select">${options(amount)}</select></div>
+          <div class="field"><label>السعر في الكشف</label><select id="mapAmount" class="select">${options(amount)}</select></div>
+          <div class="field"><label>أجور التوصيل</label><select id="mapFee" class="select">${options(fee)}</select></div>
           <div class="field"><label>الملاحظات</label><select id="mapNote" class="select">${options(note)}</select></div>
         </div>
         <div class="sub">تم قراءة ${parsed.rows.length} صف. إذا لم يتعرف النظام على اسم العمود، اختاره يدويًا.</div>
@@ -2051,11 +2111,12 @@ async function deliveryReconcileView(){
   };
 
   $('#deliveryFile').onchange=async e=>{
-    const file=e.target.files?.[0];
-    if(!file)return;
-    const text=await file.text();
-    $('#deliveryPaste').value='';
-    parseText(text);
+    const file=e.target.files?.[0];if(!file)return;
+    $('#deliveryPaste').value='';$('#deliveryPreview').innerHTML='<div class="empty">جارٍ قراءة الكشف...</div>';
+    try{
+      if(file.type==='application/pdf'||file.name.toLowerCase().endsWith('.pdf')){parsed=await parseDeliveryPdfFile(file);previewRows=[];$('#deliveryPreview').innerHTML='';renderMapping();toast('تمت قراءة '+parsed.rows.length+' شحنة من ملف PDF')}
+      else parseText(await file.text());
+    }catch(error){parsed={headers:[],rows:[]};$('#deliveryMapping').style.display='none';$('#deliveryPreview').innerHTML='<div class="empty">'+esc(error.message||'تعذر قراءة الكشف')+'</div>';toast(error.message||'تعذر قراءة الكشف')}
   };
 
   $('#deliveryPaste').oninput=()=>{
@@ -2073,6 +2134,7 @@ async function deliveryReconcileView(){
     const phoneCol=decodeURIComponent($('#mapPhone').value||'');
     const statusCol=decodeURIComponent($('#mapStatus').value||'');
     const amountCol=decodeURIComponent($('#mapAmount').value||'');
+    const feeCol=decodeURIComponent($('#mapFee').value||'');
     const noteCol=decodeURIComponent($('#mapNote').value||'');
 
     if(!phoneCol)return toast('حدد عمود رقم الهاتف');
@@ -2080,9 +2142,10 @@ async function deliveryReconcileView(){
 
     const rows=parsed.rows.map(r=>({
       phone:r[phoneCol]||'',
-      status:mapDeliveryCompanyStatus(r[statusCol]),
+      status:r.__mapped_status||mapDeliveryCompanyStatus(r[statusCol]),
       raw_status:r[statusCol]||'',
       amount:amountCol?Number(String(r[amountCol]||'0').replace(/[^\d.\-]/g,''))||0:0,
+      delivery_fee:feeCol?Number(String(r[feeCol]||'0').replace(/[^\d.\-]/g,''))||0:0,
       note:noteCol?r[noteCol]||'':''
     }));
 
@@ -2092,7 +2155,7 @@ async function deliveryReconcileView(){
         body:JSON.stringify({store_id:storeId,rows})
       });
 
-      previewRows=(d.rows||[]).map((x,i)=>({...x,raw_status:rows[i]?.raw_status||'',status:rows[i]?.status||''}));
+      previewRows=(d.rows||[]).map((x,i)=>({...x,raw_status:rows[i]?.raw_status||'',status:rows[i]?.status||'',delivery_fee:Number(x.delivery_fee??rows[i]?.delivery_fee??0)}));
       renderDeliveryPreview(d.summary||{});
     }catch(e){toast(e.message)}
   }
@@ -2112,7 +2175,7 @@ async function deliveryReconcileView(){
       <div class="table-wrap">
         <table class="table delivery-preview-table">
           <thead>
-            <tr><th>#</th><th>الهاتف</th><th>المطابقة</th><th>الطلب</th><th>حالة الكشف</th><th>الحالة المعتمدة</th><th>المبلغ</th><th>ملاحظة</th></tr>
+            <tr><th>#</th><th>الهاتف</th><th>المطابقة</th><th>الطلب</th><th>حالة الكشف</th><th>الحالة المعتمدة</th><th>السعر</th><th>أجور التوصيل</th><th>ملاحظة</th></tr>
           </thead>
           <tbody>
             ${previewRows.map((r,i)=>{
@@ -2139,6 +2202,7 @@ async function deliveryReconcileView(){
                 <td>${esc(r.raw_status||'')}</td>
                 <td><select class="select delivery-status-choice" data-i="${i}">${deliveryStatusOptions(r.status||'')}</select></td>
                 <td><input class="input delivery-amount-choice" data-i="${i}" inputmode="decimal" value="${Number(r.amount||0)}"></td>
+                <td><input class="input delivery-fee-choice" data-i="${i}" inputmode="decimal" value="${Number(r.delivery_fee||0)}"></td>
                 <td><input class="input delivery-note-choice" data-i="${i}" value="${esc(r.note||'')}"></td>
               </tr>`;
             }).join('')}
@@ -2163,13 +2227,16 @@ async function deliveryReconcileView(){
       const orderId=r.match_type==='matched'?Number(r.order?.id||0):Number(manual?.value||0);
       const status=document.querySelector(`.delivery-status-choice[data-i="${i}"]`)?.value||'';
       const amount=Number(document.querySelector(`.delivery-amount-choice[data-i="${i}"]`)?.value||0);
+      const deliveryFee=Number(document.querySelector(`.delivery-fee-choice[data-i="${i}"]`)?.value||0);
       const note=document.querySelector(`.delivery-note-choice[data-i="${i}"]`)?.value||'';
-      return {order_id:orderId,phone:r.phone,status,amount,note,match_type:r.match_type};
+      return {order_id:orderId,phone:r.phone,status,amount,delivery_fee:deliveryFee,note,match_type:r.match_type};
     });
 
     const resolvable=rows.filter(r=>r.order_id);
     const missingStatus=resolvable.filter(r=>!r.status);
     if(!resolvable.length)return toast('لا توجد طلبات مطابقة للاعتماد');
+    const selectedIds=resolvable.map(r=>r.order_id);
+    if(new Set(selectedIds).size!==selectedIds.length)return toast('تم اختيار نفس الطلب لأكثر من سطر؛ راجع الأرقام المكررة');
     if(missingStatus.length)return toast('يوجد طلب مطابق بدون حالة معتمدة');
 
     if(!confirm(`سيتم تحديث ${resolvable.length} طلب. هل تريد اعتماد وتسكير الكشف؟`))return;

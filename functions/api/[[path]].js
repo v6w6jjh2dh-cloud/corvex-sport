@@ -46,7 +46,12 @@ async function auth(request, env) {
 }
 
 function normalizePhone(value = '') {
-  return String(value).replace(/[^0-9+]/g, '').trim();
+  const digitMap={'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9','۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9'};
+  let digits=String(value||'').replace(/[٠-٩۰-۹]/g,d=>digitMap[d]||d).replace(/\D/g,'');
+  if(digits.startsWith('00962'))digits=digits.slice(2);
+  if(digits.startsWith('962')&&digits.length>=12)digits='0'+digits.slice(3);
+  else if(digits.length===9&&digits.startsWith('7'))digits='0'+digits;
+  return digits;
 }
 
 function duplicateText(value = '') {
@@ -726,24 +731,17 @@ export async function onRequest(context) {
         byPhone.get(p).push(o);
       }
 
-      const result=[];
+      const result=[],usedOrderIds=new Set();
       let matched=0,duplicate=0,unmatched=0;
-
       for(let i=0;i<rows.length;i++){
-        const row=rows[i]||{};
-        const phone=normalizePhone(row.phone);
-        const candidates=phone?(byPhone.get(phone)||[]):[];
-
-        if(!phone||candidates.length===0){
-          unmatched++;
-          result.push({row_index:i+1,phone,status:String(row.status||''),amount:Number(row.amount||0),note:String(row.note||''),match_type:'unmatched',candidates:[]});
-        }else if(candidates.length===1){
-          matched++;
-          result.push({row_index:i+1,phone,status:String(row.status||''),amount:Number(row.amount||0),note:String(row.note||''),match_type:'matched',order:candidates[0],candidates:candidates});
-        }else{
-          duplicate++;
-          result.push({row_index:i+1,phone,status:String(row.status||''),amount:Number(row.amount||0),note:String(row.note||''),match_type:'duplicate',candidates:candidates});
-        }
+        const row=rows[i]||{},phone=normalizePhone(row.phone),amount=Math.max(0,Number(row.amount||0)),deliveryFee=Math.max(0,Number(row.delivery_fee||0));
+        const allCandidates=phone?(byPhone.get(phone)||[]):[],candidates=allCandidates.filter(o=>!usedOrderIds.has(Number(o.id)));
+        let chosen=null;
+        if(candidates.length===1)chosen=candidates[0];
+        else if(candidates.length>1&&amount>0){const exact=candidates.filter(o=>Math.abs(Math.abs(Number(o.amount||0))-amount)<.01);if(exact.length===1)chosen=exact[0]}
+        if(!phone||allCandidates.length===0){unmatched++;result.push({row_index:i+1,phone,status:String(row.status||''),amount,delivery_fee:deliveryFee,note:String(row.note||''),match_type:'unmatched',candidates:[]})}
+        else if(chosen){usedOrderIds.add(Number(chosen.id));matched++;result.push({row_index:i+1,phone,status:String(row.status||''),amount,delivery_fee:deliveryFee,note:String(row.note||''),match_type:'matched',order:chosen,candidates})}
+        else{duplicate++;result.push({row_index:i+1,phone,status:String(row.status||''),amount,delivery_fee:deliveryFee,note:String(row.note||''),match_type:'duplicate',candidates})}
       }
 
       return json({rows:result,summary:{total:rows.length,matched,duplicate,unmatched}});
@@ -758,6 +756,7 @@ export async function onRequest(context) {
       if(!rows.length)return json({error:'لا توجد نتائج للاعتماد'},400);
 
       const accepted=[];
+      const acceptedOrderIds=new Set();
       let unmatched=0,duplicate=0;
 
       const storeOrdersRes=await env.DB.prepare(`${orderSelectSql('WHERE o.store_id=? AND o.delivery_company_settled=0')}`)
@@ -773,6 +772,8 @@ export async function onRequest(context) {
         }
         const order=orderById.get(orderId);
         if(!order)continue;
+        if(acceptedOrderIds.has(orderId)){duplicate++;continue}
+        acceptedOrderIds.add(orderId);
 
         let status=String(row.status||'pending');
         if(!Object.prototype.hasOwnProperty.call(STATUS_LABELS,status))status='pending';
@@ -785,8 +786,10 @@ export async function onRequest(context) {
         const delivered=['delivered','delivered_adjusted'].includes(status);
         const partial=status==='partial';
         const feePaid=status==='refused_fee_paid';
-        const deliveryFee=(delivered||partial||feePaid)?Number(order.delivery_fee||2):0;
-        const cashCollected=(delivered||partial)?importedAmount:0;
+        const noFee=status==='refused_no_fee';
+        const importedFee=Math.max(0,Number(row.delivery_fee||0));
+        const deliveryFee=(delivered||partial||feePaid||noFee)?Number(importedFee||order.delivery_fee||2):0;
+        const cashCollected=(delivered||partial||feePaid)?importedAmount:0;
 
         accepted.push({
           order,
