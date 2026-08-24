@@ -37,7 +37,7 @@ export async function onRequestGet(context) {
   const mode = url.searchParams.get('hub.mode');
   const token = url.searchParams.get('hub.verify_token');
   const challenge = url.searchParams.get('hub.challenge');
-  const verifyToken = getSecret(env, 'META_VERIFY_TOKEN', 'META_VERIFY');
+  const verifyToken = getSecret(env, 'NASHMI_META_VERIFY_TOKEN', 'META_VERIFY_TOKEN', 'META_VERIFY');
 
   if (!mode && !token && !challenge) {
     return Response.json({
