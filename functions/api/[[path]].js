@@ -1045,14 +1045,14 @@ export async function onRequest(context) {
 
       // One phone number may be entered only once per store in any rolling 48-hour window.
       // A matching number in another store remains allowed.
-      const duplicate = await env.DB.prepare(`
-        SELECT id,order_code,created_at
+      const recentOrders = await env.DB.prepare(`
+        SELECT id,order_code,created_at,phone
         FROM orders
-        WHERE store_id=? AND phone=?
+        WHERE store_id=?
           AND datetime(created_at) >= datetime('now','-48 hours')
         ORDER BY id DESC
-        LIMIT 1
-      `).bind(storeId,phone).first();
+      `).bind(storeId).all();
+      const duplicate = (recentOrders.results||[]).find(order=>normalizePhone(order.phone)===phone)||null;
       if (duplicate && !duplicateOverride) {
         return json({
           error:`رقم الهاتف موجود في طلب سابق لهذا المتجر خلال آخر 48 ساعة، بالكود #${duplicate.order_code}`,
