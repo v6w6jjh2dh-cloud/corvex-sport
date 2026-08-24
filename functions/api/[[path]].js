@@ -222,18 +222,6 @@ async function ensureBusinessSchema(env) {
     await env.DB.prepare('ALTER TABLE users ADD COLUMN deleted_at TEXT').run();
   }
 
-  // Preserve the old combined reports permission after splitting the screens.
-  const permissionRows=await env.DB.prepare("SELECT actor_type,actor_id,permissions_json FROM actor_permissions WHERE actor_type='user'").all();
-  for(const row of (permissionRows.results||[])){
-    let permissions=[];
-    try{permissions=JSON.parse(row.permissions_json||'[]')}catch{}
-    if(permissions.includes('reports')&&!permissions.includes('tracking_readonly')){
-      permissions=[...new Set([...permissions,'profits','delivery_reconcile'])];
-      await env.DB.prepare('UPDATE actor_permissions SET permissions_json=? WHERE actor_type=? AND actor_id=?')
-        .bind(JSON.stringify(permissions),row.actor_type,row.actor_id).run();
-    }
-  }
-
   // Read-only tracking account for the delivery company.
   const nanaHash=await hashPassword('123123');
   let nana=await env.DB.prepare("SELECT id FROM users WHERE lower(username)=lower('Nana') LIMIT 1").first();
@@ -731,7 +719,7 @@ export async function onRequest(context) {
 
     if(path==='/permissions'&&method==='GET'){
       if(me.role!=='admin')return json({error:'صلاحية مدير مطلوبة'},403);
-      const users=await env.DB.prepare('SELECT id,display_name name,username,is_active FROM users ORDER BY id').all();
+      const users=await env.DB.prepare('SELECT id,display_name name,username,role,is_active FROM users ORDER BY id').all();
       const couriers=await env.DB.prepare('SELECT id,name,username,is_active FROM couriers ORDER BY id').all();
       const rows=await env.DB.prepare('SELECT * FROM actor_permissions').all();
       return json({all_permissions:ALL_PERMISSIONS,users:users.results||[],couriers:couriers.results||[],permissions:rows.results||[]});
@@ -741,9 +729,23 @@ export async function onRequest(context) {
       const b=await readBody(request),type=b.actor_type==='courier'?'courier':'user',id=Number(b.actor_id||0);
       const perms=Array.isArray(b.permissions)?b.permissions.filter(p=>ALL_PERMISSIONS.includes(p)):[];
       if(!id)return json({error:'حدد الحساب'},400);
+      let role=null;
+      if(type==='user'){
+        const target=await env.DB.prepare('SELECT id,role FROM users WHERE id=?').bind(id).first();
+        if(!target)return json({error:'المستخدم غير موجود'},404);
+        role=target.role;
+        const isRestrictedAdmin=target.role==='admin'&&perms.length<ALL_PERMISSIONS.length;
+        if(isRestrictedAdmin){
+          if(id===Number(me.id))return json({error:'لا يمكنك إزالة صلاحيات حساب المدير الذي تستخدمه الآن. استخدم حساب مدير آخر أولًا.'},400);
+          if(!b.convert_admin_to_staff)return json({error:'هذا الحساب مدير وصلاحيات المدير كاملة. وافق على تحويله إلى موظف لتطبيق الصلاحيات المحددة.',requires_staff_conversion:true},409);
+          await env.DB.prepare("UPDATE users SET role='staff' WHERE id=?").bind(id).run();
+          role='staff';
+        }
+      }
       await env.DB.prepare(`INSERT INTO actor_permissions(actor_type,actor_id,permissions_json) VALUES(?,?,?)
         ON CONFLICT(actor_type,actor_id) DO UPDATE SET permissions_json=excluded.permissions_json`).bind(type,id,JSON.stringify(perms)).run();
-      return json({ok:true});
+      const stored=await permissionsFor(env,type,id);
+      return json({ok:true,actor_type:type,actor_id:id,role,permissions:stored});
     }
 
 
