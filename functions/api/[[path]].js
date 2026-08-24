@@ -977,11 +977,12 @@ export async function onRequest(context) {
         if(isDelivered)delivered++;
         else refused++;
 
-        const cash=isDelivered?Number(o.cash_collected||0):0;
+        const gross=isDelivered?Number(o.delivered_amount||o.amount||0):0;
+        const cash=isDelivered?Number(o.company_cash_net??o.cash_collected??0):0;
         const fee=(isDelivered||isFeeRefused)?Number(o.delivery_fee||0):0;
-        const orderDue=Math.max(0,cash-fee);
+        const orderDue=Math.max(0,cash);
 
-        collected+=cash;
+        collected+=gross;
         fees+=fee;
         due+=orderDue;
         vals.push([o.id,orderDue]);
