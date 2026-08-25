@@ -56,7 +56,31 @@ CREATE TABLE IF NOT EXISTS print_batch_orders (
   FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS return_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL UNIQUE,
+  return_type TEXT NOT NULL CHECK(return_type IN ('full','partial')),
+  reason TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_by INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  FOREIGN KEY(created_by) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS return_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  return_id INTEGER NOT NULL,
+  item_name TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(return_id,item_name),
+  FOREIGN KEY(return_id) REFERENCES return_events(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_code ON orders(order_code);
 CREATE INDEX IF NOT EXISTS idx_orders_phone ON orders(phone);
 CREATE INDEX IF NOT EXISTS idx_orders_printed ON orders(printed);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
+CREATE INDEX IF NOT EXISTS idx_return_events_created_at ON return_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_return_items_return_id ON return_items(return_id);
