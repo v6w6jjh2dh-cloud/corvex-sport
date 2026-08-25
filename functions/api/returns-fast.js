@@ -4,38 +4,61 @@ async function auth(request,env){const h=request.headers.get('authorization')||'
 function allowed(u){return !!u&&(u.role==='admin'||String(u.username||'').toLowerCase()==='shadi'||String(u.display_name||'').toLowerCase()==='shadi')}
 function codeOf(v=''){const m=String(v||'').match(/(\d+)\s*$/);return m?Number(m[1]):0}
 function clean(v=''){return String(v||'').replace(/\s+/g,' ').trim()}
-const ITEMS=[['بنطلون جيوب سحاب',/بنطلون\s+جيوب\s+سحاب/i],['بنطلون رياضة سحاب',/بنطلون\s+رياض[هة]\s+سحاب/i],['بنطلون تركي',/بنطلون\s+تركي/i],['بنطلون زرار',/بنطلون\s+زرار/i],['بنطلون جيوب',/بنطلون\s+جيوب/i],['تيشيرت سادة تريكو',/تيشيرت\s+ساد[هة]\s+تريكو/i],['تيشيرت بولو تريكو',/تيشيرت\s+بولو\s+تريكو/i],['بولو ترند',/بولو\s+ترند/i],['تيشيرت بولو',/تيشيرت\s+بولو/i],['بجامة جاكار',/بجام[هة]\s+جاكار/i],['ترينغ',/ترين(?:غ|نغ)/i],['بولو',/بولو/i]];
+const ITEMS=[
+ ['بنطلون جيوب سحاب',/بنطلون\s*جيوب\s*سحاب/i],
+ ['بنطلون رياضة سحاب',/بنطلون\s*رياض[هة]\s*سحاب/i],
+ ['بنطلون تركي',/بنطلون\s*تركي/i],
+ ['بنطلون زرار',/(?:بنطلون\s*)?زرار/i],
+ ['بنطلون جيوب',/(?:بنطلون\s*)?(?:جيوب|جيب\s*عادي)/i],
+ ['بلوزة ليكرا',/(?:بلوز[هة]|بلوزه)\s*ليكرا/i],
+ ['بلوزة M',/(?:بلوز[هة]|بلوزه|تيشيرت)?\s*(?:حرف\s*)?(?:ام|m6?|M6?)(?=\s|\d|$)/i],
+ ['بلوزة الحصان',/(?:بلوز[هة]|بلوزه)?\s*(?:الحصان|هيرمز|اتش|\bh\b)/i],
+ ['تيشيرت سادة تريكو',/تيشيرت\s*ساد[هة]\s*تريكو/i],
+ ['تيشيرت بولو تريكو',/تيشيرت\s*بولو\s*تريكو/i],
+ ['بولو ترند',/بولو\s*ترند/i],
+ ['تيشيرت بولو',/تيشيرت\s*بولو/i],
+ ['بجامة جاكار',/بجام[هة]\s*جاكار/i],
+ ['ترينغ',/ترين(?:غ|نغ)/i],
+ ['بولو',/بولو/i]
+];
+const COLORS=['اسود','أسود','بني','بيج','ابيض','أبيض','سكني','رصاصي','كحلي','زيتي','خمري','احمر','أحمر','ازرق','أزرق','اخضر','أخضر','رمادي','سكري','نهدي','موف'];
+function arNum(v=''){return String(v).replace(/[٠١٢٣٤٥٦٧٨٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))}
+function quantityFromSegment(seg=''){
+ const s=arNum(seg);
+ let m=s.match(/(?:عدد|العدد|كمية|كميه)\s*[:=]?\s*(\d+)/i);if(m)return Math.max(1,Number(m[1]));
+ m=s.match(/(?:^|\s)(\d+)\s*(?:قطعة|قطع|حبة|حبات)\b/i);if(m)return Math.max(1,Number(m[1]));
+ m=s.match(/[x×*]\s*(\d+)/i);if(m)return Math.max(1,Number(m[1]));
+ if(/(?:ثلاث[هة]?|3)\s*(?:ال)?وان|ثلاث\s*الالوان|ثلاثة\s*ألوان/i.test(s))return 3;
+ if(/لونين|لونان|2\s*لون/i.test(s))return 2;
+ if(/\bالعرض\b/i.test(s))return 3;
+ const found=[];for(const c of COLORS){const rx=new RegExp(c.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i');if(rx.test(s))found.push(c)}
+ const uniq=[...new Set(found.map(x=>x.replace(/[أإآ]/g,'ا')))];if(uniq.length>=2)return uniq.length;
+ if(uniq.length===1||/(?:^|\s)لون(?:\s|$)/i.test(s))return 1;
+ return 1;
+}
 function originalItems(text=''){
-  const s=String(text||'').replace(/\r/g,'\n');
-  const hits=[];
-  for(const [name,re] of ITEMS){const rx=new RegExp(re.source,'ig');let m;while((m=rx.exec(s))){hits.push({name,index:m.index,end:m.index+m[0].length,label:m[0]});if(!rx.global)break}}
-  hits.sort((a,b)=>a.index-b.index||b.end-a.end);
-  const filtered=[];
-  for(const h of hits){if(filtered.some(x=>h.index>=x.index&&h.end<=x.end))continue;filtered.push(h)}
-  const out=[];
-  for(let i=0;i<filtered.length;i++){
-    const h=filtered[i],next=filtered[i+1];
-    const segEnd=Math.min(next?next.index:s.length,h.end+45);
-    const beforeStart=Math.max(i?filtered[i-1].end:0,h.index-35);
-    const before=s.slice(beforeStart,h.index);
-    const after=s.slice(h.end,segEnd);
-    let qty=1,m;
-    m=after.match(/^\s*(?:[:\-–—|،,]*)\s*(?:عدد|العدد|كمية|كميه)\s*[:=]?\s*(\d+)/i);
-    if(!m)m=after.match(/^\s*(?:[:\-–—|،,]*)\s*[x×*]\s*(\d+)/i);
-    if(!m)m=after.match(/^\s*(?:[:\-–—|،,]*)\s*(\d+)\s*(?:قطعة|قطع|حبة|حبات)\b/i);
-    if(!m)m=before.match(/(?:عدد|العدد|كمية|كميه)\s*[:=]?\s*(\d+)\s*$/i);
-    if(!m)m=before.match(/(\d+)\s*(?:قطعة|قطع|حبة|حبات)?\s*$/i);
-    if(m&&Number(m[1])>0&&Number(m[1])<100)qty=Number(m[1]);
-    out.push({name:h.name,quantity:qty});
-  }
-  const map=new Map();for(const x of out)map.set(x.name,(map.get(x.name)||0)+x.quantity);return [...map].map(([name,quantity])=>({name,quantity}));
+ const s=String(text||'').replace(/\r/g,'\n');const hits=[];
+ for(const [name,re] of ITEMS){const rx=new RegExp(re.source,'ig');let m;while((m=rx.exec(s))){hits.push({name,index:m.index,end:m.index+m[0].length,label:m[0]});if(m[0].length===0)rx.lastIndex++;}}
+ hits.sort((a,b)=>a.index-b.index||b.end-a.end);
+ const filtered=[];for(const h of hits){if(filtered.some(x=>h.index>=x.index&&h.end<=x.end))continue;filtered.push(h)}
+ const out=[];
+ for(let i=0;i<filtered.length;i++){
+  const h=filtered[i],next=filtered[i+1],prev=filtered[i-1];
+  const start=Math.max(prev?prev.end:0,h.index-18),end=Math.min(next?next.index:s.length,h.end+55);
+  const seg=s.slice(start,end);
+  let qty=quantityFromSegment(seg);
+  const before=s.slice(Math.max(prev?prev.end:0,h.index-25),h.index);
+  const bm=arNum(before).match(/(\d+)\s*(?:قطعة|قطع|حبة|حبات)?\s*$/i);if(bm&&Number(bm[1])>0)qty=Number(bm[1]);
+  out.push({name:h.name,quantity:Math.max(1,qty)});
+ }
+ const map=new Map();for(const x of out)map.set(x.name,(map.get(x.name)||0)+x.quantity);return [...map].map(([name,quantity])=>({name,quantity}));
 }
 async function ensure(env){await env.DB.prepare(`CREATE TABLE IF NOT EXISTS return_events(id INTEGER PRIMARY KEY AUTOINCREMENT,order_id INTEGER NOT NULL UNIQUE,return_type TEXT NOT NULL DEFAULT 'full',reason TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',created_by INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT (datetime('now')))`).run();await env.DB.prepare(`CREATE TABLE IF NOT EXISTS return_items(id INTEGER PRIMARY KEY AUTOINCREMENT,return_id INTEGER NOT NULL,item_name TEXT NOT NULL,quantity INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT (datetime('now')),UNIQUE(return_id,item_name))`).run()}
 async function detail(env,orderCode){const row=await env.DB.prepare(`SELECT r.*,o.order_code,o.recipient_name,o.phone,o.raw_text,o.order_notes,o.amount,o.area,o.detailed_address,s.name store_name,u.display_name created_by_name FROM return_events r JOIN orders o ON o.id=r.order_id LEFT JOIN stores s ON s.id=o.store_id LEFT JOIN users u ON u.id=r.created_by WHERE o.order_code=?`).bind(orderCode).first();if(!row)return null;row.items=(await env.DB.prepare('SELECT id,item_name,quantity FROM return_items WHERE return_id=? ORDER BY id').bind(row.id).all()).results||[];return row}
-async function dashboard(env){const summary=await env.DB.prepare(`SELECT COUNT(*) total_returns,SUM(CASE WHEN return_type='full' THEN 1 ELSE 0 END) full_returns,SUM(CASE WHEN return_type='partial' THEN 1 ELSE 0 END) partial_returns FROM return_events`).first();const pieces=await env.DB.prepare('SELECT COALESCE(SUM(quantity),0) n FROM return_items').first();const top=(await env.DB.prepare(`SELECT item_name,SUM(quantity) returned_quantity,COUNT(DISTINCT return_id) return_orders FROM return_items GROUP BY item_name ORDER BY returned_quantity DESC,return_orders DESC,item_name LIMIT 30`).all()).results||[];const history=(await env.DB.prepare(`SELECT r.id,r.return_type,r.reason,r.notes,r.created_at,o.order_code,o.recipient_name,o.phone,o.amount,o.area,o.detailed_address,o.raw_text,o.order_notes,s.name store_name,u.display_name created_by_name FROM return_events r JOIN orders o ON o.id=r.order_id LEFT JOIN stores s ON s.id=o.store_id LEFT JOIN users u ON u.id=r.created_by ORDER BY r.id DESC LIMIT 100`).all()).results||[];for(const r of history)r.items=(await env.DB.prepare('SELECT id,item_name,quantity FROM return_items WHERE return_id=? ORDER BY id').bind(r.id).all()).results||[];return {summary:{...summary,returned_pieces:Number(pieces?.n||0)},top_items:top,returns:history}}
+async function dashboard(env){const summary=await env.DB.prepare(`SELECT COUNT(*) total_returns,SUM(CASE WHEN return_type='full' THEN 1 ELSE 0 END) full_returns,SUM(CASE WHEN return_type='partial' THEN 1 ELSE 0 END) partial_returns FROM return_events`).first();const pieces=await env.DB.prepare('SELECT COALESCE(SUM(quantity),0) n FROM return_items').first();const top=(await env.DB.prepare(`SELECT item_name,SUM(quantity) returned_quantity,COUNT(DISTINCT return_id) return_orders FROM return_items GROUP BY item_name ORDER BY returned_quantity DESC,return_orders DESC,item_name LIMIT 30`).all()).results||[];const history=(await env.DB.prepare(`SELECT r.id,r.return_type,r.reason,r.notes,r.created_at,o.order_code,o.recipient_name,o.phone,o.amount,o.area,o.detailed_address,o.order_notes,s.name store_name,u.display_name created_by_name FROM return_events r JOIN orders o ON o.id=r.order_id LEFT JOIN stores s ON s.id=o.store_id LEFT JOIN users u ON u.id=r.created_by ORDER BY r.id DESC LIMIT 100`).all()).results||[];for(const r of history)r.items=(await env.DB.prepare('SELECT id,item_name,quantity FROM return_items WHERE return_id=? ORDER BY id').bind(r.id).all()).results||[];return {summary:{...summary,returned_pieces:Number(pieces?.n||0)},top_items:top,returns:history}}
 export async function onRequest({request,env}){const u=await auth(request,env);if(!allowed(u))return json({error:'غير مصرح لمسح المرتجعات'},403);await ensure(env);const url=new URL(request.url),method=request.method.toUpperCase();
 if(method==='GET'){const oc=Number(url.searchParams.get('order_code')||0);if(oc){const d=await detail(env,oc);return d?json({return_event:d}):json({error:'المرتجع غير موجود'},404)}return json(await dashboard(env))}
-if(method==='POST'){const b=await body(request),orderCode=codeOf(b.code||b.order_code);if(!orderCode)return json({error:'باركود غير صالح'},400);const o=await env.DB.prepare('SELECT id,order_code,recipient_name,phone,raw_text,order_notes,amount,area,detailed_address FROM orders WHERE order_code=?').bind(orderCode).first();if(!o)return json({error:'الطلب غير موجود'},404);const ex=await env.DB.prepare('SELECT id FROM return_events WHERE order_id=?').bind(o.id).first();if(ex)return json({ok:true,already:true,return_event:await detail(env,orderCode),dashboard:await dashboard(env)});const ins=await env.DB.prepare(`INSERT INTO return_events(order_id,return_type,reason,notes,created_by) VALUES(?,'full','مسح باركود مباشر','تم نسخ بيانات الطلب الأصلي وتسجيل المرتجع مباشرة',?)`).bind(o.id,u.id).run();const rid=Number(ins.meta.last_row_id);const source=[o.raw_text,o.order_notes].filter(Boolean).join('\n');let items=originalItems(source);if(!items.length)items=[{name:clean(source).slice(0,120)||'تفاصيل الطلب الأصلي',quantity:1}];for(const it of items)await env.DB.prepare('INSERT OR REPLACE INTO return_items(return_id,item_name,quantity) VALUES(?,?,?)').bind(rid,clean(it.name).slice(0,120),Math.max(1,Number(it.quantity||1))).run();return json({ok:true,already:false,return_event:await detail(env,orderCode),dashboard:await dashboard(env)})}
+if(method==='POST'){const b=await body(request),orderCode=codeOf(b.code||b.order_code);if(!orderCode)return json({error:'باركود غير صالح'},400);const o=await env.DB.prepare('SELECT id,order_code,recipient_name,phone,order_notes,amount,area,detailed_address FROM orders WHERE order_code=?').bind(orderCode).first();if(!o)return json({error:'الطلب غير موجود'},404);const ex=await env.DB.prepare('SELECT id FROM return_events WHERE order_id=?').bind(o.id).first();if(ex)return json({ok:true,already:true,return_event:await detail(env,orderCode),dashboard:await dashboard(env)});const ins=await env.DB.prepare(`INSERT INTO return_events(order_id,return_type,reason,notes,created_by) VALUES(?,'full','مسح باركود مباشر','تم نسخ آخر نسخة من الطلب وتسجيل المرتجع مباشرة',?)`).bind(o.id,u.id).run();const rid=Number(ins.meta.last_row_id);const source=String(o.order_notes||'');let items=originalItems(source);if(!items.length)items=[{name:clean(source).slice(0,120)||'تفاصيل الطلب الحالي',quantity:1}];for(const it of items)await env.DB.prepare('INSERT OR REPLACE INTO return_items(return_id,item_name,quantity) VALUES(?,?,?)').bind(rid,clean(it.name).slice(0,120),Math.max(1,Number(it.quantity||1))).run();return json({ok:true,already:false,return_event:await detail(env,orderCode),dashboard:await dashboard(env)})}
 if(method==='PUT'){const b=await body(request),orderCode=Number(b.order_code||0);if(!orderCode)return json({error:'رقم الطلب مطلوب'},400);const r=await detail(env,orderCode);if(!r)return json({error:'المرتجع غير موجود'},404);const items=Array.isArray(b.items)?b.items.filter(x=>clean(x.name)&&Number(x.quantity)>0):[];if(!items.length)return json({error:'أضف صنفًا واحدًا على الأقل'},400);await env.DB.prepare('UPDATE return_events SET return_type=?,reason=?,notes=? WHERE id=?').bind(b.return_type==='partial'?'partial':'full',clean(b.reason||r.reason),clean(b.notes||r.notes),r.id).run();await env.DB.prepare('DELETE FROM return_items WHERE return_id=?').bind(r.id).run();for(const it of items)await env.DB.prepare('INSERT INTO return_items(return_id,item_name,quantity) VALUES(?,?,?)').bind(r.id,clean(it.name).slice(0,120),Math.max(1,Number(it.quantity||1))).run();return json({ok:true,return_event:await detail(env,orderCode),dashboard:await dashboard(env)})}
 if(method==='DELETE'){const orderCode=Number(url.searchParams.get('order_code')||0);if(!orderCode)return json({error:'رقم الطلب مطلوب'},400);const r=await detail(env,orderCode);if(!r)return json({error:'المرتجع غير موجود'},404);await env.DB.prepare('DELETE FROM return_items WHERE return_id=?').bind(r.id).run();await env.DB.prepare('DELETE FROM return_events WHERE id=?').bind(r.id).run();return json({ok:true,dashboard:await dashboard(env)})}
 return json({error:'طلب غير معروف'},404)}
