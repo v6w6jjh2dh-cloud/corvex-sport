@@ -13,6 +13,7 @@ function homeView(){
   if(can('dashboard'))return 'dashboard';
   if(can('orders_view'))return 'orders';
   if(can('reports'))return 'reports';
+  if(can('returns'))return 'returns-center';
   return 'orders';
 }
 async function loadRegionIndex(force=false){
@@ -950,16 +951,16 @@ async function boot(){
   try{
     const me=await api('/me');
     state.user=me.user;
-    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v77')!=='1'){
-      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v77','1')}catch{}
+    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v80')!=='1'){
+      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v80','1')}catch{}
     }
     renderShell();
     await show(homeView())
   }catch{localStorage.removeItem('corvex_token');state.token='';renderLogin()}
 }
 function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);
-    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v77')!=='1'){
-      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v77','1')}catch{}
+    if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v80')!=='1'){
+      try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v80','1')}catch{}
     }
     renderShell();show(homeView())}catch(e){toast(e.message)}}}
 function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>تهيئة CORVEX SPORT</h1><p>أنشئ أول حساب مدير</p></div><div class="field"><label>الاسم الظاهر</label><input id="sd" class="input" value="Admin"></div><br><div class="field"><label>اسم المستخدم</label><input id="su" class="input" value="admin"></div><br><div class="field"><label>كلمة المرور</label><input id="sp" type="password" class="input"></div><button id="setupBtn" class="btn btn-accent" style="width:100%;margin-top:18px">إنشاء النظام</button></div></div>`;$('#setupBtn').onclick=async()=>{try{await api('/setup',{method:'POST',body:JSON.stringify({display_name:$('#sd').value,username:$('#su').value,password:$('#sp').value})});toast('تمت التهيئة');renderLogin()}catch(e){toast(e.message)}}}
@@ -1011,6 +1012,7 @@ function renderShell(){
           ${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}
           ${can('users')?'<button data-view="users">♟ المستخدمون</button>':''}
           ${can('permissions')?'<button data-view="permissions">⚙ الصلاحيات</button>':''}
+          ${can('returns')?'<button data-view="returns-center">↩ مركز المرتجعات</button>':''}
         </nav>
       </aside>
       <main id="content" class="content"></main>
@@ -1058,6 +1060,7 @@ function renderShell(){
   };
 }
 async function show(v){
+  if(v!=='returns-center'&&window.__corvexStopReturnCamera){window.__corvexStopReturnCamera();window.__corvexStopReturnCamera=null}
   if(isTrackingOnly()&&!['orders','reports'].includes(v))v=homeView();
   state.view=v;
   document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
@@ -1078,6 +1081,7 @@ async function show(v){
   if(v==='regions')return regionsView();
   if(v==='permissions')return permissionsView();
   if(v==='users')return usersView();
+  if(v==='returns-center')return returnsCenterView();
 }
 async function deletedOrdersView(){
   const c=$('#content');
@@ -1858,6 +1862,21 @@ function nextDeliveryDateLabel(){
   d.setDate(d.getDate()+addDays);
   return d.toLocaleDateString('en-GB',{day:'2-digit',month:'2-digit',year:'numeric'});
 }
+const CODE128_PATTERNS=['212222','222122','222221','121223','121322','131222','122213','122312','132212','221213','221312','231212','112232','122132','122231','113222','123122','123221','223211','221132','221231','213212','223112','312131','311222','321122','321221','312212','322112','322211','212123','212321','232121','111323','131123','131321','112313','132113','132311','211313','231113','231311','112133','112331','132131','113123','113321','133121','313121','211331','231131','213113','213311','213131','311123','311321','331121','312113','312311','332111','314111','221411','431111','111224','111422','121124','121421','141122','141221','112214','112412','122114','122411','142112','142211','241211','221114','413111','241112','134111','111242','121142','121241','114212','124112','124211','411212','421112','421211','212141','214121','412121','111143','111341','131141','114113','114311','411113','411311','113141','114131','311141','411131','211412','211214','211232','2331112'];
+function code128Svg(value){
+  const text=String(value||'').toUpperCase();
+  const data=[...text].map(ch=>ch.charCodeAt(0)-32).filter(code=>code>=0&&code<=94);
+  let checksum=104;
+  data.forEach((code,index)=>checksum+=code*(index+1));
+  const codes=[104,...data,checksum%103,106];
+  let x=10,bars='';
+  for(const code of codes){
+    const pattern=CODE128_PATTERNS[code];
+    [...pattern].forEach((width,index)=>{const w=Number(width);if(index%2===0)bars+=`<rect x="${x}" y="2" width="${w}" height="42"/>`;x+=w});
+  }
+  const total=x+10;
+  return `<svg class="barcode-svg" viewBox="0 0 ${total} 58" role="img" aria-label="باركود الطلب ${esc(text)}" preserveAspectRatio="none"><rect width="100%" height="100%" fill="#fff"/>${bars}<text x="${total/2}" y="55" text-anchor="middle" font-family="Arial" font-size="9" font-weight="700">${esc(text)}</text></svg>`;
+}
 function labelHtml(o){
   const noteLines=String(o.order_notes||'-').split(/\\n+/).map(x=>x.trim()).filter(Boolean);
   const noteColumns=[];
@@ -1866,9 +1885,9 @@ function labelHtml(o){
   const returnText=String(o.order_notes||'')+' '+String(o.raw_text||'');
   const hasReturn=['تبديل','استبدال','مرتجع','ارجاع','إرجاع'].some(x=>phraseMatch(returnText,x));
   const returnAlert=hasReturn?'<div class="return-alert">⚠ يوجد مرتجع</div>':'';
-  return `<div class="label"><div class="label-head"><span class="label-code">#${o.order_code}</span><b class="label-brand">CORVEX SPORT</b><span class="label-spacer"></span></div><div class="label-store">اسم المتجر: ${esc(o.store_name||'—')}</div><div class="recipient-date-row"><div><strong>المستلم:</strong> ${esc(o.recipient_name)}</div><strong class="delivery-date">${nextDeliveryDateLabel()}</strong></div><div><strong>الهاتف:</strong> ${esc(o.phone)}</div><div><strong>العنوان:</strong> ${esc(o.area)} ${esc(o.detailed_address)}</div><div><strong>القيمة:</strong> ${money(o.amount)} د.أ</div><div class="note" style="--note-cols:${Math.max(1,noteColumns.length)}">${notesHtml}</div>${returnAlert}</div>`;
+  return `<div class="label"><div class="label-head"><span class="label-code">#${o.order_code}</span><b class="label-brand">CORVEX SPORT</b><span class="label-barcode">${code128Svg(`CV-${o.order_code}`)}</span></div><div class="label-store">اسم المتجر: ${esc(o.store_name||'—')}</div><div class="recipient-date-row"><div><strong>المستلم:</strong> ${esc(o.recipient_name)}</div><strong class="delivery-date">${nextDeliveryDateLabel()}</strong></div><div><strong>الهاتف:</strong> ${esc(o.phone)}</div><div><strong>العنوان:</strong> ${esc(o.area)} ${esc(o.detailed_address)}</div><div><strong>القيمة:</strong> ${money(o.amount)} د.أ</div><div class="note" style="--note-cols:${Math.max(1,noteColumns.length)}">${notesHtml}</div>${returnAlert}</div>`;
 }
-function openPrintWindow(orders,title='طباعة'){const w=window.open('','_blank');const pages=[];for(let i=0;i<orders.length;i+=8)pages.push(orders.slice(i,i+8));w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}body{margin:0;font-family:Tahoma,Arial,sans-serif}.page{width:200mm;height:287mm;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:3mm;page-break-after:always}.page:last-child{page-break-after:auto}.label{border:1px solid #555;padding:4mm;font-size:10.5pt;overflow:hidden}.label-head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-bottom:1px solid #999;padding-bottom:2mm;margin-bottom:2mm;font-size:12pt}.label-code{justify-self:start}.label-brand{justify-self:center;text-align:center}.label-spacer{justify-self:end}.label-store{text-align:center;font-size:12pt;font-weight:900;margin:0 0 1mm;padding-bottom:1mm;border-bottom:1px solid #777}.recipient-date-row{display:flex;align-items:center;justify-content:space-between;gap:3mm}.delivery-date{direction:ltr;white-space:nowrap}.note{margin-top:1mm;border-top:1px dashed #aaa;padding-top:1mm;font-weight:700;display:grid;grid-template-columns:repeat(var(--note-cols),minmax(0,1fr));gap:2mm;line-height:1.22;word-break:break-word}.note-column{min-width:0}.note-column+.note-column{border-right:1px dotted #bbb;padding-right:2mm}.note-line{margin:0 0 .55mm}.return-alert{margin-top:1mm;padding:.8mm 1.5mm;border:2px solid #000;text-align:center;font-size:13pt;font-weight:900;background:#fff}</style></head><body>${pages.map(pg=>`<section class="page">${pg.map(labelHtml).join('')}</section>`).join('')}<script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);w.document.close()}
+function openPrintWindow(orders,title='طباعة'){const w=window.open('','_blank');const pages=[];for(let i=0;i<orders.length;i+=8)pages.push(orders.slice(i,i+8));w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}body{margin:0;font-family:Tahoma,Arial,sans-serif}.page{width:200mm;height:287mm;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:3mm;page-break-after:always}.page:last-child{page-break-after:auto}.label{border:1px solid #555;padding:3mm 4mm;font-size:10.5pt;overflow:hidden}.label-head{display:grid;grid-template-columns:32mm 1fr 34mm;gap:2mm;align-items:center;border-bottom:1px solid #999;padding-bottom:1mm;margin-bottom:1mm;font-size:12pt;direction:rtl}.label-code{justify-self:start;font-weight:900}.label-brand{justify-self:center;text-align:center;white-space:nowrap}.label-barcode{width:34mm;height:10mm;display:block;direction:ltr}.barcode-svg{display:block;width:100%;height:100%}.label-store{text-align:center;font-size:12pt;font-weight:900;margin:0 0 1mm;padding-bottom:1mm;border-bottom:1px solid #777}.recipient-date-row{display:flex;align-items:center;justify-content:space-between;gap:3mm}.delivery-date{direction:ltr;white-space:nowrap}.note{margin-top:1mm;border-top:1px dashed #aaa;padding-top:1mm;font-weight:700;display:grid;grid-template-columns:repeat(var(--note-cols),minmax(0,1fr));gap:2mm;line-height:1.18;word-break:break-word}.note-column{min-width:0}.note-column+.note-column{border-right:1px dotted #bbb;padding-right:2mm}.note-line{margin:0 0 .45mm}.return-alert{margin-top:1mm;padding:.8mm 1.5mm;border:2px solid #000;text-align:center;font-size:13pt;font-weight:900;background:#fff}</style></head><body>${pages.map(pg=>`<section class="page">${pg.map(labelHtml).join('')}</section>`).join('')}<script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);w.document.close()}
 async function batchesView(){
   const c=$('#content');
   const stores=await getActiveStores();
@@ -2738,6 +2757,147 @@ async function openCourierSettlement(cid,courier){
  $('#doneSettle').onclick=async()=>{const ids=[...document.querySelectorAll('.co:checked')].map(x=>Number(x.dataset.id));if(!ids.length)return toast('حدد طلبات');try{const r=await api('/courier-settlements',{method:'POST',body:JSON.stringify({courier_id:cid,order_ids:ids})});toast('حق المندوب '+money(r.settlement.total_due)+' د.أ');couriersView()}catch(e){toast(e.message)}};
 }
 
+async function returnsCenterView(){
+  const c=$('#content');
+  const stores=await getActiveStores();
+  const now=new Date(),dateValue=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const today=dateValue(now),monthStart=`${today.slice(0,8)}01`;
+  let currentOrder=null,cameraStream=null,scanTimer=null;
+  c.innerHTML=`
+    <div class="page-title">
+      <div><h1>مركز المرتجعات</h1><div class="sub">استلام المرتجع بالباركود • كامل أو جزئي • معرفة أكثر الأصناف رجوعًا</div></div>
+      <span class="pill return-live-pill">جاهز للمسح</span>
+    </div>
+    <div class="return-scan-card">
+      <div class="return-scan-title"><span class="return-scan-icon">▥</span><div><h2>امسح باركود البوليصة</h2><div class="sub">جهاز الباركود يعمل مباشرة، ويمكنك استخدام الكاميرا أو كتابة كود الطلب القديم.</div></div></div>
+      <div class="return-scan-actions">
+        <input id="returnCodeInput" class="input return-code-input" autocomplete="off" inputmode="numeric" placeholder="CV-4401 أو 4401">
+        <button id="findReturnOrder" class="btn btn-primary">عرض الطلب</button>
+        <button id="startReturnCamera" class="btn btn-outline">فتح الكاميرا</button>
+      </div>
+      <div id="returnCameraBox" class="return-camera-box" hidden><video id="returnCamera" playsinline muted></video><button id="stopReturnCamera" class="btn btn-danger">إغلاق الكاميرا</button></div>
+      <div id="returnOrderPanel"></div>
+    </div>
+    <div class="card return-report-card">
+      <div class="section-head"><div><h2>لوحة المرتجعات</h2><div class="sub">الإحصائية تعتمد على القطع التي تم استلامها وتأكيدها فعليًا.</div></div></div>
+      <div class="toolbar return-filter-bar">
+        <input id="returnFrom" type="date" class="input" value="${monthStart}">
+        <input id="returnTo" type="date" class="input" value="${today}">
+        <select id="returnStore" class="select"><option value="">كل المتاجر</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+        <button id="loadReturns" class="btn btn-soft">تحديث التقرير</button>
+      </div>
+      <div id="returnSummary"></div>
+      <div class="return-report-grid"><div><h3>الأكثر رجوعًا</h3><div id="returnTopItems"></div></div><div><h3>سجل الاستلام</h3><div id="returnHistory"></div></div></div>
+    </div>`;
+
+  const stopCamera=()=>{
+    if(scanTimer){clearTimeout(scanTimer);scanTimer=null}
+    if(cameraStream){cameraStream.getTracks().forEach(track=>track.stop());cameraStream=null}
+    const box=$('#returnCameraBox');if(box)box.hidden=true;
+  };
+  window.__corvexStopReturnCamera=stopCamera;
+
+  const addItemRow=(name='',quantity=1)=>{
+    const list=$('#returnItemsList');
+    const row=document.createElement('div');
+    row.className='return-item-row';
+    row.innerHTML=`<input class="input return-item-name" placeholder="اسم الصنف، مثال: بنطلون تركي" value="${esc(name)}"><input class="input return-item-qty" type="number" min="1" step="1" value="${Math.max(1,Number(quantity||1))}"><button type="button" class="btn btn-danger return-remove-item" aria-label="حذف الصنف">×</button>`;
+    row.querySelector('.return-remove-item').onclick=()=>row.remove();
+    list.appendChild(row);
+  };
+
+  const renderOrder=d=>{
+    currentOrder=d.order;
+    const panel=$('#returnOrderPanel'),existing=d.return_event;
+    if(existing){
+      panel.innerHTML=`<div class="return-existing"><div><b>الطلب #${esc(currentOrder.order_code)} مسجل مسبقًا</b><div class="sub">${existing.return_type==='full'?'مرتجع كامل':'مرتجع جزئي'} • ${(existing.items||[]).map(i=>`${esc(i.item_name)} × ${i.quantity}`).join('، ')}</div></div><span class="badge badge-ok">تم الاستلام</span></div>`;
+      return;
+    }
+    const source=currentOrder.raw_text||currentOrder.order_notes||'—';
+    panel.innerHTML=`<div class="return-order-card">
+      <div class="return-order-head"><div><b>طلب #${esc(currentOrder.order_code)} — ${esc(currentOrder.store_name||'')}</b><div class="sub">${esc(currentOrder.recipient_name||'لا يوجد')} • ${esc(currentOrder.phone||'')}</div></div>${deliveryBadge(currentOrder)}</div>
+      <div class="return-original-order"><b>محتويات الطلب الأصلية:</b><div>${esc(source)}</div></div>
+      <div class="grid form-grid return-details-grid">
+        <div class="field"><label>نوع المرتجع</label><select id="returnType" class="select"><option value="full">مرتجع كامل</option><option value="partial">مرتجع جزئي</option></select></div>
+        <div class="field"><label>سبب المرتجع</label><select id="returnReason" class="select"><option value="رفض العميل">رفض العميل</option><option value="المقاس">المقاس</option><option value="اللون">اللون</option><option value="الجودة">الجودة</option><option value="خطأ في الطلب">خطأ في الطلب</option><option value="لم يتم الرد">لم يتم الرد</option><option value="أخرى">أخرى</option></select></div>
+      </div>
+      <div class="return-items-head"><div><b>القطع التي رجعت فعليًا</b><div class="sub">اكتب اسم كل صنف وكمية القطع الراجعة.</div></div><div class="actions"><button id="returnAiItems" type="button" class="btn btn-soft">✨ استخراج الأصناف بالذكاء</button><button id="addReturnItem" type="button" class="btn btn-outline">＋ إضافة صنف</button></div></div>
+      <div id="returnItemsList" class="return-items-list"></div>
+      <div class="field"><label>ملاحظة إضافية</label><textarea id="returnNotes" class="textarea" placeholder="أي ملاحظة عن حالة المرتجع"></textarea></div>
+      <button id="saveReturn" class="btn btn-accent return-save-btn">✓ تأكيد استلام المرتجع</button>
+    </div>`;
+    addItemRow();
+    $('#addReturnItem').onclick=()=>addItemRow();
+    $('#returnAiItems').onclick=async()=>{
+      const btn=$('#returnAiItems');btn.disabled=true;btn.textContent='جاري استخراج الأصناف...';
+      try{
+        const parsed=await api('/ai-parse-order',{method:'POST',body:JSON.stringify({text:source})});
+        const items=(parsed.parsed?.items||[]).filter(i=>i.name&&Number(i.quantity)>0);
+        if(!items.length)return toast('لم يتم العثور على أصناف — أضفها يدويًا');
+        $('#returnItemsList').innerHTML='';items.forEach(item=>addItemRow(item.name,item.quantity));
+        toast('تم استخراج الأصناف — راجع الكميات قبل الحفظ');
+      }catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent='✨ استخراج الأصناف بالذكاء'}
+    };
+    $('#saveReturn').onclick=async()=>{
+      const items=[...document.querySelectorAll('.return-item-row')].map(row=>({name:row.querySelector('.return-item-name').value.trim(),quantity:Number(row.querySelector('.return-item-qty').value||0)})).filter(i=>i.name&&i.quantity>0);
+      if(!items.length)return toast('أضف صنفًا مرتجعًا واحدًا على الأقل');
+      const type=$('#returnType').value,label=type==='full'?'مرتجع كامل':'مرتجع جزئي';
+      if(!confirm(`تأكيد استلام ${label} للطلب #${currentOrder.order_code} بعدد ${items.reduce((sum,i)=>sum+i.quantity,0)} قطعة؟`))return;
+      const btn=$('#saveReturn');btn.disabled=true;
+      try{
+        await api('/returns',{method:'POST',body:JSON.stringify({order_code:currentOrder.order_code,return_type:type,reason:$('#returnReason').value,notes:$('#returnNotes').value,items})});
+        panel.innerHTML=`<div class="return-success"><b>✓ تم استلام مرتجع الطلب #${esc(currentOrder.order_code)}</b><span>${items.reduce((sum,i)=>sum+i.quantity,0)} قطعة أضيفت إلى مركز المرتجعات</span></div>`;
+        $('#returnCodeInput').value='';$('#returnCodeInput').focus();
+        toast('تم تسجيل المرتجع بنجاح');await loadReturns();
+      }catch(e){toast(e.message);btn.disabled=false}
+    };
+  };
+
+  const lookup=async raw=>{
+    const code=String(raw||$('#returnCodeInput').value||'').trim();
+    if(!code)return toast('امسح الباركود أو اكتب كود الطلب');
+    $('#returnOrderPanel').innerHTML='<div class="empty">جاري تحميل الطلب...</div>';
+    try{renderOrder(await api('/returns/order?code='+encodeURIComponent(code)))}catch(e){currentOrder=null;$('#returnOrderPanel').innerHTML=`<div class="return-error">${esc(e.message)}</div>`}
+  };
+
+  const loadReturns=async()=>{
+    const p=new URLSearchParams();
+    if($('#returnFrom').value)p.set('from_date',$('#returnFrom').value);
+    if($('#returnTo').value)p.set('to_date',$('#returnTo').value);
+    if($('#returnStore').value)p.set('store_id',$('#returnStore').value);
+    const d=await api('/returns?'+p.toString()),s=d.summary||{};
+    $('#returnSummary').innerHTML=`<div class="return-summary"><div><span>إجمالي المرتجعات</span><b>${Number(s.total_returns||0)}</b></div><div><span>مرتجع كامل</span><b>${Number(s.full_returns||0)}</b></div><div><span>مرتجع جزئي</span><b>${Number(s.partial_returns||0)}</b></div><div class="pieces"><span>إجمالي القطع الراجعة</span><b>${Number(s.returned_pieces||0)}</b></div></div>`;
+    const top=d.top_items||[];
+    $('#returnTopItems').innerHTML=top.length?`<div class="return-ranking">${top.map((item,index)=>`<div class="return-rank-row"><span class="return-rank-number">${index+1}</span><div><b>${esc(item.item_name)}</b><small>${Number(item.return_orders||0)} طلب مرتجع</small></div><strong>${Number(item.returned_quantity||0)} قطعة</strong></div>`).join('')}</div>`:'<div class="empty">لا توجد أصناف مرتجعة ضمن الفترة</div>';
+    const history=d.returns||[];
+    $('#returnHistory').innerHTML=history.length?`<div class="return-history-list">${history.map(row=>`<div class="return-history-row"><div><b>#${esc(row.order_code)} — ${esc(row.store_name||'')}</b><div class="sub">${row.return_type==='full'?'مرتجع كامل':'مرتجع جزئي'} • ${(row.items||[]).map(i=>`${esc(i.item_name)} × ${i.quantity}`).join('، ')}</div><div class="return-history-meta">${esc(row.reason||'بدون سبب')} • ${esc(row.created_by_name||'')} • ${fmtDate(row.created_at)}</div></div>${state.user?.role==='admin'?`<button class="btn btn-danger delete-return" data-id="${row.id}" data-code="${row.order_code}">حذف</button>`:''}</div>`).join('')}</div>`:'<div class="empty">لا توجد مرتجعات ضمن الفترة</div>';
+    document.querySelectorAll('.delete-return').forEach(btn=>btn.onclick=async()=>{if(!confirm(`حذف تسجيل مرتجع الطلب #${btn.dataset.code}؟`))return;btn.disabled=true;try{await api('/returns/'+btn.dataset.id,{method:'DELETE'});toast('تم حذف تسجيل المرتجع');loadReturns()}catch(e){btn.disabled=false;toast(e.message)}});
+  };
+
+  const startCamera=async()=>{
+    if(!navigator.mediaDevices?.getUserMedia)return toast('الكاميرا غير متاحة على هذا الجهاز');
+    if(!('BarcodeDetector' in window))return toast('المتصفح لا يدعم المسح بالكاميرا — استخدم جهاز الباركود أو اكتب الكود');
+    stopCamera();
+    try{
+      cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
+      const video=$('#returnCamera'),box=$('#returnCameraBox');video.srcObject=cameraStream;box.hidden=false;await video.play();
+      const detector=new BarcodeDetector({formats:['code_128','qr_code']});
+      const scan=async()=>{
+        if(!cameraStream||state.view!=='returns-center')return stopCamera();
+        try{const codes=await detector.detect(video);if(codes.length){const raw=codes[0].rawValue;$('#returnCodeInput').value=raw;stopCamera();return lookup(raw)}}catch{}
+        scanTimer=setTimeout(scan,220);
+      };
+      scan();
+    }catch(e){stopCamera();toast(e.name==='NotAllowedError'?'اسمح باستخدام الكاميرا لمسح الباركود':'تعذر تشغيل الكاميرا')}
+  };
+
+  $('#findReturnOrder').onclick=()=>lookup();
+  $('#returnCodeInput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();lookup()}};
+  $('#startReturnCamera').onclick=startCamera;$('#stopReturnCamera').onclick=stopCamera;
+  $('#loadReturns').onclick=loadReturns;$('#returnFrom').onchange=loadReturns;$('#returnTo').onchange=loadReturns;$('#returnStore').onchange=loadReturns;
+  await loadReturns();$('#returnCodeInput').focus();
+}
+
 
 async function regionsView(){
   const c=$('#content');await loadRegionIndex();
@@ -2767,7 +2927,7 @@ const PERMISSION_LABELS={
  orders_delete:'حذف الطلب',orders_status:'تغيير حالة الطلب',couriers:'عرض المناديب',couriers_add:'إضافة مندوب',couriers_edit:'تعديل مندوب',
  couriers_delete:'حذف مندوب',couriers_accounting:'محاسبة / تسكير حساب المناديب',print:'جاهز للطباعة',batches:'دفعات الطباعة',
  reports:'الكشوفات وExcel',profits:'الأرباح اليومية',delivery_reconcile:'تسوية شركة التوصيل',regions:'عرض المناطق',regions_edit:'تعديل المناطق',
- users:'المستخدمون',users_delete:'حذف المستخدمين',permissions:'الصلاحيات',tracking_readonly:'متابعة شركة التوصيل — عرض فقط'
+ users:'المستخدمون',users_delete:'حذف المستخدمين',permissions:'الصلاحيات',returns:'مركز المرتجعات',tracking_readonly:'متابعة شركة التوصيل — عرض فقط'
 };
 async function permissionsView(){
   const c=$('#content'),d=await api('/permissions');
