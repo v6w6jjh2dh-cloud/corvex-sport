@@ -5,7 +5,31 @@ function allowed(u){return !!u&&(u.role==='admin'||String(u.username||'').toLowe
 function codeOf(v=''){const m=String(v||'').match(/(\d+)\s*$/);return m?Number(m[1]):0}
 function clean(v=''){return String(v||'').replace(/\s+/g,' ').trim()}
 const ITEMS=[['بنطلون جيوب سحاب',/بنطلون\s+جيوب\s+سحاب/i],['بنطلون رياضة سحاب',/بنطلون\s+رياض[هة]\s+سحاب/i],['بنطلون تركي',/بنطلون\s+تركي/i],['بنطلون زرار',/بنطلون\s+زرار/i],['بنطلون جيوب',/بنطلون\s+جيوب/i],['تيشيرت سادة تريكو',/تيشيرت\s+ساد[هة]\s+تريكو/i],['تيشيرت بولو تريكو',/تيشيرت\s+بولو\s+تريكو/i],['بولو ترند',/بولو\s+ترند/i],['تيشيرت بولو',/تيشيرت\s+بولو/i],['بجامة جاكار',/بجام[هة]\s+جاكار/i],['ترينغ',/ترين(?:غ|نغ)/i],['بولو',/بولو/i]];
-function originalItems(text=''){const s=String(text||'').replace(/\r/g,'\n'),out=[];for(const [name,re] of ITEMS){const m=re.exec(s);if(!m)continue;const around=s.slice(Math.max(0,m.index-35),Math.min(s.length,m.index+m[0].length+20));let qty=1;const patterns=[new RegExp(`(\\d+)\\s*(?:قطعة|قطع|حبة|حبات)?\\s*${m[0].replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}`,'i'),new RegExp(`${m[0].replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\s*[x×*]?\\s*(\\d+)`,'i'),/(\d+)\s*(?:قطع|قطعة|حبات|حبة)/i];for(const p of patterns){const q=around.match(p);if(q&&Number(q[1])>0){qty=Number(q[1]);break}}out.push({name,quantity:Math.max(1,qty)})}const map=new Map();for(const x of out)map.set(x.name,Math.max(map.get(x.name)||0,x.quantity));return [...map].map(([name,quantity])=>({name,quantity}))}
+function originalItems(text=''){
+  const s=String(text||'').replace(/\r/g,'\n');
+  const hits=[];
+  for(const [name,re] of ITEMS){const rx=new RegExp(re.source,'ig');let m;while((m=rx.exec(s))){hits.push({name,index:m.index,end:m.index+m[0].length,label:m[0]});if(!rx.global)break}}
+  hits.sort((a,b)=>a.index-b.index||b.end-a.end);
+  const filtered=[];
+  for(const h of hits){if(filtered.some(x=>h.index>=x.index&&h.end<=x.end))continue;filtered.push(h)}
+  const out=[];
+  for(let i=0;i<filtered.length;i++){
+    const h=filtered[i],next=filtered[i+1];
+    const segEnd=Math.min(next?next.index:s.length,h.end+45);
+    const beforeStart=Math.max(i?filtered[i-1].end:0,h.index-35);
+    const before=s.slice(beforeStart,h.index);
+    const after=s.slice(h.end,segEnd);
+    let qty=1,m;
+    m=after.match(/^\s*(?:[:\-–—|،,]*)\s*(?:عدد|العدد|كمية|كميه)\s*[:=]?\s*(\d+)/i);
+    if(!m)m=after.match(/^\s*(?:[:\-–—|،,]*)\s*[x×*]\s*(\d+)/i);
+    if(!m)m=after.match(/^\s*(?:[:\-–—|،,]*)\s*(\d+)\s*(?:قطعة|قطع|حبة|حبات)\b/i);
+    if(!m)m=before.match(/(?:عدد|العدد|كمية|كميه)\s*[:=]?\s*(\d+)\s*$/i);
+    if(!m)m=before.match(/(\d+)\s*(?:قطعة|قطع|حبة|حبات)?\s*$/i);
+    if(m&&Number(m[1])>0&&Number(m[1])<100)qty=Number(m[1]);
+    out.push({name:h.name,quantity:qty});
+  }
+  const map=new Map();for(const x of out)map.set(x.name,(map.get(x.name)||0)+x.quantity);return [...map].map(([name,quantity])=>({name,quantity}));
+}
 async function ensure(env){await env.DB.prepare(`CREATE TABLE IF NOT EXISTS return_events(id INTEGER PRIMARY KEY AUTOINCREMENT,order_id INTEGER NOT NULL UNIQUE,return_type TEXT NOT NULL DEFAULT 'full',reason TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',created_by INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT (datetime('now')))`).run();await env.DB.prepare(`CREATE TABLE IF NOT EXISTS return_items(id INTEGER PRIMARY KEY AUTOINCREMENT,return_id INTEGER NOT NULL,item_name TEXT NOT NULL,quantity INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT (datetime('now')),UNIQUE(return_id,item_name))`).run()}
 async function detail(env,orderCode){const row=await env.DB.prepare(`SELECT r.*,o.order_code,o.recipient_name,o.phone,o.raw_text,o.order_notes,o.amount,o.area,o.detailed_address,s.name store_name,u.display_name created_by_name FROM return_events r JOIN orders o ON o.id=r.order_id LEFT JOIN stores s ON s.id=o.store_id LEFT JOIN users u ON u.id=r.created_by WHERE o.order_code=?`).bind(orderCode).first();if(!row)return null;row.items=(await env.DB.prepare('SELECT id,item_name,quantity FROM return_items WHERE return_id=? ORDER BY id').bind(row.id).all()).results||[];return row}
 async function dashboard(env){const summary=await env.DB.prepare(`SELECT COUNT(*) total_returns,SUM(CASE WHEN return_type='full' THEN 1 ELSE 0 END) full_returns,SUM(CASE WHEN return_type='partial' THEN 1 ELSE 0 END) partial_returns FROM return_events`).first();const pieces=await env.DB.prepare('SELECT COALESCE(SUM(quantity),0) n FROM return_items').first();const top=(await env.DB.prepare(`SELECT item_name,SUM(quantity) returned_quantity,COUNT(DISTINCT return_id) return_orders FROM return_items GROUP BY item_name ORDER BY returned_quantity DESC,return_orders DESC,item_name LIMIT 30`).all()).results||[];const history=(await env.DB.prepare(`SELECT r.id,r.return_type,r.reason,r.notes,r.created_at,o.order_code,o.recipient_name,o.phone,o.amount,o.area,o.detailed_address,o.raw_text,o.order_notes,s.name store_name,u.display_name created_by_name FROM return_events r JOIN orders o ON o.id=r.order_id LEFT JOIN stores s ON s.id=o.store_id LEFT JOIN users u ON u.id=r.created_by ORDER BY r.id DESC LIMIT 100`).all()).results||[];for(const r of history)r.items=(await env.DB.prepare('SELECT id,item_name,quantity FROM return_items WHERE return_id=? ORDER BY id').bind(r.id).all()).results||[];return {summary:{...summary,returned_pieces:Number(pieces?.n||0)},top_items:top,returns:history}}
