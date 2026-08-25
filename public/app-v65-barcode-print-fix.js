@@ -1,22 +1,26 @@
 (()=>{
-  // أوضح وأكبر حتى يقرأه جهاز الباركود بسهولة ويظهر الكود كاملًا أسفله.
+  // باركود قصير داخل حدود البوليصة مع Quiet Zone واضحة من الطرفين.
+  // النص الظاهر يبقى CV-رقم الطلب، لكن جهاز المسح يقرأ رقم الطلب فقط.
   code128Svg=function(value){
-    const text=String(value||'').toUpperCase();
-    const data=[...text].map(ch=>ch.charCodeAt(0)-32).filter(code=>code>=0&&code<=94);
+    const displayText=String(value||'').toUpperCase();
+    const encodedText=displayText.replace(/^CV-/,'').replace(/\D/g,'')||displayText;
+    const data=[...encodedText].map(ch=>ch.charCodeAt(0)-32).filter(code=>code>=0&&code<=94);
     let checksum=104;
     data.forEach((code,index)=>checksum+=code*(index+1));
     const codes=[104,...data,checksum%103,106];
-    let x=14,bars='';
+
+    // هامش أبيض آمن على الجهتين مهم جدًا لقارئ الباركود.
+    let x=18,bars='';
     for(const code of codes){
       const pattern=CODE128_PATTERNS[code];
       [...pattern].forEach((width,index)=>{
-        const w=Number(width)*1.15;
-        if(index%2===0)bars+=`<rect x="${x}" y="3" width="${w}" height="52"/>`;
+        const w=Number(width);
+        if(index%2===0)bars+=`<rect x="${x}" y="4" width="${w}" height="46"/>`;
         x+=w;
       });
     }
-    const total=x+14;
-    return `<svg class="barcode-svg" viewBox="0 0 ${total} 74" role="img" aria-label="باركود الطلب ${esc(text)}" preserveAspectRatio="none"><rect width="100%" height="100%" fill="#fff"/>${bars}<text x="${total/2}" y="70" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700">${esc(text)}</text></svg>`;
+    const total=x+18;
+    return `<svg class="barcode-svg" viewBox="0 0 ${total} 68" role="img" aria-label="باركود الطلب ${esc(displayText)}" preserveAspectRatio="xMidYMid meet"><rect width="100%" height="100%" fill="#fff"/>${bars}<text x="${total/2}" y="64" text-anchor="middle" font-family="Arial" font-size="11" font-weight="700">${esc(displayText)}</text></svg>`;
   };
 
   openPrintWindow=function(orders,title='طباعة'){
@@ -30,11 +34,11 @@
       .page{width:200mm;height:287mm;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:3mm;page-break-after:always}
       .page:last-child{page-break-after:auto}
       .label{border:1px solid #555;padding:3mm 4mm;font-size:10.5pt;overflow:hidden}
-      .label-head{display:grid;grid-template-columns:25mm 1fr 46mm;gap:2mm;align-items:center;border-bottom:1px solid #999;padding-bottom:1.5mm;margin-bottom:1mm;font-size:12pt;direction:rtl}
-      .label-code{justify-self:start;font-weight:900}
-      .label-brand{justify-self:center;text-align:center;white-space:nowrap}
-      .label-barcode{width:46mm;height:14mm;display:block;direction:ltr;justify-self:end;padding:0 1.5mm}
-      .barcode-svg{display:block;width:100%;height:100%;overflow:visible}
+      .label-head{display:grid;grid-template-columns:24mm minmax(0,1fr) 40mm;gap:2mm;align-items:center;border-bottom:1px solid #999;padding-bottom:1.5mm;margin-bottom:1mm;font-size:12pt;direction:rtl;overflow:hidden}
+      .label-code{justify-self:start;font-weight:900;white-space:nowrap}
+      .label-brand{justify-self:center;text-align:center;white-space:nowrap;min-width:0}
+      .label-barcode{width:40mm;max-width:40mm;height:13mm;display:block;direction:ltr;justify-self:end;padding:0 2mm;overflow:hidden}
+      .barcode-svg{display:block;width:100%;height:100%;overflow:hidden}
       .label-store{text-align:center;font-size:12pt;font-weight:900;margin:0 0 1mm;padding-bottom:1mm;border-bottom:1px solid #777}
       .recipient-date-row{display:flex;align-items:center;justify-content:space-between;gap:3mm}
       .delivery-date{direction:ltr;white-space:nowrap}
