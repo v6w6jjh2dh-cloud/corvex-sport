@@ -84,6 +84,15 @@ function sameOrderSpecification(row, input) {
     && duplicateText(row.order_notes) === duplicateText(input.order_notes);
 }
 
+function returnOrderCode(value = '') {
+  const match=String(value||'').trim().match(/(\d+)\s*$/);
+  return match?Number(match[1]):0;
+}
+
+function normalizedReturnItemName(value = '') {
+  return String(value||'').replace(/\s+/g,' ').trim().slice(0,120);
+}
+
 function orderSelectSql(where = '') {
   const deliveryDate=`CASE WHEN o.first_printed_at IS NULL THEN NULL WHEN strftime('%w',o.first_printed_at,'+3 hours')='4' THEN date(o.first_printed_at,'+3 hours','+2 days') ELSE date(o.first_printed_at,'+3 hours','+1 day') END`;
   const firstPrintDate=`CASE WHEN o.first_printed_at IS NULL THEN NULL ELSE date(o.first_printed_at,'+3 hours') END`;
@@ -118,6 +127,31 @@ async function ensurePartialProfitColumns(env) {
       if(!/duplicate column name/i.test(String(error?.message||error)))throw error;
     }
   }
+}
+
+async function ensureReturnsSchema(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS return_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL UNIQUE,
+    return_type TEXT NOT NULL CHECK(return_type IN ('full','partial')),
+    reason TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by) REFERENCES users(id)
+  )`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS return_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    return_id INTEGER NOT NULL,
+    item_name TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(return_id,item_name),
+    FOREIGN KEY(return_id) REFERENCES return_events(id) ON DELETE CASCADE
+  )`).run();
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_return_events_created_at ON return_events(created_at)').run();
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_return_items_return_id ON return_items(return_id)').run();
 }
 
 async function ensureBusinessSchema(env) {
@@ -326,6 +360,7 @@ async function ensureBusinessSchema(env) {
     await env.DB.prepare('ALTER TABLE orders ADD COLUMN delivery_company_settlement_id INTEGER').run();
   }
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_orders_delivery_company_settled ON orders(delivery_company_settled)').run();
+  await ensureReturnsSchema(env);
 }
 
 const DEFAULT_REGION_GROUPS = [{"name":"عمان الغربية","governorate":"عمان","regions":["تلاع العلي","خلدا","المدينة الرياضية","شارع الجامعة","الصويفية","عبدون","الجبيهة","شفا بدران","صويلح","الدوار الثامن","الدوار السابع","الدوار السادس","الدوار الخامس","الدوار الرابع","الدوار الثالث","الدوار الثاني","الدوار الأول","وادي صقرة","الرابية","الشميساني","جبل عمان","مرج الحمام","البيادر","المدينة الصناعية","طريق المطار","مكة مول","تاج مول","ناعور","ضاحية المفرق","ضاحية الرشيد","عرجان","ماحص","الفحيص","عين الباشا","البقعة","شارع الأردن","حي المنصور","أبو نصير","صافوط","شارع المدينة المنورة","عمان","أم السماق","المدينة الطبية","البنيات","الجندويل","شارع مكة","دابوق","أم أذينة","دير غبار","الجاردنز","دوار الداخليه","دوار الواحة","ضاحية الامير راشد","وادي الحداده"]},{"name":"عمان الشرقية","governorate":"عمان","regions":["طبربور","الهاشمي الشمالي","الهاشمي الجنوبي","ماركا الشمالية","ماركا الجنوبية","أم نوارة","المنارة","جبل النصر","أبو علندا","المقابلين","ضاحية الياسمين","اليادودة","خريبة السوق","سحاب","المستنده","الأشرفية","وسط البلد","رأس العين","جبل التاج","حي نزال","الذراع الغربي","جبل اللويبدة","شارع الإذاعة والتلفزيون","جبل الجوفة","القويسمة","منطقة مجهولة","جبل الحديد","الوحدات","النزهة","شارع الإستقلال","رغدان","المحطة","المصدار","جبل الحسين","ضاحية الأقصى","جبل المريخ","جبل القصور","الجبل الأخضر","جاوا","الجويدة","ضاحية الأمير حسن","العبدلي","جبل النظيف","جبل الزهور","وادي الرمم","شارع الحرية","ضاحية الحاج حسن","الموقر","طريق الحزام","صالحية العابد","جبل القلعة","مخيم الحسين","ضاحية الاستقلال","دوار الشرق الاوسط","دوار المشاغل","حي عدن","حي ام تينه","كلية حطين","دوار الجمرك","الرجم الشامي","اللبن","أم الحيران"]},{"name":"الزرقاء","governorate":"الزرقاء","regions":["حي حمزة","حي الأحمد","حي نصار","شومر","التطوير الحضري","القادسية","جريبا","الجبل الشمالي","مخيم شلنر","المشيرفة","البيبسي","إسكان هاشم","حي الحسين","العراتفة","حي الجندي","المنتزهات","عوجان","جبل الأمير حسن","جبل الأميرة رحمة","جبل الأبيض","ضاحية مكة","ضاحية الأميرة هيا","زواهرة","جبل طارق","الجامعة الهاشمية","الزرقاء الجديدة","الزرقاء وسط البلد","الرصيفة","وادي الحجر","جبل الأمير طلال","فندق الجوابرة","ضاحية المدينة المنورة","شارع 16","جبل الأمير فيصل","شارع الكرامة","شارع 36","مستشفى الزرقاء الحكومي","جبل المغير","الغويرية","مدينة الشرق","جناعة","حي رمزي","حي معصوم","جبل الزيتون","حي الرشيد","الزرقاء","العالوك"]},{"name":"إربد","governorate":"إربد","regions":["لواء الكورة","جديتا","الحصن","الحي الشرقي","الحي الجنوبي","كفريوبا","الخيرية","شارع فلسطين","البارحة","جامعة العلوم والتكنلوجيا","جامعة اليرموك","المزار الشمالي","إربد","كفر أسد","الوسطية","زحر","دوقرة","كفر عوان","كفر راكب","أشرفية إربد","كفرالما","دير أبو سعيد","دير السعنة","إربد كفريوبا","بيت يافا","حوفا الوسطية","كفر ابيل","خراج إربد","قم إربد","قميم","البلد إربد","شارع إيدون","شارع الرشيد","مستشفى بديعة","حي التركمان","شارع الهاشمي إربد","مجمع الغور القديم","مجمع الغور الجديد","المركزية","الأحداث","حي الطويل","حي القصيل","ضيضون","النعيمة","حوفا","حبكا","مخيم الحصن","الصريح","ايدون","دوار العيادات","قصر العيادات","قصر العوادين","إربد شارع الجامعة","إربد مول","حي الراهبات","دوار اللوازم","دوار اليوسفي","كلية غرناطة","مستشفى الراهبات","كارفور إربد","ضاحية الحسين إربد","علياء إربد","حي الأطباء","حي المهندسين","أربيلا مول","دوار القبة","مجمع عمان الجديد","دوار الثقافة","شارع البتراء إربد","حدائق الملك عبد الله إربد","المغير إربد","بشرى","حي المطلع","شارع القدس إربد","بيت رأس إربد","حي المطارق","حنينا إربد","بني كنانة","إم قيس","المنصورة إربد","ملكا","ابدر","حاتم إربد","سمر إربد","حب رأس إربد","كفر سوم","يوبلا","حرتا","حميمة إربد","كفر جايز","عالعال","حكما","حوارة","المدينة الصناعية إربد","شارع الثلاثين إربد","السنبلة إربد","بلاط الشهيد","حديقة الزهراء","فوعرا","مخيم إربد","إم الجدايل","حديقة تونس - تونس","بردا - إربد","ميدان الشهداء","دوار الدرة","المجمع الشمالي - إربد","حور - إربد","كتم","زبدة","صما - إربد","سال","دوار سال الصغير","دوار سال الكبير","سيتي سينتر - إربد","دوار البيضة - إربد","دوار الـ M.K - إربد","سحم إربد","مستشفى الأميرة بسمة"]},{"name":"جرش","governorate":"جرش","regions":["نادرة","ساكب","مخيم غزة","تل الرمان","المصطبة","سلحوب","جرش","الكتة","قفقفا","مستشفى الأميرة هيا","برما","بليلا","كفر خل","ريمون","إم بطيمة","جامعة جرش","دبين","سوق","فندق غصن الزيتون","جبة","حلاوة","هاشمية عجلون","خربة الوهدانة","سليخات","عنجرة","رأس منيف","الزراعة","راجب","بيرين"]},{"name":"عجلون","governorate":"عجلون","regions":["عبين","كفرنجة","عجلون"]},{"name":"المفرق","governorate":"المفرق","regions":["الضليل","مخيم الزعتري","إم الجمال","الدفيانة","المفرق","الهاشمية","بلعما","الازرق","الحلابات","المنطقة الحره","البادية الشمالية"]},{"name":"السلط","governorate":"البلقاء","regions":["السلط","الكماليه","السرو","ماحص","زي","العارضه","الفجيص","الرميمين","اليزيديه","علان","عيرا","وادي الحور","يرقا","ام الجوزه","بدر الجديدة"]},{"name":"الرمثا","governorate":"إربد","regions":["البويضه","الطرة","الشجرة","عمراوة","الذنيبه"]},{"name":"وادي رم","governorate":"العقبة","regions":["وادي رم","الديسي"]},{"name":"البترا","governorate":"معان","regions":["البترا"]},{"name":"وادي موسى","governorate":"معان","regions":["وادي موسى"]},{"name":"الأغوار الجنوبية","governorate":"الأغوار الجنوبية","regions":["الغور الصافي","لواء الجيزة","الأغوار الجنوبية","الكرامة","الرامة","ام الرصاص","وادي عربة","الاغوار الجنوبية"]},{"name":"الكرك","governorate":"الكرك","regions":["القصر","الكرك","الحسينية","المزار الجنوبي","الفج","المريغه","وادي ابن حماد","الزغيه","ام رمان","الوسيه","منشية ابو حمور","الصبيحات","زحوم","المامونيه","مدين","مرود","النجاصه","العدنانيه","المحموديه","عزرة","عيتون"]},{"name":"الطفيله","governorate":"الطفيلة","regions":["الطفيلة","القادسيه","الحسا","مخفر الشهداء","البربيطه","عفرا","اللعبان","ابو بنا","شيبظم","العيص","عابدر","الحرير","المعطن","ارحاب","مجادل","عيمه","العين البيضا","السلع"]},{"name":"العقبة","governorate":"العقبة","regions":["القويره","العقبة"]},{"name":"معان","governorate":"معان","regions":["الشوبك","معان"]},{"name":"مأدبا","governorate":"مأدبا","regions":["مأدبا","زيزياء","ذيبان","مليح","ماعين","ام العمد","ام البساتين"]},{"name":"الصحراوي","governorate":"الصحراوي","regions":["القطرانة","الحسينية","سد السلطاني","ارينبة الغربية","ارينبة الشرقية","الحسا","الصحراوي"]},{"name":"الاغوار الشمالية","governorate":"الأغوار الشمالية","regions":["ديرعلا","الشونة الشمالية","الشونة الجنوبية","الاغوار الشمالية","البحر الميت"]}];
@@ -335,7 +370,7 @@ const ALL_PERMISSIONS = [
   'dashboard','stores','stores_delete','orders_add','orders_view','orders_edit','orders_delete','orders_status',
   'couriers','couriers_add','couriers_edit','couriers_delete','couriers_accounting',
   'print','batches','reports','profits','delivery_reconcile','regions','regions_edit',
-  'users','users_delete','permissions','tracking_readonly'
+  'users','users_delete','permissions','returns','tracking_readonly'
 ];
 
 async function permissionsFor(env,actorType,actorId){
@@ -494,7 +529,7 @@ export async function onRequest(context) {
     if(path==='/orders'&&method==='GET'&&!permitted('orders_view')&&!permitted('reports')&&!permitted('profits'))return json({error:'لا تملك صلاحية عرض الطلبات'},403);
     if(path==='/orders'&&method==='POST'&&!permitted('orders_add'))return json({error:'لا تملك صلاحية إضافة الطلبات'},403);
     if(path==='/orders/bulk-status'&&method==='PUT'&&!permitted('orders_status'))return json({error:'لا تملك صلاحية تغيير الحالات'},403);
-    if(path==='/stores'&&method==='GET'&&!permitted('stores')&&!permitted('orders_view')&&!permitted('reports'))return json({error:'لا تملك صلاحية عرض المتاجر'},403);
+    if(path==='/stores'&&method==='GET'&&!permitted('stores')&&!permitted('orders_view')&&!permitted('reports')&&!permitted('returns'))return json({error:'لا تملك صلاحية عرض المتاجر'},403);
     if(path==='/stores'&&method==='POST'&&!permitted('stores'))return json({error:'لا تملك صلاحية إضافة المتاجر'},403);
     if(/^\/stores\/\d+$/.test(path)&&method==='PUT'&&!permitted('stores'))return json({error:'لا تملك صلاحية تعديل المتاجر'},403);
     if(/^\/stores\/\d+$/.test(path)&&method==='DELETE'&&!permitted('stores_delete'))return json({error:'لا تملك صلاحية حذف المتاجر'},403);
@@ -504,6 +539,7 @@ export async function onRequest(context) {
     if(path==='/users'&&method==='POST'&&!permitted('users'))return json({error:'لا تملك صلاحية إضافة المستخدمين'},403);
     if(/^\/users\/\d+$/.test(path)&&method==='PUT'&&!permitted('users'))return json({error:'لا تملك صلاحية تعديل المستخدمين'},403);
     if(/^\/users\/\d+$/.test(path)&&method==='DELETE'&&!permitted('users_delete'))return json({error:'لا تملك صلاحية حذف المستخدمين'},403);
+    if(path.startsWith('/returns')&&!permitted('returns'))return json({error:'لا تملك صلاحية مركز المرتجعات'},403);
 
     if (path === '/dashboard' && method === 'GET') {
       const stats = await env.DB.prepare(`SELECT
@@ -746,6 +782,114 @@ export async function onRequest(context) {
         ON CONFLICT(actor_type,actor_id) DO UPDATE SET permissions_json=excluded.permissions_json`).bind(type,id,JSON.stringify(perms)).run();
       const stored=await permissionsFor(env,type,id);
       return json({ok:true,actor_type:type,actor_id:id,role,permissions:stored});
+    }
+
+    if(path==='/returns/order'&&method==='GET'){
+      await ensureReturnsSchema(env);
+      const code=returnOrderCode(url.searchParams.get('code'));
+      if(!code)return json({error:'امسح الباركود أو أدخل كود الطلب'},400);
+      const order=await env.DB.prepare(orderSelectSql('WHERE o.order_code=?')).bind(code).first();
+      if(!order)return json({error:`لا يوجد طلب بالكود #${code}`},404);
+      const returnEvent=await env.DB.prepare(`SELECT r.*,u.display_name created_by_name
+        FROM return_events r LEFT JOIN users u ON u.id=r.created_by WHERE r.order_id=?`).bind(order.id).first();
+      let items=[];
+      if(returnEvent){
+        const itemRows=await env.DB.prepare('SELECT id,item_name,quantity FROM return_items WHERE return_id=? ORDER BY id').bind(returnEvent.id).all();
+        items=itemRows.results||[];
+      }
+      return json({order,return_event:returnEvent?{...returnEvent,items}:null});
+    }
+
+    if(path==='/returns'&&method==='GET'){
+      await ensureReturnsSchema(env);
+      const from=String(url.searchParams.get('from_date')||'').trim();
+      const to=String(url.searchParams.get('to_date')||'').trim();
+      const storeId=Number(url.searchParams.get('store_id')||0);
+      const where=[],params=[];
+      if(from){where.push("date(r.created_at,'+3 hours')>=date(?)");params.push(from)}
+      if(to){where.push("date(r.created_at,'+3 hours')<=date(?)");params.push(to)}
+      if(storeId){where.push('o.store_id=?');params.push(storeId)}
+      const clause=where.length?`WHERE ${where.join(' AND ')}`:'';
+      const bound=sql=>params.length?env.DB.prepare(sql).bind(...params):env.DB.prepare(sql);
+      const summary=await bound(`SELECT COUNT(*) total_returns,
+        COALESCE(SUM(CASE WHEN r.return_type='full' THEN 1 ELSE 0 END),0) full_returns,
+        COALESCE(SUM(CASE WHEN r.return_type='partial' THEN 1 ELSE 0 END),0) partial_returns,
+        COALESCE(SUM((SELECT SUM(ri.quantity) FROM return_items ri WHERE ri.return_id=r.id)),0) returned_pieces
+        FROM return_events r JOIN orders o ON o.id=r.order_id ${clause}`).first();
+      const topRows=await bound(`SELECT i.item_name,COALESCE(SUM(i.quantity),0) returned_quantity,
+        COUNT(DISTINCT i.return_id) return_orders
+        FROM return_items i JOIN return_events r ON r.id=i.return_id JOIN orders o ON o.id=r.order_id
+        ${clause} GROUP BY lower(trim(i.item_name)) ORDER BY returned_quantity DESC,return_orders DESC,i.item_name LIMIT 20`).all();
+      const historyRows=await bound(`SELECT r.id,r.return_type,r.reason,r.notes,r.created_at,
+        o.id order_id,o.order_code,o.recipient_name,o.phone,o.order_notes,o.raw_text,o.store_id,
+        s.name store_name,u.display_name created_by_name
+        FROM return_events r JOIN orders o ON o.id=r.order_id
+        LEFT JOIN stores s ON s.id=o.store_id LEFT JOIN users u ON u.id=r.created_by
+        ${clause} ORDER BY r.id DESC LIMIT 500`).all();
+      const history=historyRows.results||[];
+      if(history.length){
+        const marks=history.map(()=>'?').join(',');
+        const itemRows=await env.DB.prepare(`SELECT return_id,item_name,quantity FROM return_items WHERE return_id IN (${marks}) ORDER BY id`).bind(...history.map(x=>x.id)).all();
+        const byReturn=new Map();
+        for(const item of (itemRows.results||[])){
+          if(!byReturn.has(item.return_id))byReturn.set(item.return_id,[]);
+          byReturn.get(item.return_id).push(item);
+        }
+        history.forEach(row=>row.items=byReturn.get(row.id)||[]);
+      }
+      return json({summary:summary||{},top_items:topRows.results||[],returns:history});
+    }
+
+    if(path==='/returns'&&method==='POST'){
+      await ensureReturnsSchema(env);
+      const b=await readBody(request);
+      const code=returnOrderCode(b.order_code);
+      const returnType=b.return_type==='partial'?'partial':'full';
+      if(!code)return json({error:'امسح الباركود أو أدخل كود الطلب'},400);
+      const order=await env.DB.prepare('SELECT id,order_code FROM orders WHERE order_code=?').bind(code).first();
+      if(!order)return json({error:`لا يوجد طلب بالكود #${code}`},404);
+      const existing=await env.DB.prepare('SELECT id FROM return_events WHERE order_id=?').bind(order.id).first();
+      if(existing)return json({error:'هذا الطلب مسجل مسبقًا في مركز المرتجعات',return_id:existing.id},409);
+      const merged=new Map();
+      for(const raw of (Array.isArray(b.items)?b.items:[])){
+        const name=normalizedReturnItemName(raw?.name||raw?.item_name);
+        const quantity=Math.max(0,Math.floor(Number(raw?.quantity||0)));
+        if(!name||!quantity)continue;
+        const key=name.toLocaleLowerCase('ar');
+        const old=merged.get(key);
+        merged.set(key,{name:old?.name||name,quantity:(old?.quantity||0)+quantity});
+      }
+      const items=[...merged.values()];
+      if(!items.length)return json({error:'أضف صنفًا مرتجعًا واحدًا على الأقل مع الكمية'},400);
+      const created=await env.DB.prepare(`INSERT INTO return_events(order_id,return_type,reason,notes,created_by)
+        VALUES(?,?,?,?,?)`).bind(order.id,returnType,String(b.reason||'').trim().slice(0,120),String(b.notes||'').trim().slice(0,1000),me.id).run();
+      const returnId=Number(created.meta.last_row_id);
+      try{
+        const inserts=items.map(item=>env.DB.prepare('INSERT INTO return_items(return_id,item_name,quantity) VALUES(?,?,?)').bind(returnId,item.name,item.quantity));
+        for(let i=0;i<inserts.length;i+=40)await env.DB.batch(inserts.slice(i,i+40));
+        const pieces=items.reduce((sum,item)=>sum+item.quantity,0);
+        await env.DB.prepare("UPDATE orders SET returned_pieces=?,updated_at=datetime('now') WHERE id=?").bind(pieces,order.id).run();
+      }catch(error){
+        await env.DB.prepare('DELETE FROM return_items WHERE return_id=?').bind(returnId).run();
+        await env.DB.prepare('DELETE FROM return_events WHERE id=?').bind(returnId).run();
+        throw error;
+      }
+      return json({ok:true,return_id:returnId,order_code:code,returned_pieces:items.reduce((sum,item)=>sum+item.quantity,0)},201);
+    }
+
+    const returnDeleteMatch=path.match(/^\/returns\/(\d+)$/);
+    if(returnDeleteMatch&&method==='DELETE'){
+      if(me.role!=='admin')return json({error:'حذف تسجيل المرتجع متاح للمدير فقط'},403);
+      await ensureReturnsSchema(env);
+      const id=Number(returnDeleteMatch[1]);
+      const event=await env.DB.prepare('SELECT id,order_id FROM return_events WHERE id=?').bind(id).first();
+      if(!event)return json({error:'سجل المرتجع غير موجود'},404);
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM return_items WHERE return_id=?').bind(id),
+        env.DB.prepare('DELETE FROM return_events WHERE id=?').bind(id),
+        env.DB.prepare("UPDATE orders SET returned_pieces=0,updated_at=datetime('now') WHERE id=?").bind(event.order_id)
+      ]);
+      return json({ok:true,id});
     }
 
 
