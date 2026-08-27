@@ -1,8 +1,28 @@
 (()=>{
- async function render(){if(state?.view!=='daily-profits')return;const summary=document.querySelector('#profitSummary');if(!summary||document.querySelector('#profitSettlementGroups'))return;const date=document.querySelector('#profitDate')?.value;if(!date)return;const store=document.querySelector('#profitStore')?.value||'';try{const d=await api('/profit-settlements?date='+encodeURIComponent(date)+(store?'&store_id='+encodeURIComponent(store):''));const rows=d.settlements||[];const box=document.createElement('div');box.id='profitSettlementGroups';box.className='card';box.style.margin='12px 0';box.innerHTML='<h3>الأرباح حسب كشف شركة التوصيل</h3><div class="sub" style="margin-bottom:10px">اضغط على الكشف لإظهار الطلبات التي أغلقها هذا الكشف فقط.</div>'+(!rows.length?'<div class="empty">لا توجد كشوف معتمدة بهذا التاريخ</div>':rows.map(x=>`<button type="button" class="settlement-profit-row btn btn-soft" data-sid="${x.id}" style="display:grid;grid-template-columns:1.2fr repeat(5,1fr);gap:8px;width:100%;margin:7px 0;text-align:right"><b>${esc(x.settlement_code)}</b><span>${Number(x.order_count||0)} طلب</span><span>مستلم ${money(x.sales||0)}</span><span>كوست ${money(x.costs||0)}</span><span>توصيل ${money(x.fees||0)}</span><strong>ربح ${money(x.profit||0)}</strong></button>`).join(''));summary.parentNode.insertBefore(box,summary.nextSibling);box.querySelectorAll('.settlement-profit-row').forEach(b=>b.onclick=()=>{const sid=b.dataset.sid;document.querySelectorAll('.profit-order-card').forEach(c=>{c.style.display=String(c.dataset.settlementId||'')===sid?'':'none'});const reset=document.querySelector('#profitSettlementReset')||document.createElement('button');reset.id='profitSettlementReset';reset.className='btn btn-soft';reset.textContent='عرض كل طلبات اليوم';reset.onclick=()=>document.querySelectorAll('.profit-order-card').forEach(c=>c.style.display='');if(!reset.parentNode)box.appendChild(reset)});
- // attach settlement ids from order API lazily
- const cards=[...document.querySelectorAll('.profit-order-card')];for(const c of cards){try{const o=(await api('/orders/'+c.dataset.id)).order;c.dataset.settlementId=String(o?.delivery_company_settlement_id||'')}catch{}}
- }catch{}
+ let rendering=false,lastKey='';
+ function removeAll(){document.querySelectorAll('#profitSettlementGroups').forEach((x,i)=>{if(i>0)x.remove()})}
+ async function render(force=false){
+  if(state?.view!=='daily-profits')return;
+  const summary=document.querySelector('#profitSummary'),date=document.querySelector('#profitDate')?.value,store=document.querySelector('#profitStore')?.value||'';
+  if(!summary||!date||rendering)return;
+  removeAll();
+  const key=date+'|'+store;
+  let box=document.querySelector('#profitSettlementGroups');
+  if(box&&!force&&lastKey===key)return;
+  rendering=true;lastKey=key;
+  try{
+   const d=await api('/profit-settlements?date='+encodeURIComponent(date)+(store?'&store_id='+encodeURIComponent(store):'')),rows=d.settlements||[];
+   if(!box){box=document.createElement('div');box.id='profitSettlementGroups';box.className='card';summary.parentNode.insertBefore(box,summary.nextSibling)}
+   box.style.margin='12px 0';
+   box.innerHTML=`<h3 style="margin-bottom:4px">الأرباح حسب كشف شركة التوصيل</h3><div class="sub" style="margin-bottom:10px">اضغط على أي كشف لإظهار الطلبات التي أغلقها فقط.</div>${!rows.length?'<div class="empty">لا توجد كشوف معتمدة بهذا التاريخ</div>':rows.map(x=>`<button type="button" class="settlement-profit-row btn btn-soft" data-sid="${x.id}" style="display:block;width:100%;margin:8px 0;text-align:right;padding:12px"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><b style="direction:ltr">${esc(x.settlement_code)}</b><span>${Number(x.order_count||0)} طلب</span></div><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px"><span>المستلم<br><b>${money(x.sales||0)}</b></span><span>الكوست<br><b>${money(x.costs||0)}</b></span><span>التوصيل<br><b>${money(x.fees||0)}</b></span><span>الربح<br><b>${money(x.profit||0)}</b></span></div></button>`).join('')}<button id="profitSettlementReset" class="btn btn-soft" style="display:none;margin-top:8px">عرض كل طلبات اليوم</button>`;
+   const cards=[...document.querySelectorAll('.profit-order-card')];
+   await Promise.all(cards.map(async c=>{try{const o=(await api('/orders/'+c.dataset.id)).order;c.dataset.settlementId=String(o?.delivery_company_settlement_id||'')}catch{}}));
+   box.querySelectorAll('.settlement-profit-row').forEach(b=>b.onclick=()=>{const sid=b.dataset.sid;cards.forEach(c=>c.style.display=String(c.dataset.settlementId||'')===sid?'':'none');const r=box.querySelector('#profitSettlementReset');if(r)r.style.display='inline-flex'});
+   const reset=box.querySelector('#profitSettlementReset');if(reset)reset.onclick=()=>{cards.forEach(c=>c.style.display='');reset.style.display='none'};
+  }catch{}finally{rendering=false}
  }
- const clear=()=>document.querySelector('#profitSettlementGroups')?.remove();document.addEventListener('change',e=>{if(e.target?.id==='profitDate'||e.target?.id==='profitStore')clear()});document.addEventListener('click',e=>{if(e.target?.id==='loadProfits')setTimeout(()=>{clear();render()},100)});new MutationObserver(()=>setTimeout(render,80)).observe(document.documentElement,{childList:true,subtree:true});setInterval(render,1000);render();
+ document.addEventListener('change',e=>{if(e.target?.id==='profitDate'||e.target?.id==='profitStore'){lastKey='';setTimeout(()=>render(true),50)}});
+ document.addEventListener('click',e=>{if(e.target?.id==='loadProfits'){lastKey='';setTimeout(()=>render(true),150)}});
+ new MutationObserver(()=>{removeAll();setTimeout(()=>render(false),120)}).observe(document.documentElement,{childList:true,subtree:true});
+ setInterval(()=>{removeAll();render(false)},1500);render(true);
 })();
