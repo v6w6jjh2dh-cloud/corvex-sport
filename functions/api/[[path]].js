@@ -117,7 +117,9 @@ async function ensurePartialProfitColumns(env) {
   const cols=new Set((info.results||[]).map(r=>r.name));
   const wanted=[
     ['partial_cost_reviewed',"INTEGER NOT NULL DEFAULT 0"],
-    ['partial_received_items',"TEXT NOT NULL DEFAULT ''"]
+    ['partial_received_items',"TEXT NOT NULL DEFAULT ''"],
+    ['profit_reviewed_settlement_id','INTEGER'],
+    ['profit_reviewed_at','TEXT']
   ];
   for(const [name,type] of wanted){
     if(cols.has(name))continue;
@@ -126,6 +128,17 @@ async function ensurePartialProfitColumns(env) {
     }catch(error){
       if(!/duplicate column name/i.test(String(error?.message||error)))throw error;
     }
+  }
+  // Preserve reviews saved by the previous profit page, but bind them to the
+  // exact delivery-company settlement so a later settlement cannot reuse them.
+  if(cols.has('delivery_company_settlement_id')&&cols.has('settlement_note')){
+    await env.DB.prepare(`UPDATE orders SET
+      profit_reviewed_settlement_id=delivery_company_settlement_id,
+      profit_reviewed_at=COALESCE(profit_reviewed_at,updated_at,datetime('now'))
+      WHERE profit_reviewed_settlement_id IS NULL
+        AND partial_cost_reviewed=1
+        AND delivery_company_settlement_id IS NOT NULL
+        AND settlement_note LIKE '%[MANUAL_COST:%'`).run();
   }
 }
 
@@ -176,6 +189,8 @@ async function ensureBusinessSchema(env) {
     ['cost_of_goods', "REAL NOT NULL DEFAULT 0"],
     ['partial_cost_reviewed', "INTEGER NOT NULL DEFAULT 0"],
     ['partial_received_items', "TEXT NOT NULL DEFAULT ''"],
+    ['profit_reviewed_settlement_id', "INTEGER"],
+    ['profit_reviewed_at', "TEXT"],
     ['delivered_pieces', "INTEGER NOT NULL DEFAULT 0"],
     ['returned_pieces', "INTEGER NOT NULL DEFAULT 0"],
     ['settlement_note', "TEXT NOT NULL DEFAULT ''"],
@@ -399,6 +414,7 @@ async function listOrders(url, env) {
   const statuses = (url.searchParams.get('statuses') || '').split(',').map(x=>x.trim()).filter(Boolean);
   const dateBasis = (url.searchParams.get('date_basis') || '').trim();
   const storeId = url.searchParams.get('store_id');
+  const settlementId = url.searchParams.get('settlement_id');
   const fromCode = url.searchParams.get('from_code');
   const toCode = url.searchParams.get('to_code');
   const fromDate = url.searchParams.get('from_date');
@@ -412,6 +428,7 @@ async function listOrders(url, env) {
   }
   if (printed === '0' || printed === '1') { where.push('o.printed = ?'); params.push(Number(printed)); }
   if (storeId) { where.push('o.store_id = ?'); params.push(Number(storeId)); }
+  if (settlementId) { where.push('o.delivery_company_settlement_id = ?'); params.push(Number(settlementId)); }
 
   if (status) {
     if (status === 'partial') {
@@ -1237,6 +1254,7 @@ export async function onRequest(context) {
     }
 
     if (path === '/orders' && method === 'GET') {
+      await ensurePartialProfitColumns(env);
       const result = await listOrders(url, env);
       return json({ orders: result.results || [] });
     }
@@ -1400,6 +1418,40 @@ export async function onRequest(context) {
       const order=await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(Number(printedMatch[1])).first();
       if(!order)return json({error:'الطلب غير موجود'},404);
       return json({order});
+    }
+
+    const profitReviewMatch = path.match(/^\/orders\/(\d+)\/profit-review$/);
+    if (profitReviewMatch && method === 'PUT') {
+      await ensurePartialProfitColumns(env);
+      const id=Number(profitReviewMatch[1]);
+      const current=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
+      if(!current)return json({error:'الطلب غير موجود'},404);
+      const status=String(current.delivery_status||'');
+      if(!['delivered','partial','delivered_adjusted'].includes(status)){
+        return json({error:'يمكن اعتماد حساب الطلبات المسلمة أو الجزئية فقط'},409);
+      }
+      const settlementId=Number(current.delivery_company_settlement_id||0);
+      if(!settlementId)return json({error:'الطلب غير مرتبط بكشف شركة توصيل معتمد'},409);
+      const b=await readBody(request);
+      const amount=Number(b.delivered_amount);
+      const fee=Number(b.delivery_fee);
+      const cost=Number(b.cost_of_goods);
+      if(!Number.isFinite(amount)||amount<0)return json({error:'المبلغ المستلم غير صحيح'},400);
+      if(!Number.isFinite(fee)||fee<0)return json({error:'أجور التوصيل غير صحيحة'},400);
+      if(!Number.isFinite(cost)||cost<0)return json({error:'كوست البضاعة غير صحيح'},400);
+      const isPartial=status==='partial'||status==='delivered_adjusted';
+      const partialItems=isPartial?String(b.partial_received_items||'').trim():String(current.partial_received_items||'');
+      const cleanNote=String(current.settlement_note||'').replace(/\[MANUAL_COST:[^\]]+\]\s*/g,'').trim();
+      const note=`[MANUAL_COST:${cost.toFixed(2)}]${cleanNote?' '+cleanNote:''}`;
+      await env.DB.prepare(`UPDATE orders SET
+        delivered_amount=?,delivery_fee=?,cash_collected=?,cost_of_goods=?,
+        partial_cost_reviewed=?,partial_received_items=?,settlement_note=?,
+        profit_reviewed_settlement_id=?,profit_reviewed_at=datetime('now'),updated_at=datetime('now')
+        WHERE id=? AND delivery_company_settlement_id=?`)
+        .bind(amount,fee,Math.max(0,amount-fee),cost,isPartial?1:Number(current.partial_cost_reviewed||0),
+          partialItems,note,settlementId,id,settlementId).run();
+      const order=await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(id).first();
+      return json({order,reviewed:true,settlement_id:settlementId});
     }
 
     const outcomeMatch = path.match(/^\/orders\/(\d+)\/outcome$/);

@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS orders (
   first_printed_at TEXT,
   last_printed_at TEXT,
   print_count INTEGER NOT NULL DEFAULT 0,
+  partial_cost_reviewed INTEGER NOT NULL DEFAULT 0,
+  partial_received_items TEXT NOT NULL DEFAULT '',
+  profit_reviewed_settlement_id INTEGER,
+  profit_reviewed_at TEXT,
   FOREIGN KEY(created_by) REFERENCES users(id)
 );
 

@@ -1,7 +1,7 @@
 (()=>{
  let rendering=false,lastKey='';
  function removeAll(){document.querySelectorAll('#profitSettlementGroups').forEach((x,i)=>{if(i>0)x.remove()})}
- function showSettlement(cards,sid){cards.forEach(c=>c.style.display=String(c.dataset.settlementId||'')===String(sid)?'':'none');const orders=document.querySelector('#profitOrders');if(orders)orders.dataset.activeSettlementId=String(sid);const visible=cards.find(c=>String(c.dataset.settlementId||'')===String(sid));visible?.querySelector('input')?.dispatchEvent(new Event('input',{bubbles:true}));document.dispatchEvent(new CustomEvent('corvex:profit-settlement-changed',{detail:{settlementId:String(sid)}}))}
+ function showSettlement(cards,sid,reload=false){window.CORVEX_ACTIVE_PROFIT_SETTLEMENT=String(sid);cards.forEach(c=>c.style.display=String(c.dataset.settlementId||'')===String(sid)?'':'none');const orders=document.querySelector('#profitOrders');if(orders)orders.dataset.activeSettlementId=String(sid);const visible=cards.find(c=>String(c.dataset.settlementId||'')===String(sid));visible?.querySelector('input')?.dispatchEvent(new Event('input',{bubbles:true}));document.dispatchEvent(new CustomEvent('corvex:profit-settlement-changed',{detail:{settlementId:String(sid)}}));if(reload&&typeof window.CORVEX_RELOAD_DAILY_PROFITS==='function')window.CORVEX_RELOAD_DAILY_PROFITS(String(sid))}
  async function render(force=false){
   if(state?.view!=='daily-profits')return;
   const summary=document.querySelector('#profitSummary'),date=document.querySelector('#profitDate')?.value,store=document.querySelector('#profitStore')?.value||'';
@@ -13,8 +13,10 @@
    const cards=[...document.querySelectorAll('.profit-order-card')];
    const valid=new Set(rows.map(x=>String(x.id)));cards.forEach(c=>c.style.display=valid.has(String(c.dataset.settlementId||''))?'':'none');
    // When one settlement is shown for the selected store/date, default directly to its exact orders.
-   if(rows.length===1)showSettlement(cards,rows[0].id);
-   box.querySelectorAll('.settlement-profit-row').forEach(b=>b.onclick=()=>showSettlement(cards,b.dataset.sid));
+   const active=String(window.CORVEX_ACTIVE_PROFIT_SETTLEMENT||'');
+   if(active&&valid.has(active))showSettlement(cards,active);
+   else if(rows.length===1)showSettlement(cards,rows[0].id);
+   box.querySelectorAll('.settlement-profit-row').forEach(b=>b.onclick=()=>showSettlement(cards,b.dataset.sid,true));
   }catch{}finally{rendering=false}
  }
  document.addEventListener('corvex:profits-rendered',()=>{lastKey='';render(true)});render(true);

@@ -1,14 +1,14 @@
 (()=>{
- function marker(value,note=''){const clean=String(note||'').replace(/\[MANUAL_COST:[^\]]+\]\s*/g,'').trim();return `[MANUAL_COST:${Number(value).toFixed(2)}]${clean?' '+clean:''}`}
  async function saveManualCost(card,newCost){
   const id=Number(card.dataset.id||0);if(!id)return;
   const input=card.querySelector('.profit-cost');const amount=Number(card.querySelector('.profit-amount')?.value||0),fee=Number(card.querySelector('.profit-fee')?.value||0);
   card.dataset.manualCostOverride='1';card.dataset.offerPartialDone='1';card.dataset.singlePartialDone='1';card.dataset.v92CostKey=`manual:${newCost}`;
   if(input){input.value=Number(newCost).toFixed(2);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));}
   try{
-    const d=await api('/orders/'+id),o=d.order;
-    const isPartial=String(o.delivery_status||'')==='partial';await api('/orders/'+id+'/outcome',{method:'PUT',body:JSON.stringify({delivery_status:o.delivery_status,printed:Number(o.printed||0),delivered_amount:amount,delivery_fee:fee,cash_collected:Math.max(0,amount-fee),cost_of_goods:Number(newCost),partial_cost_reviewed:isPartial?1:Number(o.partial_cost_reviewed||0),partial_received_items:o.partial_received_items||'',delivered_pieces:Number(o.delivered_pieces||0),returned_pieces:Number(o.returned_pieces||0),settlement_note:marker(newCost,o.settlement_note||'')})});card.dataset.manualCost='1';if(isPartial){card.dataset.reviewed='1';const badge=card.querySelector('.partial-review-badge');if(badge){badge.className='badge badge-ok partial-review-badge';badge.textContent='تمت مراجعة الكوست'}}window.CORVEX_CLEAR_PROFIT_INCOMPLETE?.(card);input?.dispatchEvent(new Event('input',{bubbles:true}));
+    const partialItems=(card.querySelector('.profit-partial-items')?.value||'').trim();
+    await api('/orders/'+id+'/profit-review',{method:'PUT',body:JSON.stringify({delivered_amount:amount,delivery_fee:fee,cost_of_goods:Number(newCost),partial_received_items:partialItems})});
     if(typeof toast==='function')toast('تم تعديل كوست الطلب');
+    await window.CORVEX_RELOAD_DAILY_PROFITS?.(window.CORVEX_ACTIVE_PROFIT_SETTLEMENT||card.dataset.settlementId||'');
   }catch(e){if(typeof toast==='function')toast(e.message||'تعذر حفظ الكوست')}
  }
  function bind(card){if(card.dataset.costEditButtonBound==='1')return;card.dataset.costEditButtonBound='1';

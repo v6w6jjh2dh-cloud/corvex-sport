@@ -2399,7 +2399,7 @@ async function dailyProfitsView(){
     </div>`;
 
   const recalc=()=>{
-    const activeSettlementId=$('#profitOrders')?.dataset.activeSettlementId||'';
+    const activeSettlementId=$('#profitOrders')?.dataset.activeSettlementId||window.CORVEX_ACTIVE_PROFIT_SETTLEMENT||'';
     const cards=[...document.querySelectorAll('.profit-order-card')].filter(card=>!activeSettlementId||String(card.dataset.settlementId||'')===String(activeSettlementId));
     let sales=0,costs=0,fees=0,partialPending=0,modelPending=0;
     cards.forEach(card=>{
@@ -2421,18 +2421,24 @@ async function dailyProfitsView(){
     $('#profitSummary').innerHTML=`<div class="accounting-stats" style="margin:14px 0"><div><span>إجمالي الفواتير / المستلم</span><b>${money(sales)}</b></div><div><span>إجمالي كوست البضاعة</span><b>${money(costs)}</b></div><div><span>إجمالي أجور التوصيل</span><b>${money(fees)}</b></div><div><span>صافي الربح المعتمد</span><b>${money(sales-costs-fees)}</b></div></div>${warnings}`;
   };
 
-  const load=async()=>{
+  const load=async(settlementId='')=>{
     const p=new URLSearchParams({statuses:'delivered,delivered_adjusted,partial',date_basis:'settled',from_date:$('#profitDate').value,to_date:$('#profitDate').value});
     if($('#profitStore').value)p.set('store_id',$('#profitStore').value);
+    if(settlementId)p.set('settlement_id',String(settlementId));
     const d=await api('/orders?'+p.toString()),orders=d.orders||[];
-    const cardsHtml=orders.map(o=>`
-      <div class="card profit-order-card" data-id="${o.id}" data-status="${o.delivery_status}" data-settlement-id="${Number(o.delivery_company_settlement_id||0)}" data-manual-cost="${/\[MANUAL_COST:[^\]]+\]/.test(String(o.settlement_note||''))?1:0}" data-reviewed="${o.delivery_status==='partial'?Number(o.partial_cost_reviewed||0):1}" style="margin:12px 0;padding:14px">
-        <div class="section-head"><div><b>#${o.order_code} — ${esc(o.store_name||'')}</b><div class="sub">${esc(o.recipient_name||'لا يوجد')} • ${esc(o.phone||'')} • ${deliveryBadge(o)}</div></div>${o.delivery_status==='partial'?`<span class="badge ${o.partial_cost_reviewed?'badge-ok':'badge-warn'} partial-review-badge">${o.partial_cost_reviewed?'تمت مراجعة الكوست':'الكوست بحاجة لمراجعة'}</span>`:`<button class="btn btn-soft profit-ai" data-id="${o.id}">✨ حساب الكوست بالذكاء</button>`}</div>
+    const cardsHtml=orders.map(o=>{
+      const orderSettlementId=Number(o.delivery_company_settlement_id||0);
+      const partialReviewed=o.delivery_status!=='partial'||(
+        orderSettlementId>0&&Number(o.profit_reviewed_settlement_id||0)===orderSettlementId
+      );
+      return `
+      <div class="card profit-order-card" data-id="${o.id}" data-status="${o.delivery_status}" data-settlement-id="${orderSettlementId}" data-manual-cost="${/\[MANUAL_COST:[^\]]+\]/.test(String(o.settlement_note||''))?1:0}" data-reviewed="${partialReviewed?1:0}" style="margin:12px 0;padding:14px">
+        <div class="section-head"><div><b>#${o.order_code} — ${esc(o.store_name||'')}</b><div class="sub">${esc(o.recipient_name||'لا يوجد')} • ${esc(o.phone||'')} • ${deliveryBadge(o)}</div></div>${o.delivery_status==='partial'?`<span class="badge ${partialReviewed?'badge-ok':'badge-warn'} partial-review-badge">${partialReviewed?'تمت مراجعة الكوست':'الكوست بحاجة لمراجعة'}</span>`:`<button class="btn btn-soft profit-ai" data-id="${o.id}">✨ حساب الكوست بالذكاء</button>`}</div>
         <div class="grid form-grid" style="margin-top:12px">
           <div class="field"><label>المبلغ المستلم فعليًا</label><input class="input profit-amount" inputmode="decimal" value="${Number(o.delivered_amount||o.amount||0)}"></div>
-          <div class="field"><label>${o.delivery_status==='partial'?'كوست القطع المستلمة':'كوست البضاعة'}</label><input class="input profit-cost" inputmode="decimal" value="${o.delivery_status==='partial'&&!o.partial_cost_reviewed?0:Number(o.cost_of_goods||0)}"></div>
+          <div class="field"><label>${o.delivery_status==='partial'?'كوست القطع المستلمة':'كوست البضاعة'}</label><input class="input profit-cost" inputmode="decimal" value="${o.delivery_status==='partial'&&!partialReviewed?0:Number(o.cost_of_goods||0)}"></div>
           <div class="field"><label>أجور التوصيل</label><input class="input profit-fee" inputmode="decimal" value="${Number(o.delivery_fee||2)}"></div>
-          <div class="field"><label>${o.delivery_status==='partial'&&!o.partial_cost_reviewed?'صافي الربح (معاينة غير معتمدة)':'صافي الربح'}</label><div style="background:#102a43;color:#fff;border-radius:12px;padding:13px;font-size:24px"><b class="profit-net">0.00</b> د.أ</div></div>
+          <div class="field"><label>${o.delivery_status==='partial'&&!partialReviewed?'صافي الربح (معاينة غير معتمدة)':'صافي الربح'}</label><div style="background:#102a43;color:#fff;border-radius:12px;padding:13px;font-size:24px"><b class="profit-net">0.00</b> د.أ</div></div>
         </div>
         <div class="sub profit-original-notes" style="white-space:pre-line;margin:10px 0"><b>نص الطلب الأصلي:</b><br>${esc(o.order_notes||o.raw_text||'—')}</div>
         ${o.delivery_status==='partial'?`
@@ -2443,8 +2449,9 @@ async function dailyProfitsView(){
             <button type="button" class="btn btn-soft profit-partial-ai" data-id="${o.id}">✨ حساب كوست القطع المكتوبة</button>
           </div>`:''}
         <button class="btn btn-accent profit-save" data-id="${o.id}">${o.delivery_status==='partial'?'اعتماد وحفظ حساب الطلب الجزئي':'حفظ الحساب'}</button>
-      </div>`).join('');
-    delete $('#profitOrders').dataset.activeSettlementId;
+      </div>`}).join('');
+    if(settlementId)$('#profitOrders').dataset.activeSettlementId=String(settlementId);
+    else delete $('#profitOrders').dataset.activeSettlementId;
     $('#profitOrders').innerHTML=orders.length?cardsHtml+`<div class="actions" style="justify-content:center;margin-top:18px"><button id="profitAiAll" class="btn btn-primary" style="min-width:260px">✨ حساب كل الطلبات وجمع الإجماليات</button></div>`:'<div class="empty">لا توجد طلبات مسلّمة بهذا التاريخ</div>';
 
     const analyzeOne=async(card,o)=>{
@@ -2500,35 +2507,26 @@ async function dailyProfitsView(){
       const fee=Number(card.querySelector('.profit-fee').value||0);
       const cost=Number(card.querySelector('.profit-cost').value||0);
       const partialItems=isPartial?(card.querySelector('.profit-partial-items')?.value||'').trim():'';
-      const cleanNote=String(o.settlement_note||'').replace(/\[MANUAL_COST:[^\]]+\]\s*/g,'').trim();
-      const settlementNote=isPartial?`[MANUAL_COST:${cost.toFixed(2)}]${cleanNote?' '+cleanNote:''}`:(o.settlement_note||'');
       if(isPartial&&!Number.isFinite(cost))return toast('أدخل كوست القطع المستلمة');
       btn.disabled=true;
       try{
-        await api('/orders/'+o.id+'/outcome',{method:'PUT',body:JSON.stringify({
-          delivery_status:o.delivery_status,printed:Number(o.printed||0),delivered_amount:amount,
-          delivery_fee:fee,cash_collected:Math.max(0,amount-fee),cost_of_goods:cost,
-          partial_cost_reviewed:isPartial?1:0,partial_received_items:partialItems,
-          delivered_pieces:Number(o.delivered_pieces||0),returned_pieces:Number(o.returned_pieces||0),settlement_note:settlementNote
+        await api('/orders/'+o.id+'/profit-review',{method:'PUT',body:JSON.stringify({
+          delivered_amount:amount,delivery_fee:fee,cost_of_goods:cost,
+          partial_received_items:partialItems
         })});
-        if(isPartial){
-          card.dataset.reviewed='1';
-          card.dataset.manualCost='1';
-          card.dataset.manualCostOverride='1';
-          o.partial_cost_reviewed=1;
-          o.partial_received_items=partialItems;
-          const badge=card.querySelector('.partial-review-badge');
-          if(badge){badge.className='badge badge-ok partial-review-badge';badge.textContent='تمت مراجعة الكوست'}
-          btn.textContent='تم الاعتماد — حفظ أي تعديل';
-        }
         toast(isPartial?'تم اعتماد حساب الطلب الجزئي':'تم حفظ حساب الطلب');
-        recalc();
+        await load(window.CORVEX_ACTIVE_PROFIT_SETTLEMENT||card.dataset.settlementId||'');
       }catch(e){toast(e.message)}finally{btn.disabled=false}
     });
     recalc();
     document.dispatchEvent(new CustomEvent('corvex:profits-rendered',{detail:{date:$('#profitDate').value,store:$('#profitStore').value||''}}));
   };
-  $('#loadProfits').onclick=load;$('#profitStore').onchange=load;$('#profitDate').onchange=load;
+  window.CORVEX_RELOAD_DAILY_PROFITS=async settlementId=>{
+    window.CORVEX_ACTIVE_PROFIT_SETTLEMENT=String(settlementId||'');
+    return load(window.CORVEX_ACTIVE_PROFIT_SETTLEMENT);
+  };
+  const resetAndLoad=()=>{window.CORVEX_ACTIVE_PROFIT_SETTLEMENT='';return load('')};
+  $('#loadProfits').onclick=resetAndLoad;$('#profitStore').onchange=resetAndLoad;$('#profitDate').onchange=resetAndLoad;
   await load();
 }
 async function reportsView(){
