@@ -23,9 +23,9 @@
  async function run(){
   if(state?.view!=='daily-profits'||!rules())return;
   for(const card of document.querySelectorAll('.profit-order-card[data-status="partial"]')){
-   if(card.dataset.singlePartialDone==='1'||card.dataset.manualCostOverride==='1')continue;
+   if(card.dataset.singlePartialDone==='1'||card.dataset.manualCostOverride==='1'||card.dataset.manualCost==='1')continue;
    const box=card.querySelector('.profit-original-notes');if(!box)continue;
-   const text=box.dataset.cleanText||box.innerText.replace(/^نص الطلب الأصلي:\s*/,''),result=infer(text);if(!result)continue;
+   const text=box.dataset.cleanText||box.textContent.replace(/^نص الطلب الأصلي:\s*/,''),result=infer(text);if(!result)continue;
    card.dataset.singlePartialDone='1';
    const items=card.querySelector('textarea');if(items&&!items.value.trim())items.value=`${result.model.name} عدد ${result.delivered}`;
    const cost=card.querySelector('.profit-cost');
@@ -38,7 +38,7 @@
     const amount=Number(card.querySelector('.profit-amount')?.value||0),fee=Number(card.querySelector('.profit-fee')?.value||0);
     await api('/orders/'+id+'/outcome',{method:'PUT',body:JSON.stringify({
      delivery_status:'partial',printed:Number(order.printed||0),delivered_amount:amount,delivery_fee:fee,
-     cash_collected:Math.max(0,amount-fee),cost_of_goods:result.cost,delivered_pieces:result.delivered,
+     cash_collected:Math.max(0,amount-fee),cost_of_goods:result.cost,partial_cost_reviewed:Number(order.partial_cost_reviewed||0),partial_received_items:order.partial_received_items||'',delivered_pieces:result.delivered,
      returned_pieces:result.returned,settlement_note:order.settlement_note||''
     })});
    }catch{card.dataset.singlePartialDone=''}

@@ -2400,7 +2400,7 @@ async function dailyProfitsView(){
 
   const recalc=()=>{
     const cards=[...document.querySelectorAll('.profit-order-card')];
-    let sales=0,costs=0,fees=0,pendingReview=0;
+    let sales=0,costs=0,fees=0,partialPending=0,modelPending=0;
     cards.forEach(card=>{
       const amount=Number(card.querySelector('.profit-amount').value||0);
       const cost=Number(card.querySelector('.profit-cost').value||0);
@@ -2408,12 +2408,16 @@ async function dailyProfitsView(){
       const net=amount-cost-fee;
       const incomplete=card.dataset.costIncomplete==='1';
       card.querySelector('.profit-net').textContent=incomplete?'غير مكتمل':money(net);
-      const reviewed=!incomplete&&(card.dataset.status!=='partial'||card.dataset.reviewed==='1');
+      const needsPartialReview=card.dataset.status==='partial'&&card.dataset.reviewed!=='1';
+      if(incomplete)modelPending++;
+      if(needsPartialReview)partialPending++;
+      const reviewed=!incomplete&&!needsPartialReview;
       card.classList.toggle('profit-review-pending',!reviewed);
-      if(!reviewed){pendingReview++;return}
+      if(!reviewed)return;
       sales+=amount;costs+=cost;fees+=fee;
     });
-    $('#profitSummary').innerHTML=`<div class="accounting-stats" style="margin:14px 0"><div><span>إجمالي الفواتير / المستلم</span><b>${money(sales)}</b></div><div><span>إجمالي كوست البضاعة</span><b>${money(costs)}</b></div><div><span>إجمالي أجور التوصيل</span><b>${money(fees)}</b></div><div><span>صافي الربح المعتمد</span><b>${money(sales-costs-fees)}</b></div></div>${pendingReview?`<div class="partial-summary-warning">⚠️ يوجد ${pendingReview} طلب لا يدخل الإجمالي حتى اكتمال تعريف الموديلات ومراجعة الكوست.</div>`:''}`;
+    const warnings=[partialPending?`<div class="partial-summary-warning">⚠️ يوجد ${partialPending} طلب تعديل قيمة بحاجة لمراجعة الكوست وحفظه.</div>`:'',modelPending?`<div class="partial-summary-warning">⚠️ يوجد ${modelPending} طلب فيه موديل غير معرّف ولا يدخل الإجمالي حتى تعريفه أو تجاهله.</div>`:''].join('');
+    $('#profitSummary').innerHTML=`<div class="accounting-stats" style="margin:14px 0"><div><span>إجمالي الفواتير / المستلم</span><b>${money(sales)}</b></div><div><span>إجمالي كوست البضاعة</span><b>${money(costs)}</b></div><div><span>إجمالي أجور التوصيل</span><b>${money(fees)}</b></div><div><span>صافي الربح المعتمد</span><b>${money(sales-costs-fees)}</b></div></div>${warnings}`;
   };
 
   const load=async()=>{
@@ -2494,6 +2498,8 @@ async function dailyProfitsView(){
       const fee=Number(card.querySelector('.profit-fee').value||0);
       const cost=Number(card.querySelector('.profit-cost').value||0);
       const partialItems=isPartial?(card.querySelector('.profit-partial-items')?.value||'').trim():'';
+      const cleanNote=String(o.settlement_note||'').replace(/\[MANUAL_COST:[^\]]+\]\s*/g,'').trim();
+      const settlementNote=isPartial?`[MANUAL_COST:${cost.toFixed(2)}]${cleanNote?' '+cleanNote:''}`:(o.settlement_note||'');
       if(isPartial&&!Number.isFinite(cost))return toast('أدخل كوست القطع المستلمة');
       btn.disabled=true;
       try{
@@ -2501,14 +2507,17 @@ async function dailyProfitsView(){
           delivery_status:o.delivery_status,printed:Number(o.printed||0),delivered_amount:amount,
           delivery_fee:fee,cash_collected:Math.max(0,amount-fee),cost_of_goods:cost,
           partial_cost_reviewed:isPartial?1:0,partial_received_items:partialItems,
-          delivered_pieces:Number(o.delivered_pieces||0),returned_pieces:Number(o.returned_pieces||0),settlement_note:o.settlement_note||''
+          delivered_pieces:Number(o.delivered_pieces||0),returned_pieces:Number(o.returned_pieces||0),settlement_note:settlementNote
         })});
         if(isPartial){
           card.dataset.reviewed='1';
+          card.dataset.manualCost='1';
+          card.dataset.manualCostOverride='1';
           o.partial_cost_reviewed=1;
           o.partial_received_items=partialItems;
           const badge=card.querySelector('.partial-review-badge');
           if(badge){badge.className='badge badge-ok partial-review-badge';badge.textContent='تمت مراجعة الكوست'}
+          btn.textContent='تم الاعتماد — حفظ أي تعديل';
         }
         toast(isPartial?'تم اعتماد حساب الطلب الجزئي':'تم حفظ حساب الطلب');
         recalc();
