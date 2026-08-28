@@ -1201,7 +1201,7 @@ async function newOrder(){
     ${stores.length?'':'<div class="store-warning">لا يوجد متجر مضاف بعد. أضف متجر أولاً حتى تحفظ الطلب.</div>'}
 
     <div class="smart-box">
-      <div class="field"><label>الصق الطلب هنا</label><textarea id="raw" class="textarea" placeholder="0772207993\nعلجون عرجان\n3 بلايز ريبوك\nالوزن 100\n15 شامل التوصيل"></textarea></div>
+      <div class="field"><label>الصق الطلب هنا</label><textarea id="raw" class="textarea" placeholder="0772207993\nعلجون عرجان\n3 بلايز ريبوك\nالوزن 100\n15 مع التوصيل"></textarea></div>
       <div class="smart-actions"><button id="parse" class="btn btn-accent">⚡ تعبئة تلقائية</button><button id="clearRaw" class="btn btn-outline">مسح</button></div>
     </div>
     <br>

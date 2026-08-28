@@ -100,7 +100,7 @@
    for(let i=0;i<quantities.length;i++){
     const start=quantities[i].index+quantities[i][0].length,end=i+1<quantities.length?quantities[i+1].index:line.length;
     let candidate=line.slice(start,end).replace(/^\s*و(?:\s+|$)/,'').replace(/\s+و\s*$/,'').trim();
-    candidate=candidate.split(/\s+(?:السعر|سعر|شامل|توصيل|وزن|مقاس|طول|هاتف|تلفون|رقم|عنوان)(?:\s|$)/)[0].trim();
+    candidate=candidate.replace(/\s*(?:مع|شامل)\s+التوصيل(?:\s|$).*$/,'').split(/\s+(?:السعر|سعر|شامل|توصيل|وزن|مقاس|طول|هاتف|تلفون|رقم|عنوان)(?:\s|$)/)[0].trim();
     if(!candidate||findAll(candidate).length||isIgnoredCandidate(candidate))continue;
     const words=candidate.split(/\s+/).filter(word=>!COLORS.has(word)&&!['لون','الوان','قطعه','قطع','حبه','حبات','اكس','اكسل','لارج','ميديوم','سمول','xl','xxl','xxxl'].includes(word));
     candidate=words.join(' ').trim();
