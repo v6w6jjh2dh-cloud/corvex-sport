@@ -1,0 +1,4 @@
+(()=>{
+ function run(){if(state?.view!=='daily-profits')return;document.querySelectorAll('.profit-order-card').forEach(card=>{const input=card.querySelector('.profit-cost');if(!input||input.dataset.manualCostBound==='1')return;input.dataset.manualCostBound='1';input.readOnly=false;input.disabled=false;input.style.pointerEvents='auto';input.addEventListener('focus',()=>{card.dataset.manualCostEditing='1'});input.addEventListener('input',()=>{card.dataset.manualCostOverride='1';card.dataset.manualCostEditing='1';card.dataset.v92CostKey=`manual:${input.value}`;card.dataset.offerPartialDone='1';card.dataset.singlePartialDone='1';});input.addEventListener('blur',()=>{delete card.dataset.manualCostEditing});});}
+ new MutationObserver(()=>setTimeout(run,30)).observe(document.documentElement,{childList:true,subtree:true});setInterval(run,500);run();
+})();
