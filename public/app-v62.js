@@ -2399,7 +2399,8 @@ async function dailyProfitsView(){
     </div>`;
 
   const recalc=()=>{
-    const cards=[...document.querySelectorAll('.profit-order-card')];
+    const activeSettlementId=$('#profitOrders')?.dataset.activeSettlementId||'';
+    const cards=[...document.querySelectorAll('.profit-order-card')].filter(card=>!activeSettlementId||String(card.dataset.settlementId||'')===String(activeSettlementId));
     let sales=0,costs=0,fees=0,partialPending=0,modelPending=0;
     cards.forEach(card=>{
       const amount=Number(card.querySelector('.profit-amount').value||0);
@@ -2443,6 +2444,7 @@ async function dailyProfitsView(){
           </div>`:''}
         <button class="btn btn-accent profit-save" data-id="${o.id}">${o.delivery_status==='partial'?'اعتماد وحفظ حساب الطلب الجزئي':'حفظ الحساب'}</button>
       </div>`).join('');
+    delete $('#profitOrders').dataset.activeSettlementId;
     $('#profitOrders').innerHTML=orders.length?cardsHtml+`<div class="actions" style="justify-content:center;margin-top:18px"><button id="profitAiAll" class="btn btn-primary" style="min-width:260px">✨ حساب كل الطلبات وجمع الإجماليات</button></div>`:'<div class="empty">لا توجد طلبات مسلّمة بهذا التاريخ</div>';
 
     const analyzeOne=async(card,o)=>{

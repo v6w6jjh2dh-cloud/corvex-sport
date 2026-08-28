@@ -1,7 +1,7 @@
 (()=>{
  let rendering=false,lastKey='';
  function removeAll(){document.querySelectorAll('#profitSettlementGroups').forEach((x,i)=>{if(i>0)x.remove()})}
- function showSettlement(cards,sid){cards.forEach(c=>c.style.display=String(c.dataset.settlementId||'')===String(sid)?'':'none')}
+ function showSettlement(cards,sid){cards.forEach(c=>c.style.display=String(c.dataset.settlementId||'')===String(sid)?'':'none');const orders=document.querySelector('#profitOrders');if(orders)orders.dataset.activeSettlementId=String(sid);const visible=cards.find(c=>String(c.dataset.settlementId||'')===String(sid));visible?.querySelector('input')?.dispatchEvent(new Event('input',{bubbles:true}));document.dispatchEvent(new CustomEvent('corvex:profit-settlement-changed',{detail:{settlementId:String(sid)}}))}
  async function render(force=false){
   if(state?.view!=='daily-profits')return;
   const summary=document.querySelector('#profitSummary'),date=document.querySelector('#profitDate')?.value,store=document.querySelector('#profitStore')?.value||'';
