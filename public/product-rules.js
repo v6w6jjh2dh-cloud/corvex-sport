@@ -32,7 +32,9 @@
  };
  const normalize=value=>normalizeDigitsSafe(value).toLowerCase().replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/ة/g,'ه').replace(/[ًٌٍَُِّْـ]/g,'').replace(/\s+/g,' ').trim();
  const COLORS=new Set(['اسود','ابيض','بني','زيتي','سكني','رمادي','سماوي','ازرق','كحلي','برتقالي','احمر','اخضر','بيج','رصاصي','نهدي','زهري','وردي','موف','بنفسجي']);
- const STOP_CONTEXT=/(?:وزن|مقاس|طول|تواصل|توصيل|شامل|السعر|سعر|دينار|هاتف|تلفون|موبايل|رقم|عنوان|ملاحظه|استرجاع|ارجاع|مرتجع)/i;
+ const STOP_CONTEXT=/(?:وزن|مقاس|قياس|طول|تواصل|توصيل|شامل|السعر|سعر|دينار|هاتف|تلفون|موبايل|رقم|عنوان|ملاحظه|استرجاع|ارجاع|مرتجع)/i;
+ const SIZE_CONTEXT=/(?:^|\s)(?:بلبس|بيلبس|يلبس|لبس|مقاس|قياس)(?:\s|$)/i;
+ const SIZE_WORDS=new Set(['اكس','اكسل','اكس لارج','دبل اكس','لارج','ميديوم','سمول','xl','xxl','xxxl']);
  const QUANTITY_LABEL=/(?:عدد|العدد|كميه|الكميه|تفصيل)\s*[:=\-]?\s*(\d{1,3})(?=\s|$)/i;
  const QUANTITY_UNIT=/(?:^|\s)(\d{1,3})\s*(?:قطعه|قطع|حبه|حبات|لون|الوان)(?=\s|$)/i;
 
@@ -89,6 +91,8 @@
   return colors||1;
  }
  const itemCost=(product,quantity)=>Number((Number(product?.cost||0)*Math.max(0,Number(quantity||0))).toFixed(2));
+ let ignoredPhrases=[];
+ function isIgnoredCandidate(candidate){const value=normalize(candidate);return SIZE_CONTEXT.test(value)||SIZE_WORDS.has(value)||ignoredPhrases.includes(value)}
  function unknownCandidates(text=''){
   const lines=String(text).split(/\n+/).map(line=>normalize(line)).filter(Boolean),unknown=[];
   for(const line of lines){
@@ -97,10 +101,10 @@
     const start=quantities[i].index+quantities[i][0].length,end=i+1<quantities.length?quantities[i+1].index:line.length;
     let candidate=line.slice(start,end).replace(/^\s*و\s*/,'').replace(/\s*و\s*$/,'').trim();
     candidate=candidate.split(/\s+(?:السعر|سعر|شامل|توصيل|وزن|مقاس|طول|هاتف|تلفون|رقم|عنوان)(?:\s|$)/)[0].trim();
-    if(!candidate||findAll(candidate).length)continue;
-    const words=candidate.split(/\s+/).filter(word=>!COLORS.has(word)&&!['لون','الوان','قطعه','قطع','حبه','حبات','لارج','ميديوم','سمول','xl','xxl','xxxl'].includes(word));
+    if(!candidate||findAll(candidate).length||isIgnoredCandidate(candidate))continue;
+    const words=candidate.split(/\s+/).filter(word=>!COLORS.has(word)&&!['لون','الوان','قطعه','قطع','حبه','حبات','اكس','اكسل','لارج','ميديوم','سمول','xl','xxl','xxxl'].includes(word));
     candidate=words.join(' ').trim();
-    if(candidate.length<2||STOP_CONTEXT.test(candidate)||/^\d+$/.test(candidate))continue;
+    if(candidate.length<2||STOP_CONTEXT.test(candidate)||isIgnoredCandidate(candidate)||/^\d+$/.test(candidate))continue;
     unknown.push(candidate);
    }
   }
@@ -120,10 +124,10 @@
 
  let remoteLoaded=false,remotePromise=null;
  const engine={
-  get products(){return products},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-28-v5',
+  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-28-v6',
   async loadRemote(force=false){
    if(remoteLoaded&&!force)return products;if(remotePromise)return remotePromise;
-   remotePromise=(async()=>{try{if(typeof api!=='function')return products;const data=await api('/profit-models');if(Array.isArray(data.models)&&data.models.length){products=data.models.filter(model=>model.active!==false).map(model=>({id:model.key||String(model.id),databaseId:Number(model.id),name:model.name,cost:Number(model.cost||0),aliases:Array.isArray(model.aliases)?model.aliases:[model.name],offers:model.offers||{},deliveryIncluded:Boolean(model.deliveryIncluded)}));engine.version=`db:${data.version||Date.now()}`;remoteLoaded=true}return products}catch{return products}finally{remotePromise=null}})();
+   remotePromise=(async()=>{try{if(typeof api!=='function')return products;const data=await api('/profit-models');ignoredPhrases=(data.ignored_phrases||[]).map(normalize).filter(Boolean);if(Array.isArray(data.models)&&data.models.length){products=data.models.filter(model=>model.active!==false).map(model=>({id:model.key||String(model.id),databaseId:Number(model.id),name:model.name,cost:Number(model.cost||0),aliases:Array.isArray(model.aliases)?model.aliases:[model.name],offers:model.offers||{},deliveryIncluded:Boolean(model.deliveryIncluded)}));engine.version=`db:${data.version||Date.now()}`;remoteLoaded=true}return products}catch{return products}finally{remotePromise=null}})();
    return remotePromise;
   }
  };

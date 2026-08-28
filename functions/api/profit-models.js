@@ -54,6 +54,12 @@ async function ensure(env){
   changed_by INTEGER,
   changed_at TEXT NOT NULL DEFAULT (datetime('now'))
  )`).run();
+ await env.DB.prepare(`CREATE TABLE IF NOT EXISTS profit_ignored_phrases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phrase TEXT NOT NULL UNIQUE,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+ )`).run();
  const count=await env.DB.prepare('SELECT COUNT(*) c FROM profit_models').first();
  if(Number(count?.c||0)===0){
   for(const [key,name,cost,aliases,offers,deliveryIncluded] of SEED_MODELS){
@@ -68,13 +74,20 @@ const cleanAliases=(value,name)=>{
  return [...new Set([name,...source].map(x=>String(x||'').trim()).filter(Boolean))].slice(0,80);
 };
 const rowOut=row=>{let aliases=[],offers={};try{aliases=JSON.parse(row.aliases_json||'[]')}catch{}try{offers=JSON.parse(row.offers_json||'{}')}catch{}return{id:Number(row.id),key:row.model_key,name:row.name,cost:Number(row.cost||0),aliases,offers,deliveryIncluded:Boolean(row.delivery_included),active:Boolean(row.active),updated_at:row.updated_at}};
-async function list(env){const rows=(await env.DB.prepare('SELECT * FROM profit_models ORDER BY active DESC,name ASC').all()).results||[];const stamp=rows.map(x=>`${x.id}:${x.updated_at}:${x.cost}:${x.active}`).join('|');return{models:rows.map(rowOut),version:stamp||'empty'}}
+async function list(env){const rows=(await env.DB.prepare('SELECT * FROM profit_models ORDER BY active DESC,name ASC').all()).results||[],ignored=(await env.DB.prepare('SELECT phrase FROM profit_ignored_phrases ORDER BY phrase ASC').all()).results||[];const phrases=ignored.map(x=>String(x.phrase||'')).filter(Boolean),stamp=rows.map(x=>`${x.id}:${x.updated_at}:${x.cost}:${x.active}`).join('|')+'#'+phrases.join('|');return{models:rows.map(rowOut),ignored_phrases:phrases,version:stamp||'empty'}}
 
 export async function onRequest({request,env}){
  const user=await auth(request,env);if(!await allowed(env,user))return json({error:'لا تملك صلاحية إدارة موديلات الأرباح'},403);
  await ensure(env);const method=request.method.toUpperCase();
  if(method==='GET')return json(await list(env));
  let body={};try{body=await request.json()}catch{return json({error:'بيانات غير صالحة'},400)}
+ if(method==='POST'&&body.action==='ignore'){
+  const phrase=String(body.phrase||'').trim().slice(0,120);if(phrase.length<2)return json({error:'العبارة غير صالحة'},400);
+  await env.DB.prepare('INSERT OR IGNORE INTO profit_ignored_phrases(phrase,created_by) VALUES(?,?)').bind(phrase,user.id).run();return json({ok:true,...(await list(env))});
+ }
+ if(method==='PUT'&&body.action==='unignore'){
+  const phrase=String(body.phrase||'').trim();await env.DB.prepare('DELETE FROM profit_ignored_phrases WHERE phrase=?').bind(phrase).run();return json({ok:true,...(await list(env))});
+ }
  const name=String(body.name||'').trim(),cost=Number(body.cost),aliases=cleanAliases(body.aliases,name);
  if(method==='POST'){
   if(!name)return json({error:'اسم الموديل مطلوب'},400);if(!Number.isFinite(cost)||cost<0)return json({error:'الكوست غير صحيح'},400);

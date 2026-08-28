@@ -5,7 +5,7 @@
  function showIncomplete(card,names){
   card.dataset.costIncomplete='1';card.classList.add('profit-cost-incomplete');let box=card.querySelector('.profit-unknown-models');
   if(!box){box=document.createElement('div');box.className='profit-unknown-models';const anchor=card.querySelector('.profit-original-notes');anchor?.parentNode.insertBefore(box,anchor)}
-  box.innerHTML=`<b>الكوست غير مكتمل</b><span>موديل غير معرّف: ${names.map(esc).join('، ')}</span><div>${names.map(name=>`<button type="button" class="btn btn-soft profit-define-model" data-model="${encodeURIComponent(name)}">تعريف ${esc(name)}</button>`).join('')}</div>`;
+  box.innerHTML=`<b>الكوست غير مكتمل</b><span>موديل غير معرّف: ${names.map(esc).join('، ')}</span><div>${names.map(name=>`<button type="button" class="btn btn-soft profit-define-model" data-model="${encodeURIComponent(name)}">تعريف ${esc(name)}</button><button type="button" class="btn btn-soft profit-ignore-model" data-model="${encodeURIComponent(name)}">ليست موديلًا — تجاهل</button>`).join('')}</div>`;
   card.querySelector('.profit-cost')?.dispatchEvent(new Event('input',{bubbles:true}));
  }
  function showBreakdown(card,items){let box=card.querySelector('.profit-cost-breakdown');if(!box){box=document.createElement('div');box.className='sub profit-cost-breakdown';const anchor=card.querySelector('.profit-original-notes');anchor?.parentNode.insertBefore(box,anchor)}box.textContent='تفصيل الكوست: '+items.map(item=>`${item.qty} ${item.name} = ${Number(item.cost).toFixed(2)}`).join(' + ')}

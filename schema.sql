@@ -102,6 +102,13 @@ CREATE TABLE IF NOT EXISTS profit_model_audit (
   changed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS profit_ignored_phrases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phrase TEXT NOT NULL UNIQUE,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_code ON orders(order_code);
 CREATE INDEX IF NOT EXISTS idx_orders_phone ON orders(phone);
 CREATE INDEX IF NOT EXISTS idx_orders_printed ON orders(printed);
@@ -110,3 +117,4 @@ CREATE INDEX IF NOT EXISTS idx_return_events_created_at ON return_events(created
 CREATE INDEX IF NOT EXISTS idx_return_items_return_id ON return_items(return_id);
 CREATE INDEX IF NOT EXISTS idx_profit_models_active ON profit_models(active);
 CREATE INDEX IF NOT EXISTS idx_profit_model_audit_model ON profit_model_audit(model_id);
+CREATE INDEX IF NOT EXISTS idx_profit_ignored_phrases_phrase ON profit_ignored_phrases(phrase);
