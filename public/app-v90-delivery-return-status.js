@@ -1,7 +1,8 @@
 (()=>{
  const oldMap=mapDeliveryCompanyStatus;
  mapDeliveryCompanyStatus=function(raw){
-  const n=normalizeArabic(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();
+ const n=normalizeArabic(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();
+  if((n.includes('تم التسليم')||n.includes('مسلم'))&&(n.includes('تعديل قيم')||n.includes('تعديل القيمه')||n.includes('تعديل القيمة')))return 'partial';
   if((n.includes('تم التسليم')||n.includes('مسلم'))&&n.includes('مرتجع')&&!n.includes('جزئي')&&!n.includes('جزء'))return 'refused_fee_paid';
   return oldMap(raw);
  };
@@ -14,9 +15,11 @@
    const i=Number(sel.dataset.i);if(!Number.isFinite(i))return;
    const amount=Number(document.querySelector(`.delivery-amount-choice[data-i="${i}"]`)?.value||0);
    const row=typeof previewRows!=='undefined'?previewRows[i]:null;
-   const raw=normalizeArabic(String(row?.raw_status||'')).toLowerCase();
+   const encoded=String(sel.dataset.rawStatus||''),rawText=encoded?decodeURIComponent(encoded):String(row?.raw_status||'');
+   const raw=normalizeArabic(rawText).toLowerCase();
    if(!raw.includes('مرتجع'))return;
-   if(Math.abs(amount)<0.001){sel.value='refused_no_fee';sel.dispatchEvent(new Event('change',{bubbles:true}));}
+   if((raw.includes('تعديل قيم')||raw.includes('تعديل القيمه')||raw.includes('تعديل القيمة'))&&amount>2.001){sel.value='partial';sel.dispatchEvent(new Event('change',{bubbles:true}));}
+   else if(Math.abs(amount)<0.001){sel.value='refused_no_fee';sel.dispatchEvent(new Event('change',{bubbles:true}));}
    else if(Math.abs(amount-2)<0.001){sel.value='refused_fee_paid';sel.dispatchEvent(new Event('change',{bubbles:true}));}
   });
  }

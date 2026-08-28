@@ -2237,6 +2237,9 @@ async function deliveryReconcileView(){
         <div><span>إجمالي الكشف</span><b>${summary.total||0}</b></div>
         <div class="ok"><span>مطابق مؤكد</span><b>${summary.matched||0}</b></div>
         <div class="warn"><span>رقم مكرر</span><b>${summary.duplicate||0}</b></div>
+        <div class="warn"><span>بحاجة مراجعة</span><b>${summary.review||0}</b></div>
+        <div><span>مسوّى سابقًا</span><b>${summary.already_settled||0}</b></div>
+        <div class="warn"><span>في متجر آخر</span><b>${summary.other_store||0}</b></div>
         <div class="bad"><span>غير موجود</span><b>${summary.unmatched||0}</b></div>
       </div>
 
@@ -2250,18 +2253,36 @@ async function deliveryReconcileView(){
           <tbody>
             ${previewRows.map((r,i)=>{
               let orderCell='—';
-              if(r.match_type==='matched'&&r.order){
+              const autoMatched=['matched','matched_partial'].includes(r.match_type);
+              const manualReview=['duplicate','review_amount','review_amount_higher'].includes(r.match_type);
+              if(autoMatched&&r.order){
                 orderCell=`#${r.order.order_code} • ${esc(r.order.recipient_name||'لا يوجد')}`;
-              }else if(r.match_type==='duplicate'){
+              }else if(manualReview){
                 orderCell=`<select class="select delivery-order-choice" data-i="${i}">
                   <option value="">اختر الطلب الصحيح...</option>
                   ${(r.candidates||[]).map(o=>`<option value="${o.id}">#${o.order_code} • ${esc(o.recipient_name||'لا يوجد')} • ${money(o.amount)}</option>`).join('')}
                 </select>`;
+              }else if(r.match_type==='already_settled'){
+                const o=(r.candidates||[])[0]||{};
+                orderCell=`#${esc(o.order_code||'—')} • ${esc(o.recipient_name||'لا يوجد')}<div class="sub">${esc(o.settlement_code||'كشف سابق')}</div>`;
+              }else if(r.match_type==='other_store'){
+                const stores=[...new Set((r.candidates||[]).map(o=>o.store_name).filter(Boolean))];
+                orderCell=`موجود في: ${esc(stores.join('، ')||'متجر آخر')}`;
               }
               const badge=r.match_type==='matched'
                 ?'<span class="match-badge match-ok">مطابق</span>'
+                :r.match_type==='matched_partial'
+                  ?'<span class="match-badge match-ok">مطابق — قيمة معدلة</span>'
                 :r.match_type==='duplicate'
                   ?'<span class="match-badge match-warn">مكرر</span>'
+                  :r.match_type==='review_amount'
+                    ?'<span class="match-badge match-warn">راجع اختلاف القيمة</span>'
+                    :r.match_type==='review_amount_higher'
+                      ?'<span class="match-badge match-warn">قيمة الكشف أكبر</span>'
+                      :r.match_type==='already_settled'
+                        ?'<span class="match-badge match-ok">مسوّى سابقًا</span>'
+                        :r.match_type==='other_store'
+                          ?'<span class="match-badge match-warn">موجود بمتجر آخر</span>'
                   :r.match_type==='date_mismatch'
                     ?'<span class="match-badge match-warn">تاريخ مختلف</span>'
                     :'<span class="match-badge match-bad">غير موجود</span>';
@@ -2273,7 +2294,7 @@ async function deliveryReconcileView(){
                 <td>${badge}</td>
                 <td>${orderCell}</td>
                 <td>${esc(r.raw_status||'')}</td>
-                <td><select class="select delivery-status-choice" data-i="${i}">${deliveryStatusOptions(r.status||'')}</select></td>
+                <td><select class="select delivery-status-choice" data-i="${i}" data-raw-status="${encodeURIComponent(r.raw_status||'')}">${deliveryStatusOptions(r.status||'')}</select></td>
                 <td><input class="input delivery-amount-choice" data-i="${i}" inputmode="decimal" value="${Number(r.amount||0)}"></td>
                 <td><input class="input delivery-fee-choice" data-i="${i}" inputmode="decimal" value="${Number(r.delivery_fee||0)}"></td>
                 <td><input class="input delivery-note-choice" data-i="${i}" value="${esc(r.note||'')}"></td>
@@ -2297,16 +2318,24 @@ async function deliveryReconcileView(){
 
     const rows=previewRows.map((r,i)=>{
       const manual=document.querySelector(`.delivery-order-choice[data-i="${i}"]`);
-      const orderId=r.match_type==='matched'?Number(r.order?.id||0):Number(manual?.value||0);
+      const automatic=['matched','matched_partial'].includes(r.match_type);
+      const orderId=automatic?Number(r.order?.id||0):Number(manual?.value||0);
       const status=document.querySelector(`.delivery-status-choice[data-i="${i}"]`)?.value||'';
       const amount=Number(document.querySelector(`.delivery-amount-choice[data-i="${i}"]`)?.value||0);
       const deliveryFee=Number(document.querySelector(`.delivery-fee-choice[data-i="${i}"]`)?.value||0);
       const note=document.querySelector(`.delivery-note-choice[data-i="${i}"]`)?.value||'';
-      return {order_id:orderId,phone:r.phone,status,amount,delivery_fee:deliveryFee,note,match_type:r.match_type};
+      let matchType=r.match_type;
+      if(orderId&&!automatic){
+        const selected=(r.candidates||[]).find(o=>Number(o.id)===orderId);
+        matchType=selected&&Math.abs(Math.abs(Number(selected.amount||0))-amount)<.01?'matched':'matched_partial';
+      }
+      return {order_id:orderId,phone:r.phone,status,amount,delivery_fee:deliveryFee,note,match_type:matchType,original_match_type:r.match_type};
     });
 
     const resolvable=rows.filter(r=>r.order_id);
+    const unresolved=rows.filter(r=>!r.order_id&&!['already_settled'].includes(r.original_match_type));
     const missingStatus=resolvable.filter(r=>!r.status);
+    if(unresolved.length)return toast(`يوجد ${unresolved.length} سطر غير محسوم. اختر الطلب الصحيح أو صحح المتجر قبل تسكير الكشف`);
     if(!resolvable.length)return toast('لا توجد طلبات مطابقة للاعتماد');
     const selectedIds=resolvable.map(r=>r.order_id);
     if(new Set(selectedIds).size!==selectedIds.length)return toast('تم اختيار نفس الطلب لأكثر من سطر؛ راجع الأرقام المكررة');
@@ -2316,9 +2345,10 @@ async function deliveryReconcileView(){
 
     try{
       const source=$('#deliveryFile').files?.[0]?.name||'كشف ملصوق';
+      const commitRows=rows.filter(r=>r.original_match_type!=='already_settled');
       const d=await api('/delivery-reconcile/commit',{
         method:'POST',
-        body:JSON.stringify({store_id:storeId,source_name:source,rows})
+        body:JSON.stringify({store_id:storeId,source_name:source,rows:commitRows})
       });
       const s=d.settlement;
       $('#deliveryPreview').innerHTML=`
