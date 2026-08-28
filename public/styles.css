@@ -1162,6 +1162,10 @@ html,body,#app,.shell{width:100%!important;max-width:100%!important;overflow-x:h
 .partial-cost-review .textarea{min-height:82px;background:#fff}
 .partial-review-badge{white-space:nowrap}
 .profit-original-notes{padding:10px 12px;border-radius:10px;background:#f7f9fb;color:#263746}
+@media(max-width:900px){
+  #profitOrders{overflow:visible!important}
+  .profit-order-card{box-shadow:0 4px 14px rgba(16,42,67,.07)!important}
+}
 
 /* Returns center */
 .return-live-pill{background:#e8f7f0!important;color:#08715a!important}

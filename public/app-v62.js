@@ -2419,7 +2419,7 @@ async function dailyProfitsView(){
     if($('#profitStore').value)p.set('store_id',$('#profitStore').value);
     const d=await api('/orders?'+p.toString()),orders=d.orders||[];
     const cardsHtml=orders.map(o=>`
-      <div class="card profit-order-card" data-id="${o.id}" data-status="${o.delivery_status}" data-reviewed="${o.delivery_status==='partial'?Number(o.partial_cost_reviewed||0):1}" style="margin:12px 0;padding:14px">
+      <div class="card profit-order-card" data-id="${o.id}" data-status="${o.delivery_status}" data-settlement-id="${Number(o.delivery_company_settlement_id||0)}" data-reviewed="${o.delivery_status==='partial'?Number(o.partial_cost_reviewed||0):1}" style="margin:12px 0;padding:14px">
         <div class="section-head"><div><b>#${o.order_code} — ${esc(o.store_name||'')}</b><div class="sub">${esc(o.recipient_name||'لا يوجد')} • ${esc(o.phone||'')} • ${deliveryBadge(o)}</div></div>${o.delivery_status==='partial'?`<span class="badge ${o.partial_cost_reviewed?'badge-ok':'badge-warn'} partial-review-badge">${o.partial_cost_reviewed?'تمت مراجعة الكوست':'الكوست بحاجة لمراجعة'}</span>`:`<button class="btn btn-soft profit-ai" data-id="${o.id}">✨ حساب الكوست بالذكاء</button>`}</div>
         <div class="grid form-grid" style="margin-top:12px">
           <div class="field"><label>المبلغ المستلم فعليًا</label><input class="input profit-amount" inputmode="decimal" value="${Number(o.delivered_amount||o.amount||0)}"></div>
@@ -2513,6 +2513,7 @@ async function dailyProfitsView(){
       }catch(e){toast(e.message)}finally{btn.disabled=false}
     });
     recalc();
+    document.dispatchEvent(new CustomEvent('corvex:profits-rendered',{detail:{date:$('#profitDate').value,store:$('#profitStore').value||''}}));
   };
   $('#loadProfits').onclick=load;$('#profitStore').onchange=load;$('#profitDate').onchange=load;
   await load();

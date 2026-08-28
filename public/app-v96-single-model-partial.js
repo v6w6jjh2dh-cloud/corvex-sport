@@ -45,6 +45,5 @@
   }
  }
 
- new MutationObserver(()=>setTimeout(run,80)).observe(document.documentElement,{childList:true,subtree:true});
- setInterval(run,1000);run();
+ document.addEventListener('corvex:profits-rendered',run);run();
 })();

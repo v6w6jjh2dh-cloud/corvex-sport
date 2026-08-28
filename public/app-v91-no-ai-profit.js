@@ -14,5 +14,5 @@
    if(btn&&!btn.dataset.localBound){btn.dataset.localBound='1';btn.textContent='حساب كوست القطع المكتوبة';btn.onclick=()=>{const text=card.querySelector('.profit-partial-items')?.value.trim()||'';if(!text)return toast('اكتب القطع التي تم تسليمها أولًا');const r=rules()?.calculateCost(text)||{found:0};if(!r.found)return toast('الموديل غير معرّف — أدخل الكوست يدويًا');card.querySelector('.profit-cost').value=r.cost.toFixed(2);card.querySelector('.profit-cost').dispatchEvent(new Event('input',{bubbles:true}));toast('تم حساب كوست القطع المكتوبة')};}
   });
  }
- new MutationObserver(()=>setTimeout(refresh,30)).observe(document.documentElement,{childList:true,subtree:true});setInterval(refresh,500);refresh();
+ document.addEventListener('corvex:profits-rendered',refresh);refresh();
 })();

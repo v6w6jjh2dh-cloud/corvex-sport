@@ -22,5 +22,5 @@
   };
  }
  function run(){if(state?.view!=='daily-profits')return;document.querySelectorAll('.profit-order-card').forEach(bind)}
- new MutationObserver(()=>setTimeout(run,30)).observe(document.documentElement,{childList:true,subtree:true});setInterval(run,500);run();
+ document.addEventListener('corvex:profits-rendered',run);run();
 })();

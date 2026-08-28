@@ -30,6 +30,5 @@
      };
    });
  }
- new MutationObserver(()=>setTimeout(bind,20)).observe(document.documentElement,{childList:true,subtree:true});
- setInterval(bind,500);bind();
+ document.addEventListener('corvex:profits-rendered',bind);bind();
 })();

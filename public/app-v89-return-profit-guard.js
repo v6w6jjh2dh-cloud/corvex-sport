@@ -11,5 +11,5 @@
    if(head&&!head.querySelector('.return-profit-badge'))head.insertAdjacentHTML('beforeend','<span class="badge badge-warn return-profit-badge">مرتجع — بدون حساب كوست بيع</span>');
   });
  }
- new MutationObserver(()=>setTimeout(apply,30)).observe(document.documentElement,{childList:true,subtree:true});setInterval(apply,700);apply();
+ document.addEventListener('corvex:profits-rendered',apply);apply();
 })();
