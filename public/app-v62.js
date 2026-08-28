@@ -2383,10 +2383,11 @@ function renderReportTable(orders){
 
 async function dailyProfitsView(){
   const c=$('#content');
+  await window.CORVEX_PRODUCT_RULES?.loadRemote?.();
   const stores=await getActiveStores();
   const today=new Date().toISOString().slice(0,10);
   c.innerHTML=`
-    <div class="page-title"><div><h1>الأرباح اليومية</h1><div class="sub">الطلب الجزئي لا يدخل الإجمالي قبل مراجعة كوست القطع المستلمة</div></div></div>
+    <div class="page-title"><div><h1>الأرباح اليومية</h1><div class="sub">الطلب الجزئي لا يدخل الإجمالي قبل مراجعة كوست القطع المستلمة</div></div><button type="button" id="profitModelsBtn" class="btn btn-soft">إدارة الموديلات والكوست</button></div>
     <div class="card">
       <div class="toolbar">
         <input id="profitDate" type="date" class="input" value="${today}">
@@ -2405,13 +2406,14 @@ async function dailyProfitsView(){
       const cost=Number(card.querySelector('.profit-cost').value||0);
       const fee=Number(card.querySelector('.profit-fee').value||0);
       const net=amount-cost-fee;
-      card.querySelector('.profit-net').textContent=money(net);
-      const reviewed=card.dataset.status!=='partial'||card.dataset.reviewed==='1';
+      const incomplete=card.dataset.costIncomplete==='1';
+      card.querySelector('.profit-net').textContent=incomplete?'غير مكتمل':money(net);
+      const reviewed=!incomplete&&(card.dataset.status!=='partial'||card.dataset.reviewed==='1');
       card.classList.toggle('profit-review-pending',!reviewed);
       if(!reviewed){pendingReview++;return}
       sales+=amount;costs+=cost;fees+=fee;
     });
-    $('#profitSummary').innerHTML=`<div class="accounting-stats" style="margin:14px 0"><div><span>إجمالي الفواتير / المستلم</span><b>${money(sales)}</b></div><div><span>إجمالي كوست البضاعة</span><b>${money(costs)}</b></div><div><span>إجمالي أجور التوصيل</span><b>${money(fees)}</b></div><div><span>صافي الربح المعتمد</span><b>${money(sales-costs-fees)}</b></div></div>${pendingReview?`<div class="partial-summary-warning">⚠️ يوجد ${pendingReview} طلب جزئي لا يدخل الإجمالي حتى مراجعة الكوست وحفظه.</div>`:''}`;
+    $('#profitSummary').innerHTML=`<div class="accounting-stats" style="margin:14px 0"><div><span>إجمالي الفواتير / المستلم</span><b>${money(sales)}</b></div><div><span>إجمالي كوست البضاعة</span><b>${money(costs)}</b></div><div><span>إجمالي أجور التوصيل</span><b>${money(fees)}</b></div><div><span>صافي الربح المعتمد</span><b>${money(sales-costs-fees)}</b></div></div>${pendingReview?`<div class="partial-summary-warning">⚠️ يوجد ${pendingReview} طلب لا يدخل الإجمالي حتى اكتمال تعريف الموديلات ومراجعة الكوست.</div>`:''}`;
   };
 
   const load=async()=>{
@@ -2419,7 +2421,7 @@ async function dailyProfitsView(){
     if($('#profitStore').value)p.set('store_id',$('#profitStore').value);
     const d=await api('/orders?'+p.toString()),orders=d.orders||[];
     const cardsHtml=orders.map(o=>`
-      <div class="card profit-order-card" data-id="${o.id}" data-status="${o.delivery_status}" data-settlement-id="${Number(o.delivery_company_settlement_id||0)}" data-reviewed="${o.delivery_status==='partial'?Number(o.partial_cost_reviewed||0):1}" style="margin:12px 0;padding:14px">
+      <div class="card profit-order-card" data-id="${o.id}" data-status="${o.delivery_status}" data-settlement-id="${Number(o.delivery_company_settlement_id||0)}" data-manual-cost="${/\[MANUAL_COST:[^\]]+\]/.test(String(o.settlement_note||''))?1:0}" data-reviewed="${o.delivery_status==='partial'?Number(o.partial_cost_reviewed||0):1}" style="margin:12px 0;padding:14px">
         <div class="section-head"><div><b>#${o.order_code} — ${esc(o.store_name||'')}</b><div class="sub">${esc(o.recipient_name||'لا يوجد')} • ${esc(o.phone||'')} • ${deliveryBadge(o)}</div></div>${o.delivery_status==='partial'?`<span class="badge ${o.partial_cost_reviewed?'badge-ok':'badge-warn'} partial-review-badge">${o.partial_cost_reviewed?'تمت مراجعة الكوست':'الكوست بحاجة لمراجعة'}</span>`:`<button class="btn btn-soft profit-ai" data-id="${o.id}">✨ حساب الكوست بالذكاء</button>`}</div>
         <div class="grid form-grid" style="margin-top:12px">
           <div class="field"><label>المبلغ المستلم فعليًا</label><input class="input profit-amount" inputmode="decimal" value="${Number(o.delivered_amount||o.amount||0)}"></div>

@@ -1,4 +1,5 @@
 (()=>{
+ function marker(value,note=''){const clean=String(note||'').replace(/\[MANUAL_COST:[^\]]+\]\s*/g,'').trim();return `[MANUAL_COST:${Number(value).toFixed(2)}]${clean?' '+clean:''}`}
  async function saveManualCost(card,newCost){
   const id=Number(card.dataset.id||0);if(!id)return;
   const input=card.querySelector('.profit-cost');const amount=Number(card.querySelector('.profit-amount')?.value||0),fee=Number(card.querySelector('.profit-fee')?.value||0);
@@ -6,7 +7,7 @@
   if(input){input.value=Number(newCost).toFixed(2);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));}
   try{
     const d=await api('/orders/'+id),o=d.order;
-    await api('/orders/'+id+'/outcome',{method:'PUT',body:JSON.stringify({delivery_status:o.delivery_status,printed:Number(o.printed||0),delivered_amount:amount,delivery_fee:fee,cash_collected:Math.max(0,amount-fee),cost_of_goods:Number(newCost),delivered_pieces:Number(o.delivered_pieces||0),returned_pieces:Number(o.returned_pieces||0),settlement_note:o.settlement_note||''})});
+    await api('/orders/'+id+'/outcome',{method:'PUT',body:JSON.stringify({delivery_status:o.delivery_status,printed:Number(o.printed||0),delivered_amount:amount,delivery_fee:fee,cash_collected:Math.max(0,amount-fee),cost_of_goods:Number(newCost),delivered_pieces:Number(o.delivered_pieces||0),returned_pieces:Number(o.returned_pieces||0),settlement_note:marker(newCost,o.settlement_note||'')})});card.dataset.manualCost='1';
     if(typeof toast==='function')toast('تم تعديل كوست الطلب');
   }catch(e){if(typeof toast==='function')toast(e.message||'تعذر حفظ الكوست')}
  }

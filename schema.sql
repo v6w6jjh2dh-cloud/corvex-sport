@@ -78,9 +78,35 @@ CREATE TABLE IF NOT EXISTS return_items (
   FOREIGN KEY(return_id) REFERENCES return_events(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS profit_models (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  model_key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  cost REAL NOT NULL DEFAULT 0,
+  aliases_json TEXT NOT NULL DEFAULT '[]',
+  offers_json TEXT NOT NULL DEFAULT '{}',
+  delivery_included INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS profit_model_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  model_id INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  before_json TEXT NOT NULL DEFAULT '',
+  after_json TEXT NOT NULL DEFAULT '',
+  changed_by INTEGER,
+  changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_code ON orders(order_code);
 CREATE INDEX IF NOT EXISTS idx_orders_phone ON orders(phone);
 CREATE INDEX IF NOT EXISTS idx_orders_printed ON orders(printed);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
 CREATE INDEX IF NOT EXISTS idx_return_events_created_at ON return_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_return_items_return_id ON return_items(return_id);
+CREATE INDEX IF NOT EXISTS idx_profit_models_active ON profit_models(active);
+CREATE INDEX IF NOT EXISTS idx_profit_model_audit_model ON profit_model_audit(model_id);
