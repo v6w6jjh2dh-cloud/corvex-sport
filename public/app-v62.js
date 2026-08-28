@@ -320,6 +320,11 @@ const PRIORITY_LOCAL_ALIASES = [
 
 function priorityLocalMatch(line){
   const n=normalizeArabic(String(line||''));
+  // Business grouping: Dead Sea and every explicit Ghor address belong to one
+  // operational governorate, regardless of the official north/south district.
+  if(phraseMatch(n,'بحر ميت')||phraseMatch(n,'البحر الميت')||/(?:^|\s)ال?اغوار(?:\s|$)/.test(n)){
+    return {governorate:'الأغوار',alias:phraseMatch(n,'البحر الميت')?'البحر الميت':(phraseMatch(n,'بحر ميت')?'بحر ميت':'الاغوار'),raw:String(line||'')};
+  }
   let best=null;
   for(const [gov,names] of PRIORITY_LOCAL_ALIASES){
     for(const raw of names){
