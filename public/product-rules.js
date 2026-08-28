@@ -12,6 +12,7 @@
   {id:'polo_plain',name:'بولو سادة',cost:2.8,aliases:[/ساده\s*بولو/i,/بولو\s*ساده/i],offers:{1:[5],2:[10]},deliveryIncluded:false},
   {id:'polo_knit',name:'بولو تريكو',cost:3.5,aliases:[/بولو\s*تريكو/i,/تريكو\s*بولو/i,/بولو\s*ترند/i],offers:{1:[5],2:[9],3:[15]},deliveryIncluded:false},
   {id:'turkish',name:'تركي',cost:2.7,aliases:[/بنطلون\s*تركي/i,/(?:^|\s)تركي(?:\s|$)/i],offers:{1:[5],2:[9],3:[15,16]},deliveryIncluded:false},
+  {id:'takyeef',name:'بنطلون تكيف',cost:3.5,aliases:[/(?:بنطلون\s*)?(?:تكيف|تكييف|يكتف|تكف)/i],offers:{},deliveryIncluded:false},
   {id:'cardigan',name:'كاردونيه',cost:3.5,aliases:[/كاردونيه/i,/بجامه\s*كاردونيه/i],offers:{1:[8],2:[14],3:[18]},deliveryIncluded:false},
   {id:'cotton_tee',name:'تيشيرت قطن',cost:3.3,aliases:[/تيش(?:رت|يرت)\s*قطن/i,/قطن\s*سبور/i],offers:{1:[7],2:[12],3:[15]},deliveryIncluded:false},
   {
@@ -91,5 +92,5 @@
   return{cost:Number(cost.toFixed(2)),items,found:items.length};
  }
 
- window.CORVEX_PRODUCT_RULES={products,normalize,matches,findAll,findOne,quantityFor,itemCost,calculateCost,version:'2026-08-28-v3'};
+ window.CORVEX_PRODUCT_RULES={products,normalize,matches,findAll,findOne,quantityFor,itemCost,calculateCost,version:'2026-08-28-v4'};
 })();
