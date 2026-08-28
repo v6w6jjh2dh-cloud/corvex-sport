@@ -1,7 +1,7 @@
 (()=>{
  const rules=()=>window.CORVEX_PRODUCT_RULES;
  const calc=text=>rules()?.calculateCost(text)||{cost:0,items:[],found:0};
- function clearIncomplete(card){delete card.dataset.costIncomplete;card.classList.remove('profit-cost-incomplete');card.querySelector('.profit-unknown-models')?.remove()}
+ function clearIncomplete(card){const wasIncomplete=card.dataset.costIncomplete==='1';delete card.dataset.costIncomplete;card.classList.remove('profit-cost-incomplete');card.querySelector('.profit-unknown-models')?.remove();if(wasIncomplete)card.querySelector('.profit-cost')?.dispatchEvent(new Event('input',{bubbles:true}))}
  function showIncomplete(card,names){
   card.dataset.costIncomplete='1';card.classList.add('profit-cost-incomplete');let box=card.querySelector('.profit-unknown-models');
   if(!box){box=document.createElement('div');box.className='profit-unknown-models';const anchor=card.querySelector('.profit-original-notes');anchor?.parentNode.insertBefore(box,anchor)}
@@ -21,5 +21,5 @@
  }
  let running=false,rerun=false;
  async function run(){if(running){rerun=true;return}if(state?.view!=='daily-profits'||!rules())return;running=true;try{await rules().loadRemote?.();for(const c of document.querySelectorAll('.profit-order-card'))await apply(c)}finally{running=false;if(rerun){rerun=false;run()}}}
- window.CORVEX_CALC_ORDER_COST=calc;document.addEventListener('corvex:profits-rendered',run);run();setTimeout(run,1200);
+ window.CORVEX_CALC_ORDER_COST=calc;window.CORVEX_CLEAR_PROFIT_INCOMPLETE=clearIncomplete;document.addEventListener('corvex:profits-rendered',run);run();setTimeout(run,1200);
 })();
