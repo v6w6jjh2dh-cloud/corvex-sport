@@ -64,13 +64,13 @@
  const findOne=text=>{const found=findAll(text);return found.length===1?found[0]:null};
 
  function explicitQuantity(text,product){
-  const value=normalize(text);let match=value.match(QUANTITY_LABEL)||value.match(QUANTITY_UNIT);
-  if(match)return Math.max(1,Number(match[1]));
+  const value=normalize(text);
   const productMatch=matchProduct(product,value);if(!productMatch)return 0;
-  const before=value.slice(0,productMatch.index),after=value.slice(productMatch.index+productMatch.length);
-  match=before.match(/(?:^|\s)(\d{1,3})\s*$/);
+  const lineMatches=findMatches(value),previous=[...lineMatches].reverse().find(item=>item.index<productMatch.index),next=lineMatches.find(item=>item.index>productMatch.index);
+  const before=value.slice(previous?previous.index+previous.length:0,productMatch.index),after=value.slice(productMatch.index+productMatch.length,next?next.index:value.length);
+  let match=before.match(/(?:^|\s)(?:عدد|العدد|كميه|الكميه|تفصيل)\s*[:=\-]?\s*(\d{1,3})\s*$/i)||before.match(/(?:^|\s)(\d{1,3})\s*(?:قطعه|قطع|حبه|حبات|لون|الوان)\s*$/i)||before.match(/(?:^|\s)(\d{1,3})\s*$/);
   if(match&&!STOP_CONTEXT.test(before.slice(Math.max(0,match.index-18),match.index)))return Math.max(1,Number(match[1]));
-  match=after.match(/^\s*(\d{1,3})(?=\s|$)/);
+  match=after.match(QUANTITY_LABEL)||after.match(QUANTITY_UNIT)||after.match(/^\s*(?:[+،,:=\-]\s*)?(\d{1,3})(?=\s|$)/);
   return match?Math.max(1,Number(match[1])):0;
  }
  function colorCount(text){
@@ -99,7 +99,7 @@
    const quantities=[...line.matchAll(/(?:^|\s)(?:عدد\s*)?(\d{1,3})\s*(?:قطعه|قطع|حبه|حبات|لون|الوان)?(?=\s|$)/g)];
    for(let i=0;i<quantities.length;i++){
     const start=quantities[i].index+quantities[i][0].length,end=i+1<quantities.length?quantities[i+1].index:line.length;
-    let candidate=line.slice(start,end).replace(/^\s*و\s*/,'').replace(/\s*و\s*$/,'').trim();
+    let candidate=line.slice(start,end).replace(/^\s*و(?:\s+|$)/,'').replace(/\s+و\s*$/,'').trim();
     candidate=candidate.split(/\s+(?:السعر|سعر|شامل|توصيل|وزن|مقاس|طول|هاتف|تلفون|رقم|عنوان)(?:\s|$)/)[0].trim();
     if(!candidate||findAll(candidate).length||isIgnoredCandidate(candidate))continue;
     const words=candidate.split(/\s+/).filter(word=>!COLORS.has(word)&&!['لون','الوان','قطعه','قطع','حبه','حبات','اكس','اكسل','لارج','ميديوم','سمول','xl','xxl','xxxl'].includes(word));
@@ -124,7 +124,7 @@
 
  let remoteLoaded=false,remotePromise=null;
  const engine={
-  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-28-v6',
+  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-28-v7',
   async loadRemote(force=false){
    if(remoteLoaded&&!force)return products;if(remotePromise)return remotePromise;
    remotePromise=(async()=>{try{if(typeof api!=='function')return products;const data=await api('/profit-models');ignoredPhrases=(data.ignored_phrases||[]).map(normalize).filter(Boolean);if(Array.isArray(data.models)&&data.models.length){products=data.models.filter(model=>model.active!==false).map(model=>({id:model.key||String(model.id),databaseId:Number(model.id),name:model.name,cost:Number(model.cost||0),aliases:Array.isArray(model.aliases)?model.aliases:[model.name],offers:model.offers||{},deliveryIncluded:Boolean(model.deliveryIncluded)}));engine.version=`db:${data.version||Date.now()}`;remoteLoaded=true}return products}catch{return products}finally{remotePromise=null}})();
