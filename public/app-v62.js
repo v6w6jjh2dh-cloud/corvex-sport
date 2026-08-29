@@ -2474,7 +2474,7 @@ async function dailyProfitsView(){
         orderSettlementId>0&&Number(o.profit_reviewed_settlement_id||0)===orderSettlementId
       );
       return `
-      <div class="card profit-order-card" data-id="${o.id}" data-status="${o.delivery_status}" data-settlement-id="${orderSettlementId}" data-manual-cost="${/\[MANUAL_COST:[^\]]+\]/.test(String(o.settlement_note||''))?1:0}" data-reviewed="${partialReviewed?1:0}" style="margin:12px 0;padding:14px">
+      <div class="card profit-order-card" data-id="${o.id}" data-status="${o.delivery_status}" data-stored-cost="${Number(o.cost_of_goods||0)}" data-settlement-id="${orderSettlementId}" data-manual-cost="${/\[MANUAL_COST:[^\]]+\]/.test(String(o.settlement_note||''))?1:0}" data-reviewed="${partialReviewed?1:0}" style="margin:12px 0;padding:14px">
         <div class="section-head"><div><b>#${o.order_code} — ${esc(o.store_name||'')}</b><div class="sub">${esc(o.recipient_name||'لا يوجد')} • ${esc(o.phone||'')} • ${deliveryBadge(o)}</div></div>${o.delivery_status==='partial'?`<span class="badge ${partialReviewed?'badge-ok':'badge-warn'} partial-review-badge">${partialReviewed?'تمت مراجعة الكوست':'الكوست بحاجة لمراجعة'}</span>`:`<button class="btn btn-soft profit-ai" data-id="${o.id}">✨ حساب الكوست بالذكاء</button>`}</div>
         <div class="grid form-grid" style="margin-top:12px">
           <div class="field"><label>المبلغ المستلم فعليًا</label><input class="input profit-amount" inputmode="decimal" value="${Number(o.delivered_amount||o.amount||0)}"></div>
