@@ -140,6 +140,16 @@ async function ensurePartialProfitColumns(env) {
         AND delivery_company_settlement_id IS NOT NULL
         AND settlement_note LIKE '%[MANUAL_COST:%'`).run();
   }
+  // Older delivery imports classified every "delivered and returned" row as
+  // fee-only refusal. A collected merchandise amount means partial delivery.
+  await env.DB.prepare(`UPDATE orders SET
+    delivery_status='partial',
+    partial_cost_reviewed=0,
+    partial_received_items='',
+    updated_at=datetime('now')
+    WHERE delivery_company_settled=1
+      AND delivery_status='refused_fee_paid'
+      AND COALESCE(delivered_amount,0)>COALESCE(delivery_fee,0)+0.001`).run();
 }
 
 async function ensureOrderDepartures(env){

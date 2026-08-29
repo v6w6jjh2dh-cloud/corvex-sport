@@ -2,8 +2,7 @@
  const oldMap=mapDeliveryCompanyStatus;
  mapDeliveryCompanyStatus=function(raw){
  const n=normalizeArabic(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();
-  if((n.includes('تم التسليم')||n.includes('مسلم'))&&(n.includes('تعديل قيم')||n.includes('تعديل القيمه')||n.includes('تعديل القيمة')))return 'partial';
-  if((n.includes('تم التسليم')||n.includes('مسلم'))&&n.includes('مرتجع')&&!n.includes('جزئي')&&!n.includes('جزء'))return 'refused_fee_paid';
+  if(n.includes('مرتجع'))return 'partial';
   return oldMap(raw);
  };
  // After report rows are rendered, distinguish returned rows by final amount:
@@ -14,13 +13,14 @@
   document.querySelectorAll('.delivery-status-choice').forEach(sel=>{
    const i=Number(sel.dataset.i);if(!Number.isFinite(i))return;
    const amount=Number(document.querySelector(`.delivery-amount-choice[data-i="${i}"]`)?.value||0);
+   const fee=Number(document.querySelector(`.delivery-fee-choice[data-i="${i}"]`)?.value||0);
+   const net=Number(document.querySelector(`.delivery-net-choice[data-i="${i}"]`)?.value||0);
    const row=typeof previewRows!=='undefined'?previewRows[i]:null;
    const encoded=String(sel.dataset.rawStatus||''),rawText=encoded?decodeURIComponent(encoded):String(row?.raw_status||'');
    const raw=normalizeArabic(rawText).toLowerCase();
    if(!raw.includes('مرتجع'))return;
-   if((raw.includes('تعديل قيم')||raw.includes('تعديل القيمه')||raw.includes('تعديل القيمة'))&&amount>2.001){sel.value='partial';sel.dispatchEvent(new Event('change',{bubbles:true}));}
-   else if(Math.abs(amount)<0.001){sel.value='refused_no_fee';sel.dispatchEvent(new Event('change',{bubbles:true}));}
-   else if(Math.abs(amount-2)<0.001){sel.value='refused_fee_paid';sel.dispatchEvent(new Event('change',{bubbles:true}));}
+   const target=net<-.001||amount<.001?'refused_no_fee':Math.abs(net)<.001||amount<=fee+.001?'refused_fee_paid':'partial';
+   if(sel.value!==target){sel.value=target;sel.dispatchEvent(new Event('change',{bubbles:true}));}
   });
  }
  new MutationObserver(()=>setTimeout(fixReturnAmounts,40)).observe(document.documentElement,{childList:true,subtree:true});setInterval(fixReturnAmounts,500);

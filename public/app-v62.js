@@ -2068,6 +2068,17 @@ function mapDeliveryCompanyStatus(raw){
   return '';
 }
 
+function deliveryStatusFromStatement(raw,mapped,amount,fee,netAmount,hasNet){
+  const n=normalizeArabic(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();
+  if(!n.includes('مرتجع'))return mapped;
+  if(n.includes('ملغي')||n.includes('الغاء')||n.includes('إلغاء')||n.includes('cancel'))return 'canceled_before_arrival';
+  const price=Number(amount||0),deliveryFee=Math.max(0,Number(fee||0));
+  const net=hasNet?Number(netAmount||0):price-deliveryFee;
+  if(net<-.001||price<.001)return 'refused_no_fee';
+  if(Math.abs(net)<.001||price<=deliveryFee+.001)return 'refused_fee_paid';
+  return 'partial';
+}
+
 function deliveryStatusOptions(selected=''){
   return [
     ['','اختر الحالة'],
@@ -2213,17 +2224,25 @@ async function deliveryReconcileView(){
     if(!phoneCol)return toast('حدد عمود رقم الهاتف');
     if(!statusCol)return toast('حدد عمود الحالة');
 
-    const rows=parsed.rows.map(r=>({
-      phone:r[phoneCol]||'',
-      shipment_date:shipmentDateCol?deliveryPdfDate(r[shipmentDateCol]||''):'',
-      status:r.__mapped_status||mapDeliveryCompanyStatus(r[statusCol]),
-      raw_status:r[statusCol]||'',
-      amount:amountCol?Number(String(r[amountCol]||'0').replace(/[^\d.\-]/g,''))||0:0,
-      delivery_fee:feeCol?Number(String(r[feeCol]||'0').replace(/[^\d.\-]/g,''))||0:0,
-      net_amount:netCol?Number(String(r[netCol]||'0').replace(/[^\d.\-]/g,''))||0:null,
-      has_net:Boolean(netCol),
-      note:noteCol?r[noteCol]||'':''
-    }));
+    const rows=parsed.rows.map(r=>{
+      const rawStatus=r[statusCol]||'';
+      const amount=amountCol?Number(String(r[amountCol]||'0').replace(/[^\d.\-]/g,''))||0:0;
+      const deliveryFee=feeCol?Number(String(r[feeCol]||'0').replace(/[^\d.\-]/g,''))||0:0;
+      const netAmount=netCol?Number(String(r[netCol]||'0').replace(/[^\d.\-]/g,''))||0:null;
+      const hasNet=Boolean(netCol);
+      const mapped=r.__mapped_status||mapDeliveryCompanyStatus(rawStatus);
+      return {
+        phone:r[phoneCol]||'',
+        shipment_date:shipmentDateCol?deliveryPdfDate(r[shipmentDateCol]||''):'',
+        status:deliveryStatusFromStatement(rawStatus,mapped,amount,deliveryFee,netAmount,hasNet),
+        raw_status:rawStatus,
+        amount,
+        delivery_fee:deliveryFee,
+        net_amount:netAmount,
+        has_net:hasNet,
+        note:noteCol?r[noteCol]||'':''
+      };
+    });
 
     try{
       const d=await api('/delivery-reconcile/preview',{

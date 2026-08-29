@@ -60,7 +60,7 @@
 
   deliveryBadge=function(o){
     const s=o.delivery_status||'pending';
-    if(CANCELLED.has(s))return `<span class="badge badge-danger cancel-main" title="${esc(STATUS_DETAIL[s]||'ملغي')}">ملغي</span>`;
+    if(CANCELLED.has(s))return `<span class="badge badge-danger cancel-main">${esc(STATUS_DETAIL[s]||'ملغي')}</span>`;
     const html=originalDeliveryBadge(o);
     const stale=s==='pending'&&((Date.now()-new Date(String(o.first_printed_at||o.created_at||'').replace(' ','T')+'Z').getTime())/86400000)>=3;
     return html+(stale?'<span class="stale-chip">معلق +3 أيام</span>':'');
