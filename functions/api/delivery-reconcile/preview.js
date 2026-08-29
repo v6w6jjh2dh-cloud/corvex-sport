@@ -88,15 +88,15 @@ export async function onRequestPost({request,env}){
   const returnStatus=['refused_fee_paid','refused_no_fee','canceled_before_arrival'].includes(status);
   let chosen=null,type='';
 
-  if(returnStatus){
-   const dated=nearDate(available),pool=dated.length?dated:available;
-   if(pool.length===1){chosen=pool[0];type=Math.abs(Math.abs(Number(chosen.amount||0))-amount)<.01?'matched':'matched_partial'}
-   else{duplicate++;result.push({...common,match_type:'duplicate',candidates:pool});continue}
-  }else if(exact.length===1){chosen=exact[0];type='matched'}
+  if(exact.length===1){chosen=exact[0];type='matched'}
   else if(exact.length>1){
    const dated=nearDate(exact);
    if(dated.length===1){chosen=dated[0];type='matched'}
    else{duplicate++;result.push({...common,match_type:'duplicate',candidates:exact});continue}
+  }else if(returnStatus){
+   const dated=nearDate(available),pool=dated.length?dated:available;
+   if(pool.length===1){chosen=pool[0];type=Math.abs(Math.abs(Number(chosen.amount||0))-amount)<.01?'matched':'matched_partial'}
+   else{duplicate++;result.push({...common,match_type:'duplicate',candidates:pool});continue}
   }else{
    const lower=available.filter(order=>amount>0&&amount<Math.abs(Number(order.amount||0)));
    const dated=nearDate(lower);

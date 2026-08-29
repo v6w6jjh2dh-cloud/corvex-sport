@@ -2356,9 +2356,9 @@ async function deliveryReconcileView(){
     });
 
     const resolvable=rows.filter(r=>r.order_id);
-    const unresolved=rows.filter(r=>!r.order_id&&!['already_settled'].includes(r.original_match_type));
+    const unresolved=rows.filter(r=>!r.order_id&&['duplicate','review_amount','review_amount_higher','other_store'].includes(r.original_match_type));
     const missingStatus=resolvable.filter(r=>!r.status);
-    if(unresolved.length)return toast(`يوجد ${unresolved.length} سطر غير محسوم. اختر الطلب الصحيح أو صحح المتجر قبل تسكير الكشف`);
+    if(unresolved.length)return toast(`يوجد ${unresolved.length} سطر بحاجة اختيار طلب أو تصحيح المتجر قبل تسكير الكشف`);
     if(!resolvable.length)return toast('لا توجد طلبات مطابقة للاعتماد');
     const selectedIds=resolvable.map(r=>r.order_id);
     if(new Set(selectedIds).size!==selectedIds.length)return toast('تم اختيار نفس الطلب لأكثر من سطر؛ راجع الأرقام المكررة');
