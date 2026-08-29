@@ -142,6 +142,21 @@ async function ensurePartialProfitColumns(env) {
   }
 }
 
+async function ensureOrderDepartures(env){
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS order_departures (
+    order_id INTEGER PRIMARY KEY,
+    store_id INTEGER,
+    first_batch_id INTEGER,
+    departed_at TEXT NOT NULL,
+    FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY(first_batch_id) REFERENCES print_batches(id) ON DELETE SET NULL
+  )`).run();
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_order_departures_date_store ON order_departures(departed_at,store_id)').run();
+  // One-time-safe migration for every order printed before this ledger existed.
+  await env.DB.prepare(`INSERT OR IGNORE INTO order_departures(order_id,store_id,departed_at)
+    SELECT id,store_id,first_printed_at FROM orders WHERE first_printed_at IS NOT NULL`).run();
+}
+
 async function ensureReturnsSchema(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS return_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -559,12 +574,13 @@ export async function onRequest(context) {
     if(path.startsWith('/returns')&&!permitted('returns'))return json({error:'لا تملك صلاحية مركز المرتجعات'},403);
 
     if (path === '/dashboard' && method === 'GET') {
+      await ensureOrderDepartures(env);
       const stats = await env.DB.prepare(`SELECT
         COUNT(*) total,
         SUM(CASE WHEN printed=0 THEN 1 ELSE 0 END) unprinted,
         SUM(CASE WHEN printed=1 THEN 1 ELSE 0 END) printed,
         SUM(CASE WHEN date(created_at)=date('now') THEN 1 ELSE 0 END) today,
-        COUNT(DISTINCT CASE WHEN date(first_printed_at,'+3 hours')=date('now','+3 hours') THEN id END) outgoing_today,
+        (SELECT COUNT(*) FROM order_departures od WHERE date(od.departed_at,'+3 hours')=date('now','+3 hours')) outgoing_today,
         SUM(CASE WHEN delivery_status='delivered' THEN 1 ELSE 0 END) delivered,
         SUM(CASE WHEN delivery_status='delivered_adjusted' THEN 1 ELSE 0 END) delivered_adjusted,
         SUM(CASE WHEN delivery_status='partial' THEN 1 ELSE 0 END) partial,
@@ -583,12 +599,12 @@ export async function onRequest(context) {
       const storeRows = await env.DB.prepare(`SELECT
         s.id store_id,
         s.name store_name,
-        COUNT(DISTINCT o.id) outgoing_count
+        COUNT(od.order_id) outgoing_count
         FROM stores s
-        LEFT JOIN orders o ON o.store_id=s.id AND date(o.first_printed_at,'+3 hours')=date('now','+3 hours')
+        LEFT JOIN order_departures od ON od.store_id=s.id AND date(od.departed_at,'+3 hours')=date('now','+3 hours')
         WHERE s.is_active=1
         GROUP BY s.id,s.name
-        HAVING COUNT(DISTINCT o.id) > 0
+        HAVING COUNT(od.order_id) > 0
         ORDER BY outgoing_count DESC,s.name ASC`).all();
 
       return json({
@@ -603,28 +619,29 @@ export async function onRequest(context) {
 
 
     if(path==='/outgoing-report'&&method==='GET'){
+      await ensureOrderDepartures(env);
       const from=(url.searchParams.get('from_date')||'').trim();
       const to=(url.searchParams.get('to_date')||'').trim();
       const storeId=Number(url.searchParams.get('store_id')||0);
-      const firstPrintDateExpr="date(o.first_printed_at,'+3 hours')";
-      const where=["o.first_printed_at IS NOT NULL"];
+      const firstPrintDateExpr="date(od.departed_at,'+3 hours')";
+      const where=['1=1'];
       const params=[];
       if(from){where.push(`${firstPrintDateExpr}>=date(?)`);params.push(from)}
       if(to){where.push(`${firstPrintDateExpr}<=date(?)`);params.push(to)}
-      if(storeId){where.push("o.store_id=?");params.push(storeId)}
+      if(storeId){where.push("od.store_id=?");params.push(storeId)}
 
       const rows=await env.DB.prepare(`SELECT
         ${firstPrintDateExpr} print_date,
-        o.store_id,
+        od.store_id,
         s.name store_name,
-        COUNT(DISTINCT o.id) orders_count
-        FROM orders o
-        LEFT JOIN stores s ON s.id=o.store_id
+        COUNT(od.order_id) orders_count
+        FROM order_departures od
+        LEFT JOIN stores s ON s.id=od.store_id
         WHERE ${where.join(' AND ')}
-        GROUP BY ${firstPrintDateExpr},o.store_id,s.name
+        GROUP BY ${firstPrintDateExpr},od.store_id,s.name
         ORDER BY print_date DESC,orders_count DESC`).bind(...params).all();
 
-      const total=await env.DB.prepare(`SELECT COUNT(DISTINCT o.id) c FROM orders o WHERE ${where.join(' AND ')}`).bind(...params).first();
+      const total=await env.DB.prepare(`SELECT COUNT(*) c FROM order_departures od WHERE ${where.join(' AND ')}`).bind(...params).first();
 
       return json({rows:rows.results||[],total:Number(total?.c||0)});
     }
@@ -1700,6 +1717,7 @@ export async function onRequest(context) {
     }
 
     if (path === '/print-batches' && method === 'POST') {
+      await ensureOrderDepartures(env);
       const b = await readBody(request);
       const ids = Array.isArray(b.order_ids) ? [...new Set(b.order_ids.map(Number).filter(Boolean))] : [];
       if (!ids.length) return json({error:'حدد طلبات للطباعة'},400);
@@ -1719,6 +1737,8 @@ export async function onRequest(context) {
 
       for (let i=0;i<orders.length;i++) {
         await env.DB.prepare('INSERT INTO print_batch_orders(batch_id,order_id,position) VALUES(?,?,?)').bind(batchId,orders[i].id,i+1).run();
+        await env.DB.prepare(`INSERT OR IGNORE INTO order_departures(order_id,store_id,first_batch_id,departed_at)
+          VALUES(?,?,?,datetime('now'))`).bind(orders[i].id,storeId,batchId).run();
         await env.DB.prepare(`UPDATE orders SET printed=1, print_count=print_count+1,
           first_printed_at=COALESCE(first_printed_at,datetime('now')), last_printed_at=datetime('now') WHERE id=?`).bind(orders[i].id).run();
       }

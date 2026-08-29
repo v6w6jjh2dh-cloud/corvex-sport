@@ -60,6 +60,17 @@ CREATE TABLE IF NOT EXISTS print_batch_orders (
   FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS order_departures (
+  order_id INTEGER PRIMARY KEY,
+  store_id INTEGER,
+  first_batch_id INTEGER,
+  departed_at TEXT NOT NULL,
+  FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  FOREIGN KEY(first_batch_id) REFERENCES print_batches(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_departures_date_store ON order_departures(departed_at, store_id);
+
 CREATE TABLE IF NOT EXISTS return_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   order_id INTEGER NOT NULL UNIQUE,
