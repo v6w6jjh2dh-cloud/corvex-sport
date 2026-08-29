@@ -1995,7 +1995,8 @@ async function parseDeliveryPdfFile(file){
     }
   }
   if(!rows.length)throw new Error('لم أجد أرقام هواتف قابلة للقراءة داخل ملف PDF');
-  return {headers:['رقم الهاتف','تاريخ الشحنة','الحالة','السعر','أجور التوصيل','ملاحظة'],rows};
+  rows.forEach(row=>row['الصافي']=row.__cash);
+  return {headers:['رقم الهاتف','تاريخ الشحنة','الحالة','السعر','أجور التوصيل','الصافي','ملاحظة'],rows};
 }
 
 function parseDeliveryDelimitedText(text){
@@ -2044,10 +2045,12 @@ function deliveryHeaderGuess(headers,kind){
     status:['حاله','الحاله','الحالة','status','result','نتيجه','نتيجة'],
     amount:['سعر','السعر','مبلغ','القيمه','القيمة','تحصيل','المحصل','cash','amount','cod','price'],
     fee:['اجور التوصيل','أجور التوصيل','توصيل','delivery fee','fee'],
+    net:['الصافي','صافي','الصافى','net amount','net'],
     note:['ملاحظه','ملاحظات','note','notes','سبب','reason']
   };
   const list=tests[kind]||[];
-  const found=hs.find(x=>list.some(k=>x.n.includes(normalizeArabic(k).toLowerCase())));
+  const pool=kind==='amount'?hs.filter(x=>!x.n.includes('صافي')&&!x.n.includes('صافى')&&!x.n.includes('net')):hs;
+  const found=pool.find(x=>list.some(k=>x.n.includes(normalizeArabic(k).toLowerCase())));
   return found?.raw||'';
 }
 
@@ -2148,6 +2151,7 @@ async function deliveryReconcileView(){
     const status=deliveryHeaderGuess(parsed.headers,'status');
     const amount=deliveryHeaderGuess(parsed.headers,'amount');
     const fee=deliveryHeaderGuess(parsed.headers,'fee');
+    const net=deliveryHeaderGuess(parsed.headers,'net');
     const note=deliveryHeaderGuess(parsed.headers,'note');
 
     $('#deliveryMapping').style.display='block';
@@ -2160,6 +2164,7 @@ async function deliveryReconcileView(){
           <div class="field"><label>الحالة *</label><select id="mapStatus" class="select">${options(status)}</select></div>
           <div class="field"><label>السعر في الكشف</label><select id="mapAmount" class="select">${options(amount)}</select></div>
           <div class="field"><label>أجور التوصيل</label><select id="mapFee" class="select">${options(fee)}</select></div>
+          <div class="field"><label>الصافي</label><select id="mapNet" class="select">${options(net)}</select></div>
           <div class="field"><label>الملاحظات</label><select id="mapNote" class="select">${options(note)}</select></div>
         </div>
         <div class="sub">تم قراءة ${parsed.rows.length} صف. إذا لم يتعرف النظام على اسم العمود، اختاره يدويًا.</div>
@@ -2202,6 +2207,7 @@ async function deliveryReconcileView(){
     const statusCol=decodeURIComponent($('#mapStatus').value||'');
     const amountCol=decodeURIComponent($('#mapAmount').value||'');
     const feeCol=decodeURIComponent($('#mapFee').value||'');
+    const netCol=decodeURIComponent($('#mapNet').value||'');
     const noteCol=decodeURIComponent($('#mapNote').value||'');
 
     if(!phoneCol)return toast('حدد عمود رقم الهاتف');
@@ -2214,6 +2220,8 @@ async function deliveryReconcileView(){
       raw_status:r[statusCol]||'',
       amount:amountCol?Number(String(r[amountCol]||'0').replace(/[^\d.\-]/g,''))||0:0,
       delivery_fee:feeCol?Number(String(r[feeCol]||'0').replace(/[^\d.\-]/g,''))||0:0,
+      net_amount:netCol?Number(String(r[netCol]||'0').replace(/[^\d.\-]/g,''))||0:null,
+      has_net:Boolean(netCol),
       note:noteCol?r[noteCol]||'':''
     }));
 
@@ -2223,7 +2231,7 @@ async function deliveryReconcileView(){
         body:JSON.stringify({store_id:storeId,rows})
       });
 
-      previewRows=(d.rows||[]).map((x,i)=>({...x,raw_status:rows[i]?.raw_status||'',raw_date:rows[i]?.shipment_date||'',status:rows[i]?.status||'',delivery_fee:Number(x.delivery_fee??rows[i]?.delivery_fee??0)}));
+      previewRows=(d.rows||[]).map((x,i)=>({...x,raw_status:rows[i]?.raw_status||'',raw_date:rows[i]?.shipment_date||'',status:rows[i]?.status||'',delivery_fee:Number(x.delivery_fee??rows[i]?.delivery_fee??0),net_amount:x.has_net?Number(x.net_amount??0):Number(x.amount||0)-Number(x.delivery_fee||0),has_net:Boolean(x.has_net)}));
       const settlementRank=row=>{
         const special=row.status==='partial'||row.status==='delivered_adjusted'||/(مرتجع|جزئي|جزء|تعديل قيم)/.test(normalizeArabic(row.raw_status||''));
         if(row.match_type==='matched')return special?1:0;
@@ -2253,7 +2261,7 @@ async function deliveryReconcileView(){
       <div class="table-wrap">
         <table class="table delivery-preview-table">
           <thead>
-            <tr><th>#</th><th>الهاتف</th><th>تاريخ الشحنة</th><th>المطابقة</th><th>الطلب</th><th>حالة الكشف</th><th>الحالة المعتمدة</th><th>السعر</th><th>أجور التوصيل</th><th>ملاحظة</th></tr>
+            <tr><th>#</th><th>الهاتف</th><th>تاريخ الشحنة</th><th>المطابقة</th><th>الطلب</th><th>حالة الكشف</th><th>الحالة المعتمدة</th><th>السعر</th><th>أجور التوصيل</th><th>الصافي</th><th>ملاحظة</th></tr>
           </thead>
           <tbody>
             ${previewRows.map((r,i)=>{
@@ -2302,6 +2310,7 @@ async function deliveryReconcileView(){
                 <td><select class="select delivery-status-choice" data-i="${i}" data-raw-status="${encodeURIComponent(r.raw_status||'')}">${deliveryStatusOptions(r.status||'')}</select></td>
                 <td><input class="input delivery-amount-choice" data-i="${i}" inputmode="decimal" value="${Number(r.amount||0)}"></td>
                 <td><input class="input delivery-fee-choice" data-i="${i}" inputmode="decimal" value="${Number(r.delivery_fee||0)}"></td>
+                <td><input class="input delivery-net-choice" data-i="${i}" inputmode="decimal" value="${Number(r.net_amount||0)}"></td>
                 <td><input class="input delivery-note-choice" data-i="${i}" value="${esc(r.note||'')}"></td>
               </tr>`;
             }).join('')}
@@ -2315,6 +2324,14 @@ async function deliveryReconcileView(){
       </div>`;
 
     $('#commitDeliveryReport').onclick=commitReport;
+    document.querySelectorAll('.delivery-amount-choice,.delivery-fee-choice').forEach(input=>input.addEventListener('input',()=>{
+      const i=input.dataset.i,row=previewRows[i];
+      if(row?.has_net)return;
+      const amount=Number(document.querySelector(`.delivery-amount-choice[data-i="${i}"]`)?.value||0);
+      const fee=Number(document.querySelector(`.delivery-fee-choice[data-i="${i}"]`)?.value||0);
+      const netInput=document.querySelector(`.delivery-net-choice[data-i="${i}"]`);
+      if(netInput)netInput.value=String(amount-fee);
+    }));
   }
 
   async function commitReport(){
@@ -2328,13 +2345,14 @@ async function deliveryReconcileView(){
       const status=document.querySelector(`.delivery-status-choice[data-i="${i}"]`)?.value||'';
       const amount=Number(document.querySelector(`.delivery-amount-choice[data-i="${i}"]`)?.value||0);
       const deliveryFee=Number(document.querySelector(`.delivery-fee-choice[data-i="${i}"]`)?.value||0);
+      const netAmount=Number(document.querySelector(`.delivery-net-choice[data-i="${i}"]`)?.value||0);
       const note=document.querySelector(`.delivery-note-choice[data-i="${i}"]`)?.value||'';
       let matchType=r.match_type;
       if(orderId&&!automatic){
         const selected=(r.candidates||[]).find(o=>Number(o.id)===orderId);
         matchType=selected&&Math.abs(Math.abs(Number(selected.amount||0))-amount)<.01?'matched':'matched_partial';
       }
-      return {order_id:orderId,phone:r.phone,status,amount,delivery_fee:deliveryFee,note,match_type:matchType,original_match_type:r.match_type};
+      return {order_id:orderId,phone:r.phone,status,amount,delivery_fee:deliveryFee,net_amount:netAmount,has_net:r.has_net,note,match_type:matchType,original_match_type:r.match_type};
     });
 
     const resolvable=rows.filter(r=>r.order_id);

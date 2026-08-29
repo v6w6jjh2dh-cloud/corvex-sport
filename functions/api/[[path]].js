@@ -959,7 +959,7 @@ export async function onRequest(context) {
       }
       let matched=0,duplicate=0,unmatched=0;
       for(let i=0;i<rows.length;i++){
-        const row=rows[i]||{},phone=normalizePhone(row.phone),amount=Math.max(0,Number(row.amount||0)),deliveryFee=Math.max(0,Number(row.delivery_fee||0));
+        const row=rows[i]||{},phone=normalizePhone(row.phone),amount=Math.max(0,Number(row.amount||0)),deliveryFee=Math.max(0,Number(row.delivery_fee||0)),hasNet=Boolean(row.has_net),netAmount=hasNet?Number(row.net_amount||0):amount-deliveryFee;
         const shipmentDate=String(row.shipment_date||'').trim(),rowKey=settlementRowKey(row);
         const remainingCount=remainingRows.get(rowKey)||1;
         const allCandidates=phone?(byPhone.get(phone)||[]):[];
@@ -973,7 +973,7 @@ export async function onRequest(context) {
           chosen=exactAmount.slice().sort((a,b)=>Number(a.id)-Number(b.id))[0];
         }
         remainingRows.set(rowKey,Math.max(0,remainingCount-1));
-        const common={row_index:i+1,phone,shipment_date:shipmentDate,status:String(row.status||''),amount,delivery_fee:deliveryFee,note:String(row.note||'')};
+        const common={row_index:i+1,phone,shipment_date:shipmentDate,status:String(row.status||''),amount,delivery_fee:deliveryFee,net_amount:netAmount,has_net:hasNet,note:String(row.note||'')};
         if(!phone||allCandidates.length===0){unmatched++;result.push({...common,match_type:'unmatched',candidates:[]})}
         else if(shipmentDate&&candidates.length===0){unmatched++;result.push({...common,match_type:'date_mismatch',candidates:[]})}
         else if(chosen){usedOrderIds.add(Number(chosen.id));matched++;result.push({...common,match_type:'matched',order:chosen,candidates})}
@@ -1028,9 +1028,12 @@ export async function onRequest(context) {
         const importedFee=Math.max(0,Number(row.delivery_fee||0));
         const deliveryFee=(delivered||partial||feePaid||noFee)?Number(importedFee||order.delivery_fee||2):0;
         const grossCollected=(delivered||partial||feePaid)?importedAmount:0;
-        const cashCollected=(delivered||partial||feePaid)
-          ?Math.max(0,grossCollected-deliveryFee)
-          :(noFee?-deliveryFee:0);
+        const hasNet=Boolean(row.has_net);
+        const cashCollected=hasNet
+          ?Number(row.net_amount||0)
+          :(delivered||partial||feePaid)
+            ?Math.max(0,grossCollected-deliveryFee)
+            :(noFee?-deliveryFee:0);
 
         accepted.push({
           order,
@@ -1100,7 +1103,7 @@ export async function onRequest(context) {
         id:settlementId,settlement_code:code,matched_count:accepted.length,
         unmatched_count:unmatched,duplicate_count:duplicate,
         delivered_count:deliveredCount,refused_count:refusedCount,pending_count:pendingCount,
-        collected_amount:collected,delivery_fees:fees,net_due:collected-fees
+        collected_amount:collected,delivery_fees:fees,net_due:netDue
       }});
     }
 

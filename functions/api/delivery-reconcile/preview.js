@@ -69,9 +69,9 @@ export async function onRequestPost({request,env}){
  let matched=0,duplicate=0,unmatched=0,review=0,alreadySettled=0,otherStore=0;
  for(let index=0;index<rows.length;index++){
   const row=rows[index]||{},phone=normalizePhone(row.phone),amount=Math.max(0,Number(row.amount||0));
-  const deliveryFee=Math.max(0,Number(row.delivery_fee||0)),shipmentDate=String(row.shipment_date||'').trim(),status=String(row.status||'');
+  const deliveryFee=Math.max(0,Number(row.delivery_fee||0)),hasNet=Boolean(row.has_net),netAmount=hasNet?Number(row.net_amount||0):amount-deliveryFee,shipmentDate=String(row.shipment_date||'').trim(),status=String(row.status||'');
   const all=phone?(activeByPhone.get(phone)||[]):[],available=all.filter(order=>!used.has(Number(order.id)));
-  const common={row_index:index+1,phone,shipment_date:shipmentDate,status,amount,delivery_fee:deliveryFee,note:String(row.note||'')};
+  const common={row_index:index+1,phone,shipment_date:shipmentDate,status,amount,delivery_fee:deliveryFee,net_amount:netAmount,has_net:hasNet,note:String(row.note||'')};
 
   if(!phone){unmatched++;result.push({...common,match_type:'unmatched',candidates:[]});continue}
   if(all.length&&!available.length){duplicate++;result.push({...common,match_type:'duplicate',candidates:all});continue}
