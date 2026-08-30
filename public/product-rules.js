@@ -31,6 +31,12 @@
   return text.replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
  };
  const normalize=value=>normalizeDigitsSafe(value).toLowerCase().replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/ة/g,'ه').replace(/[ًٌٍَُِّْـ]/g,'').replace(/\s+/g,' ').trim();
+ const BUILTIN_ALIAS_TEXT={
+  button:['جيوب زرار','بنطلون زرار','بنطلون بزرار','بنطلون الزرار','بنطلون الازرار','بنطلون الأزرار','بزار','زرار','الزرار','الازرار','الأزرار'],
+  zip_pockets:['جيوب سحاب','جيب سحاب','سحاب جيوب','سحاب جيب','بنطلون جيوب سحاب','بنطلون جيب سحاب'],
+  polo_knit:['بولو تريكو','تريكو بولو','بولو ترند','بلوزة بولو','بلوزه بولو','تيشيرت بولو','تيشرت بولو','بولو'],
+  old_money:['اولد ماني','أولد ماني','اولد موني','أولد موني','اولد مني','أولد مني','بلوزه اولد ماني','بلوزه اولد موني','Old Money']
+ };
  const COLORS=new Set(['اسود','ابيض','بني','زيتي','سكني','رمادي','سماوي','ازرق','كحلي','برتقالي','احمر','اخضر','بيج','رصاصي','نهدي','زهري','وردي','موف','بنفسجي']);
  const OPERATION_CONTEXT=/(?:^|\s)و?(?:استرجاع|ارجاع|مرتجع|استبدال|تبديل|بدل)(?=\s|$)/i;
  const STOP_CONTEXT=/(?:وزن|كيلو|كغم|كغ|kg|مقاس|قياس|طول|تواصل|توصيل|شامل|السعر|سعر|دينار|هاتف|تلفون|موبايل|رقم|عنوان|ملاحظه|موعد|بعد|يوم|ايام|استرجاع|ارجاع|مرتجع|استبدال|تبديل|بدل)/i;
@@ -146,19 +152,23 @@
   }
   return{cost:Number(cost.toFixed(2)),items,found:items.length,unknown:unknownCandidates(lines.join('\n'))};
  }
+ function likelyModelLineCount(text=''){
+  const hint=/(?:بنطلون|جيوب|جيب|بلوز[هة]|بلوزه|تيشرت|تيشيرت|بجام[هة]|طقم|بولو|تريكو|جاكار|ترينغ|كاردوني|اولد|أولد|زرار|الازرار|الأزرار|سحاب)/i;
+  return saleLines(text).filter(line=>!STOP_CONTEXT.test(normalize(line))&&(findAll(line).length>0||hint.test(line))).length;
+ }
 
  let remoteLoaded=false,remotePromise=null;const semanticCache=new Map();
  const engine={
-  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-30-v11',
+  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-30-v12',
   async calculateCostSmart(text=''){
-   const local=calculateCost(text);if(local.items.length&&!local.unknown.length)return local;
+   const local=calculateCost(text),looksComplete=local.items.length&&!local.unknown.length&&likelyModelLineCount(text)<=local.items.length;if(looksComplete)return local;
    if(typeof api!=='function')return local;const key=`${engine.version}:${normalize(text)}`;if(semanticCache.has(key))return semanticCache.get(key);
    try{const data=await api('/profit-interpret',{method:'POST',body:JSON.stringify({text})}),result=data?.result;if(result&&Array.isArray(result.items)){semanticCache.set(key,result);if(semanticCache.size>200)semanticCache.delete(semanticCache.keys().next().value);return result}}catch{}
    return local;
   },
   async loadRemote(force=false){
    if(remoteLoaded&&!force)return products;if(remotePromise)return remotePromise;
-   remotePromise=(async()=>{try{if(typeof api!=='function')return products;const data=await api('/profit-models');ignoredPhrases=(data.ignored_phrases||[]).map(normalize).filter(Boolean);if(Array.isArray(data.models)&&data.models.length){products=data.models.filter(model=>model.active!==false).map(model=>({id:model.key||String(model.id),databaseId:Number(model.id),name:model.name,cost:Number(model.cost||0),aliases:Array.isArray(model.aliases)?model.aliases:[model.name],offers:model.offers||{},deliveryIncluded:Boolean(model.deliveryIncluded)}));engine.version=`db:${data.version||Date.now()}`;remoteLoaded=true;if(force)semanticCache.clear()}return products}catch{return products}finally{remotePromise=null}})();
+   remotePromise=(async()=>{try{if(typeof api!=='function')return products;const data=await api('/profit-models');ignoredPhrases=(data.ignored_phrases||[]).map(normalize).filter(Boolean);if(Array.isArray(data.models)&&data.models.length){products=data.models.filter(model=>model.active!==false).map(model=>{const id=model.key||String(model.id),aliases=[...(Array.isArray(model.aliases)?model.aliases:[model.name]),...(BUILTIN_ALIAS_TEXT[id]||[])];return{id,databaseId:Number(model.id),name:model.name,cost:Number(model.cost||0),aliases:[...new Set(aliases)],offers:model.offers||{},deliveryIncluded:Boolean(model.deliveryIncluded)}});engine.version=`db:${data.version||Date.now()}`;remoteLoaded=true;if(force)semanticCache.clear()}return products}catch{return products}finally{remotePromise=null}})();
    return remotePromise;
   }
  };
