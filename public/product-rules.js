@@ -159,12 +159,12 @@
 
  let remoteLoaded=false,remotePromise=null;const semanticCache=new Map();
  const engine={
-  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-30-v12',
+  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-30-v13',
   async calculateCostSmart(text=''){
-   const local=calculateCost(text),looksComplete=local.items.length&&!local.unknown.length&&likelyModelLineCount(text)<=local.items.length;if(looksComplete)return local;
-   if(typeof api!=='function')return local;const key=`${engine.version}:${normalize(text)}`;if(semanticCache.has(key))return semanticCache.get(key);
-   try{const data=await api('/profit-interpret',{method:'POST',body:JSON.stringify({text})}),result=data?.result;if(result&&Array.isArray(result.items)){semanticCache.set(key,result);if(semanticCache.size>200)semanticCache.delete(semanticCache.keys().next().value);return result}}catch{}
-   return local;
+   const local=calculateCost(text),localResult={...local,source:'deterministic',engineVersion:engine.version},looksComplete=local.items.length&&!local.unknown.length&&likelyModelLineCount(text)<=local.items.length;if(looksComplete)return localResult;
+   if(typeof api!=='function')return localResult;const key=`${engine.version}:${normalize(text)}`;if(semanticCache.has(key))return semanticCache.get(key);
+   try{const data=await api('/profit-interpret',{method:'POST',body:JSON.stringify({text})}),result=data?.result;if(result&&Array.isArray(result.items)){const semanticResult={...result,source:'semantic',engineVersion:engine.version};semanticCache.set(key,semanticResult);if(semanticCache.size>200)semanticCache.delete(semanticCache.keys().next().value);return semanticResult}}catch{}
+   return localResult;
   },
   async loadRemote(force=false){
    if(remoteLoaded&&!force)return products;if(remotePromise)return remotePromise;
