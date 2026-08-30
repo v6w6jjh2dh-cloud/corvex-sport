@@ -6,7 +6,7 @@ const SEED_MODELS=[
  ['reebok','ريبوك',2.5,['ريبوك','reebok','ري bok'],{3:[15]},1],
  ['m','M',3,['بلوزه m','بلوزة m','حرف m','m6','ام6'],{1:[7],2:[12],3:[15]},0],
  ['trico_plain','تريكو سادة',2.5,['تريكو سادة','سادة تريكو'],{1:[7],2:[12],3:[15]},0],
- ['button','زرار',2.2,['جيوب زرار','بنطلون زرار','بنطلون بزرار','بزار','زرار'],{1:[7],2:[12],3:[15]},0],
+ ['button','زرار',2.2,['جيوب زرار','بنطلون زرار','بنطلون بزرار','بنطلون الزرار','بنطلون الازرار','بنطلون الأزرار','بزار','زرار','الزرار','الازرار','الأزرار'],{1:[7],2:[12],3:[15]},0],
  ['zip_pockets','جيوب سحاب',2.3,['جيوب سحاب','جيب سحاب','سحاب جيوب','سحاب جيب','بنطلون جيوب سحاب','بنطلون جيب سحاب'],{1:[7],2:[12],3:[15]},0],
  ['regular_pockets','جيوب عادي',2.2,['جيوب عادي','بنطلون جيوب عادي','بنطلون جيوب'],{1:[5],2:[9],3:[12]},0],
  ['sport_zip','رياضة سحاب',2.7,['رياضه سحاب','رياضة سحاب','سحاب رياضه','سحاب رياضة','بنطلون سحاب'],{1:[5],2:[9]},0],
@@ -72,6 +72,12 @@ async function ensure(env){
   let aliases=[];try{aliases=JSON.parse(zip.aliases_json||'[]')}catch{}
   const required=['جيب سحاب','سحاب جيب','بنطلون جيب سحاب'],missing=required.filter(alias=>!aliases.includes(alias));
   if(missing.length)await env.DB.prepare("UPDATE profit_models SET aliases_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify([...new Set([...aliases,...missing])]),zip.id).run();
+ }
+ const button=await env.DB.prepare("SELECT id,aliases_json FROM profit_models WHERE model_key='button'").first();
+ if(button){
+  let aliases=[];try{aliases=JSON.parse(button.aliases_json||'[]')}catch{}
+  const required=['الزرار','الازرار','الأزرار','بنطلون الزرار','بنطلون الازرار','بنطلون الأزرار'],missing=required.filter(alias=>!aliases.includes(alias));
+  if(missing.length)await env.DB.prepare("UPDATE profit_models SET aliases_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify([...new Set([...aliases,...missing])]),button.id).run();
  }
 }
 

@@ -5,7 +5,7 @@
   {id:'reebok',name:'ريبوك',cost:2.5,aliases:[/ريبوك/i,/reebok/i,/ري\s*bok/i],offers:{3:[15]},deliveryIncluded:true},
   {id:'m',name:'M',cost:3,aliases:[/(?:تيشرت|تيشيرت|تشرت|بلوزه?|بلايز)\s*(?:حرف\s*)?(?:m6|m|م6|م|ام6|ام)(?=\s|$)/i],offers:{1:[7],2:[12],3:[15]},deliveryIncluded:false},
   {id:'trico_plain',name:'تريكو سادة',cost:2.5,aliases:[/ساده\s*تريكو/i,/تريكو\s*ساده/i],offers:{1:[7],2:[12],3:[15]},deliveryIncluded:false},
-  {id:'button',name:'زرار',cost:2.2,aliases:[/جيوب\s*زرار/i,/بنطلون\s*(?:ب?زرار|بزار)/i,/(?:^|\s)(?:زرار|بزار)(?:\s|$)/i],offers:{1:[7],2:[12],3:[15]},deliveryIncluded:false},
+  {id:'button',name:'زرار',cost:2.2,aliases:[/جيوب\s*زرار/i,/بنطلون\s*(?:ب?زرار|بزار|الزرار|الازرار|الأزرار)/i,/(?:^|\s)(?:زرار|بزار|الزرار|الازرار|الأزرار)(?:\s|$)/i],offers:{1:[7],2:[12],3:[15]},deliveryIncluded:false},
   {id:'zip_pockets',name:'جيوب سحاب',cost:2.3,aliases:[/جيو?ب\s*سحاب/i,/سحاب\s*جيو?ب/i],offers:{1:[7],2:[12],3:[15]},deliveryIncluded:false},
   {id:'regular_pockets',name:'جيوب عادي',cost:2.2,aliases:[/جيوب\s*عادي/i,/بنطلون\s*جيوب(?!\s*سحاب|\s*زرار)/i,/(?:^|\s)جيوب(?:\s|$)/i],offers:{1:[5],2:[9],3:[12]},deliveryIncluded:false},
   {id:'sport_zip',name:'رياضة سحاب',cost:2.7,aliases:[/رياضه\s*سحاب/i,/سحاب\s*رياضه/i,/بنطلون\s*سحاب/i],offers:{1:[5],2:[9]},deliveryIncluded:false},
@@ -33,7 +33,7 @@
  const normalize=value=>normalizeDigitsSafe(value).toLowerCase().replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/ة/g,'ه').replace(/[ًٌٍَُِّْـ]/g,'').replace(/\s+/g,' ').trim();
  const COLORS=new Set(['اسود','ابيض','بني','زيتي','سكني','رمادي','سماوي','ازرق','كحلي','برتقالي','احمر','اخضر','بيج','رصاصي','نهدي','زهري','وردي','موف','بنفسجي']);
  const OPERATION_CONTEXT=/(?:^|\s)و?(?:استرجاع|ارجاع|مرتجع|استبدال|تبديل|بدل)(?=\s|$)/i;
- const STOP_CONTEXT=/(?:وزن|مقاس|قياس|طول|تواصل|توصيل|شامل|السعر|سعر|دينار|هاتف|تلفون|موبايل|رقم|عنوان|ملاحظه|استرجاع|ارجاع|مرتجع|استبدال|تبديل|بدل)/i;
+ const STOP_CONTEXT=/(?:وزن|كيلو|كغم|كغ|kg|مقاس|قياس|طول|تواصل|توصيل|شامل|السعر|سعر|دينار|هاتف|تلفون|موبايل|رقم|عنوان|ملاحظه|استرجاع|ارجاع|مرتجع|استبدال|تبديل|بدل)/i;
  const SIZE_CONTEXT=/(?:^|\s)(?:بلبس|بيلبس|يلبس|لبس|مقاس|قياس)(?:\s|$)/i;
  const SIZE_WORDS=new Set(['اكس','اكسل','اكس لارج','دبل اكس','لارج','ميديوم','سمول','xl','xxl','xxxl']);
  const QUANTITY_LABEL=/(?:عدد|العدد|كميه|الكميه|تفصيل)\s*[:=\-]?\s*(\d{1,3})(?=\s|$)/i;
@@ -80,7 +80,7 @@
  }
  function colorCount(text){
   const words=normalize(text).split(/[^\p{L}]+/u).filter(Boolean);
-  return words.reduce((count,word)=>count+(COLORS.has(word)?1:0),0);
+  return words.reduce((count,word)=>{const color=word.startsWith('و')&&COLORS.has(word.slice(1))?word.slice(1):word;return count+(COLORS.has(color)?1:0)},0);
  }
  function quantityFor(lines,index,product){
   let quantity=explicitQuantity(lines[index],product);if(quantity)return quantity;
@@ -137,7 +137,7 @@
 
  let remoteLoaded=false,remotePromise=null;
  const engine={
-  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-30-v9',
+  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-30-v10',
   async loadRemote(force=false){
    if(remoteLoaded&&!force)return products;if(remotePromise)return remotePromise;
    remotePromise=(async()=>{try{if(typeof api!=='function')return products;const data=await api('/profit-models');ignoredPhrases=(data.ignored_phrases||[]).map(normalize).filter(Boolean);if(Array.isArray(data.models)&&data.models.length){products=data.models.filter(model=>model.active!==false).map(model=>({id:model.key||String(model.id),databaseId:Number(model.id),name:model.name,cost:Number(model.cost||0),aliases:Array.isArray(model.aliases)?model.aliases:[model.name],offers:model.offers||{},deliveryIncluded:Boolean(model.deliveryIncluded)}));engine.version=`db:${data.version||Date.now()}`;remoteLoaded=true}return products}catch{return products}finally{remotePromise=null}})();
