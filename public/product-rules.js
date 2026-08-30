@@ -10,7 +10,7 @@
   {id:'regular_pockets',name:'جيوب عادي',cost:2.2,aliases:[/جيوب\s*عادي/i,/بنطلون\s*جيوب(?!\s*سحاب|\s*زرار)/i,/(?:^|\s)جيوب(?:\s|$)/i],offers:{1:[5],2:[9],3:[12]},deliveryIncluded:false},
   {id:'sport_zip',name:'رياضة سحاب',cost:2.7,aliases:[/رياضه\s*سحاب/i,/سحاب\s*رياضه/i,/بنطلون\s*سحاب/i],offers:{1:[5],2:[9]},deliveryIncluded:false},
   {id:'polo_plain',name:'بولو سادة',cost:2.8,aliases:[/ساده\s*بولو/i,/بولو\s*ساده/i],offers:{1:[5],2:[10]},deliveryIncluded:false},
-  {id:'polo_knit',name:'بولو تريكو',cost:3.5,aliases:[/بولو\s*تريكو/i,/تريكو\s*بولو/i,/بولو\s*ترند/i],offers:{1:[5],2:[9],3:[15]},deliveryIncluded:false},
+  {id:'polo_knit',name:'بولو تريكو',cost:3.5,aliases:[/بولو\s*تريكو/i,/تريكو\s*بولو/i,/بولو\s*ترند/i,/(?:بلوز[هة]|بلوزه|تيشرت|تيشيرت)\s*بولو/i,/(?:^|\s)بولو(?:\s|$)/i],offers:{1:[5],2:[9],3:[15]},deliveryIncluded:false},
   {id:'turkish',name:'تركي',cost:2.7,aliases:[/بنطلون\s*تركي/i,/(?:^|\s)تركي(?:\s|$)/i],offers:{1:[5],2:[9],3:[15,16]},deliveryIncluded:false},
   {id:'takyeef',name:'بنطلون تكيف',cost:3.5,aliases:[/(?:بنطلون\s*)?(?:تكيف|تكييف|يكتف|تكف)/i],offers:{},deliveryIncluded:false},
   {id:'cardigan',name:'كاردونيه',cost:3.5,aliases:[/كاردونيه/i,/بجامه\s*كاردونيه/i],offers:{1:[8],2:[14],3:[18]},deliveryIncluded:false},
@@ -33,13 +33,22 @@
  const normalize=value=>normalizeDigitsSafe(value).toLowerCase().replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/ة/g,'ه').replace(/[ًٌٍَُِّْـ]/g,'').replace(/\s+/g,' ').trim();
  const COLORS=new Set(['اسود','ابيض','بني','زيتي','سكني','رمادي','سماوي','ازرق','كحلي','برتقالي','احمر','اخضر','بيج','رصاصي','نهدي','زهري','وردي','موف','بنفسجي']);
  const OPERATION_CONTEXT=/(?:^|\s)و?(?:استرجاع|ارجاع|مرتجع|استبدال|تبديل|بدل)(?=\s|$)/i;
- const STOP_CONTEXT=/(?:وزن|كيلو|كغم|كغ|kg|مقاس|قياس|طول|تواصل|توصيل|شامل|السعر|سعر|دينار|هاتف|تلفون|موبايل|رقم|عنوان|ملاحظه|استرجاع|ارجاع|مرتجع|استبدال|تبديل|بدل)/i;
+ const STOP_CONTEXT=/(?:وزن|كيلو|كغم|كغ|kg|مقاس|قياس|طول|تواصل|توصيل|شامل|السعر|سعر|دينار|هاتف|تلفون|موبايل|رقم|عنوان|ملاحظه|موعد|بعد|يوم|ايام|استرجاع|ارجاع|مرتجع|استبدال|تبديل|بدل)/i;
  const SIZE_CONTEXT=/(?:^|\s)(?:بلبس|بيلبس|يلبس|لبس|مقاس|قياس)(?:\s|$)/i;
  const SIZE_WORDS=new Set(['اكس','اكسل','اكس لارج','دبل اكس','لارج','ميديوم','سمول','xl','xxl','xxxl']);
  const QUANTITY_LABEL=/(?:عدد|العدد|كميه|الكميه|تفصيل)\s*[:=\-]?\s*(\d{1,3})(?=\s|$)/i;
  const QUANTITY_UNIT=/(?:^|\s)(\d{1,3})\s*(?:قطعه|قطع|حبه|حبات|لون|الوان)(?=\s|$)/i;
  const COLOR_QUANTITY=/(?:^|\s)(\d{1,3})\s*(?:اسود|ابيض|بني|زيتي|سكني|رمادي|سماوي|ازرق|كحلي|برتقالي|احمر|اخضر|بيج|رصاصي|نهدي|زهري|وردي|موف|بنفسجي)(?=\s|$)/gi;
  const colorQuantityCount=text=>[...normalize(text).matchAll(COLOR_QUANTITY)].reduce((sum,match)=>sum+Number(match[1]||0),0);
+ const WORD_NUMBERS={واحد:1,واحده:1,اثنين:2,اتنين:2,ثنتين:2,ثلاث:3,ثلاثه:3,اربع:4,اربعه:4,خمس:5,خمسه:5,ست:6,سته:6,سبع:7,سبعه:7,ثمان:8,ثمانيه:8,تسع:9,تسعه:9,عشر:10,عشره:10};
+ function standaloneQuantity(text){
+  const value=normalize(text);if(STOP_CONTEXT.test(value))return 0;
+  let match=value.match(/^(?:عدد|العدد|كميه|الكميه|تفصيل)\s*[:=\-]?\s*(\d{1,3})\s*(?:قطعه|قطع|حبه|حبات|لون|الوان)?$/)||value.match(/^(\d{1,3})\s*(?:قطعه|قطع|حبه|حبات|لون|الوان)$/);
+  if(match)return Math.max(1,Number(match[1]));
+  if(/^(?:قطعتين|حبتين|لونين)$/.test(value))return 2;
+  match=value.match(/^(?:عدد|العدد|كميه|الكميه|تفصيل)?\s*(واحد|واحده|اثنين|اتنين|ثنتين|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه|ست|سته|سبع|سبعه|ثمان|ثمانيه|تسع|تسعه|عشر|عشره)\s*(?:قطعه|قطع|حبه|حبات|لون|الوان)$/);
+  return match?WORD_NUMBERS[match[1]]||0:0;
+ }
 
  function aliasMatches(product,text){
   const value=normalize(text),found=[];
@@ -84,10 +93,12 @@
  }
  function quantityFor(lines,index,product){
   let quantity=explicitQuantity(lines[index],product);if(quantity)return quantity;
+  if(index>0&&!findAll(lines[index-1]).length){quantity=standaloneQuantity(lines[index-1]);if(quantity)return quantity}
   let end=index+1,colorQuantity=0;
   for(;end<lines.length;end++){
    const line=normalize(lines[end]);
    if(findAll(line).length)break;
+   quantity=standaloneQuantity(line);if(quantity)return quantity;
    const match=line.match(QUANTITY_LABEL)||line.match(QUANTITY_UNIT);
    if(match)return Math.max(1,Number(match[1]));
    colorQuantity+=colorQuantityCount(line);
@@ -106,7 +117,8 @@
  }
  const saleLines=text=>String(text||'').split(/\n+/).map(saleLine).filter(Boolean);
  let ignoredPhrases=[];
- function isIgnoredCandidate(candidate){const value=normalize(candidate);return SIZE_CONTEXT.test(value)||SIZE_WORDS.has(value)||ignoredPhrases.includes(value)}
+ const NON_MODEL_PHRASES=new Set(['او','و','الى','الي','من','حتى','تقريبا']);
+ function isIgnoredCandidate(candidate){const value=normalize(candidate);return SIZE_CONTEXT.test(value)||SIZE_WORDS.has(value)||NON_MODEL_PHRASES.has(value)||ignoredPhrases.includes(value)}
  function unknownCandidates(text=''){
   const lines=saleLines(text),unknown=[];
   for(const line of lines){
@@ -135,12 +147,18 @@
   return{cost:Number(cost.toFixed(2)),items,found:items.length,unknown:unknownCandidates(lines.join('\n'))};
  }
 
- let remoteLoaded=false,remotePromise=null;
+ let remoteLoaded=false,remotePromise=null;const semanticCache=new Map();
  const engine={
-  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-30-v10',
+  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-30-v11',
+  async calculateCostSmart(text=''){
+   const local=calculateCost(text);if(local.items.length&&!local.unknown.length)return local;
+   if(typeof api!=='function')return local;const key=`${engine.version}:${normalize(text)}`;if(semanticCache.has(key))return semanticCache.get(key);
+   try{const data=await api('/profit-interpret',{method:'POST',body:JSON.stringify({text})}),result=data?.result;if(result&&Array.isArray(result.items)){semanticCache.set(key,result);if(semanticCache.size>200)semanticCache.delete(semanticCache.keys().next().value);return result}}catch{}
+   return local;
+  },
   async loadRemote(force=false){
    if(remoteLoaded&&!force)return products;if(remotePromise)return remotePromise;
-   remotePromise=(async()=>{try{if(typeof api!=='function')return products;const data=await api('/profit-models');ignoredPhrases=(data.ignored_phrases||[]).map(normalize).filter(Boolean);if(Array.isArray(data.models)&&data.models.length){products=data.models.filter(model=>model.active!==false).map(model=>({id:model.key||String(model.id),databaseId:Number(model.id),name:model.name,cost:Number(model.cost||0),aliases:Array.isArray(model.aliases)?model.aliases:[model.name],offers:model.offers||{},deliveryIncluded:Boolean(model.deliveryIncluded)}));engine.version=`db:${data.version||Date.now()}`;remoteLoaded=true}return products}catch{return products}finally{remotePromise=null}})();
+   remotePromise=(async()=>{try{if(typeof api!=='function')return products;const data=await api('/profit-models');ignoredPhrases=(data.ignored_phrases||[]).map(normalize).filter(Boolean);if(Array.isArray(data.models)&&data.models.length){products=data.models.filter(model=>model.active!==false).map(model=>({id:model.key||String(model.id),databaseId:Number(model.id),name:model.name,cost:Number(model.cost||0),aliases:Array.isArray(model.aliases)?model.aliases:[model.name],offers:model.offers||{},deliveryIncluded:Boolean(model.deliveryIncluded)}));engine.version=`db:${data.version||Date.now()}`;remoteLoaded=true;if(force)semanticCache.clear()}return products}catch{return products}finally{remotePromise=null}})();
    return remotePromise;
   }
  };

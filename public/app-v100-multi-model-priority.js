@@ -12,7 +12,7 @@
  async function apply(card){
   if(card.dataset.manualCostOverride==='1'||card.dataset.manualCost==='1'||card.dataset.status==='partial'){clearIncomplete(card);return}
   const rr=rules();if(!rr)return;await rr.loadRemote?.();
-  const text=(card.querySelector('.profit-original-notes')?.textContent||'').replace(/^نص الطلب الأصلي:\s*/,''),result=rr.calculateCost(text),unknown=result.unknown||[];
+  const text=(card.querySelector('.profit-original-notes')?.textContent||'').replace(/^نص الطلب الأصلي:\s*/,''),result=await(rr.calculateCostSmart?.(text)||rr.calculateCost(text)),unknown=result.unknown||[];
   if(unknown.length){showIncomplete(card,unknown);return}clearIncomplete(card);if(!result.items.length)return;
   const input=card.querySelector('.profit-cost');if(!input)return;showBreakdown(card,result.items);
   const id=+card.dataset.id,amount=+(card.querySelector('.profit-amount')?.value||0),fee=+(card.querySelector('.profit-fee')?.value||0),key=`${id}:${result.cost}:${rr.version}`;
