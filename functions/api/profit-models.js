@@ -11,7 +11,7 @@ const SEED_MODELS=[
  ['regular_pockets','جيوب عادي',2.2,['جيوب عادي','بنطلون جيوب عادي','بنطلون جيوب'],{1:[5],2:[9],3:[12]},0],
  ['sport_zip','رياضة سحاب',2.7,['رياضه سحاب','رياضة سحاب','سحاب رياضه','سحاب رياضة','بنطلون سحاب'],{1:[5],2:[9]},0],
  ['polo_plain','بولو سادة',2.8,['بولو سادة','سادة بولو'],{1:[5],2:[10]},0],
- ['polo_knit','بولو تريكو',3.5,['بولو تريكو','تريكو بولو','بولو ترند','بلوزة بولو','بلوزه بولو','تيشيرت بولو','تيشرت بولو','بولو'],{1:[5],2:[9],3:[15]},0],
+ ['polo_knit','بولو تريكو',3.5,['بولو تريكو','تريكو بولو','بولو ترند'],{1:[5],2:[9],3:[15]},0],
  ['turkish','تركي',2.7,['بنطلون تركي','تركي'],{1:[5],2:[9],3:[15,16]},0],
  ['takyeef','بنطلون تكيف',3.5,['بنطلون تكيف','تكيف','تكييف','يكتف','تكف'],{},0],
  ['cardigan','كاردونيه',3.5,['كاردونيه','بجامه كاردونيه','بجامة كاردونيه'],{1:[8],2:[14],3:[18]},0],
@@ -78,12 +78,6 @@ async function ensure(env){
   let aliases=[];try{aliases=JSON.parse(button.aliases_json||'[]')}catch{}
   const required=['الزرار','الازرار','الأزرار','بنطلون الزرار','بنطلون الازرار','بنطلون الأزرار'],missing=required.filter(alias=>!aliases.includes(alias));
   if(missing.length)await env.DB.prepare("UPDATE profit_models SET aliases_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify([...new Set([...aliases,...missing])]),button.id).run();
- }
- const polo=await env.DB.prepare("SELECT id,aliases_json FROM profit_models WHERE model_key='polo_knit'").first();
- if(polo){
-  let aliases=[];try{aliases=JSON.parse(polo.aliases_json||'[]')}catch{}
-  const required=['بلوزة بولو','بلوزه بولو','تيشيرت بولو','تيشرت بولو','بولو'],missing=required.filter(alias=>!aliases.includes(alias));
-  if(missing.length)await env.DB.prepare("UPDATE profit_models SET aliases_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify([...new Set([...aliases,...missing])]),polo.id).run();
  }
 }
 

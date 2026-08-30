@@ -9,31 +9,17 @@
   card.querySelector('.profit-cost')?.dispatchEvent(new Event('input',{bubbles:true}));
  }
  function showBreakdown(card,items){let box=card.querySelector('.profit-cost-breakdown');if(!box){box=document.createElement('div');box.className='sub profit-cost-breakdown';const anchor=card.querySelector('.profit-original-notes');anchor?.parentNode.insertBefore(box,anchor)}box.textContent='تفصيل الكوست: '+items.map(item=>`${item.qty} ${item.name} = ${Number(item.cost).toFixed(2)}`).join(' + ')}
- const cardText=card=>(card.querySelector('.profit-original-notes')?.textContent||'').replace(/^نص الطلب الأصلي:\s*/,'');
- async function apply(card,generation){
+ async function apply(card){
   if(card.dataset.manualCostOverride==='1'||card.dataset.manualCost==='1'||card.dataset.status==='partial'){clearIncomplete(card);return}
   const rr=rules();if(!rr)return;await rr.loadRemote?.();
-  const text=cardText(card),token=`${generation}:${card.dataset.id||''}:${text}`;card.dataset.profitAnalysisToken=token;
-  const result=await(rr.calculateCostSmart?.(text)||rr.calculateCost(text));
-  // A semantic request may finish after the report was redrawn or the order text
-  // changed. Such a result must never overwrite the current card.
-  if(generation!==requestedGeneration||!card.isConnected||card.dataset.profitAnalysisToken!==token||cardText(card)!==text||state?.view!=='daily-profits')return;
-  if(card.dataset.manualCostOverride==='1'||card.dataset.manualCost==='1'||card.dataset.status==='partial'){clearIncomplete(card);return}
-  card.dataset.profitEngineVersion=String(result.engineVersion||rr.version||'central-v13');card.dataset.profitEngineSource=String(result.source||'central');
-  const unknown=result.unknown||[];
+  const text=(card.querySelector('.profit-original-notes')?.textContent||'').replace(/^نص الطلب الأصلي:\s*/,''),result=rr.calculateCost(text),unknown=result.unknown||[];
   if(unknown.length){showIncomplete(card,unknown);return}clearIncomplete(card);if(!result.items.length)return;
   const input=card.querySelector('.profit-cost');if(!input)return;showBreakdown(card,result.items);
   const id=+card.dataset.id,amount=+(card.querySelector('.profit-amount')?.value||0),fee=+(card.querySelector('.profit-fee')?.value||0),key=`${id}:${result.cost}:${rr.version}`;
   if(card.dataset.centralCostKey===key)return;card.dataset.centralCostKey=key;input.value=result.cost.toFixed(2);input.dispatchEvent(new Event('input',{bubbles:true}));card.dataset.autoCostUnknown='0';card.querySelectorAll('.local-unknown,[data-model-unknown="1"]').forEach(x=>x.remove());
   try{const d=await api('/orders/'+id),o=d.order;if(Math.abs(+(o.cost_of_goods||0)-result.cost)>.001)await api('/orders/'+id+'/outcome',{method:'PUT',body:JSON.stringify({delivery_status:o.delivery_status,printed:+(o.printed||0),delivered_amount:amount,delivery_fee:fee,cash_collected:Math.max(0,amount-fee),cost_of_goods:result.cost,delivered_pieces:+(o.delivered_pieces||0),returned_pieces:+(o.returned_pieces||0),settlement_note:o.settlement_note||''})})}catch{card.dataset.centralCostKey=''}
  }
- let running=false,rerun=false,requestedGeneration=0;
- async function run(){
-  const generation=++requestedGeneration;
-  if(running){rerun=true;return}if(state?.view!=='daily-profits'||!rules())return;
-  running=true;
-  try{await rules().loadRemote?.();for(const c of document.querySelectorAll('.profit-order-card')){if(generation!==requestedGeneration)break;await apply(c,generation)}}
-  finally{running=false;if(rerun){rerun=false;run()}}
- }
+ let running=false,rerun=false;
+ async function run(){if(running){rerun=true;return}if(state?.view!=='daily-profits'||!rules())return;running=true;try{await rules().loadRemote?.();for(const c of document.querySelectorAll('.profit-order-card'))await apply(c)}finally{running=false;if(rerun){rerun=false;run()}}}
  window.CORVEX_CALC_ORDER_COST=calc;window.CORVEX_CLEAR_PROFIT_INCOMPLETE=clearIncomplete;document.addEventListener('corvex:profits-rendered',run);run();setTimeout(run,1200);
 })();
