@@ -6,7 +6,7 @@
   {id:'m',name:'M',cost:3,aliases:[/(?:تيشرت|تيشيرت|تشرت|بلوزه?|بلايز)\s*(?:حرف\s*)?(?:m6|m|م6|م|ام6|ام)(?=\s|$)/i],offers:{1:[7],2:[12],3:[15]},deliveryIncluded:false},
   {id:'trico_plain',name:'تريكو سادة',cost:2.5,aliases:[/ساده\s*تريكو/i,/تريكو\s*ساده/i],offers:{1:[7],2:[12],3:[15]},deliveryIncluded:false},
   {id:'button',name:'زرار',cost:2.2,aliases:[/جيوب\s*زرار/i,/بنطلون\s*(?:ب?زرار|بزار)/i,/(?:^|\s)(?:زرار|بزار)(?:\s|$)/i],offers:{1:[7],2:[12],3:[15]},deliveryIncluded:false},
-  {id:'zip_pockets',name:'جيوب سحاب',cost:2.3,aliases:[/جيوب\s*سحاب/i,/سحاب\s*جيوب/i],offers:{1:[7],2:[12],3:[15]},deliveryIncluded:false},
+  {id:'zip_pockets',name:'جيوب سحاب',cost:2.3,aliases:[/جيو?ب\s*سحاب/i,/سحاب\s*جيو?ب/i],offers:{1:[7],2:[12],3:[15]},deliveryIncluded:false},
   {id:'regular_pockets',name:'جيوب عادي',cost:2.2,aliases:[/جيوب\s*عادي/i,/بنطلون\s*جيوب(?!\s*سحاب|\s*زرار)/i,/(?:^|\s)جيوب(?:\s|$)/i],offers:{1:[5],2:[9],3:[12]},deliveryIncluded:false},
   {id:'sport_zip',name:'رياضة سحاب',cost:2.7,aliases:[/رياضه\s*سحاب/i,/سحاب\s*رياضه/i,/بنطلون\s*سحاب/i],offers:{1:[5],2:[9]},deliveryIncluded:false},
   {id:'polo_plain',name:'بولو سادة',cost:2.8,aliases:[/ساده\s*بولو/i,/بولو\s*ساده/i],offers:{1:[5],2:[10]},deliveryIncluded:false},
@@ -137,7 +137,7 @@
 
  let remoteLoaded=false,remotePromise=null;
  const engine={
-  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-29-v8',
+  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-30-v9',
   async loadRemote(force=false){
    if(remoteLoaded&&!force)return products;if(remotePromise)return remotePromise;
    remotePromise=(async()=>{try{if(typeof api!=='function')return products;const data=await api('/profit-models');ignoredPhrases=(data.ignored_phrases||[]).map(normalize).filter(Boolean);if(Array.isArray(data.models)&&data.models.length){products=data.models.filter(model=>model.active!==false).map(model=>({id:model.key||String(model.id),databaseId:Number(model.id),name:model.name,cost:Number(model.cost||0),aliases:Array.isArray(model.aliases)?model.aliases:[model.name],offers:model.offers||{},deliveryIncluded:Boolean(model.deliveryIncluded)}));engine.version=`db:${data.version||Date.now()}`;remoteLoaded=true}return products}catch{return products}finally{remotePromise=null}})();
