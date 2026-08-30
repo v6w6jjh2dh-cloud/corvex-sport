@@ -79,6 +79,12 @@ async function ensure(env){
   const required=['الزرار','الازرار','الأزرار','بنطلون الزرار','بنطلون الازرار','بنطلون الأزرار'],missing=required.filter(alias=>!aliases.includes(alias));
   if(missing.length)await env.DB.prepare("UPDATE profit_models SET aliases_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify([...new Set([...aliases,...missing])]),button.id).run();
  }
+ const polo=await env.DB.prepare("SELECT id,aliases_json FROM profit_models WHERE model_key='polo_knit'").first();
+ if(polo){
+  let aliases=[];try{aliases=JSON.parse(polo.aliases_json||'[]')}catch{}
+  const required=['بلوزة بولو','بلوزه بولو','تيشيرت بولو','تيشرت بولو','بولو'],missing=required.filter(alias=>!aliases.includes(alias));
+  if(missing.length)await env.DB.prepare("UPDATE profit_models SET aliases_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify([...new Set([...aliases,...missing])]),polo.id).run();
+ }
 }
 
 const cleanAliases=(value,name)=>{
