@@ -31,6 +31,7 @@
   return text.replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
  };
  const normalize=value=>normalizeDigitsSafe(value).toLowerCase().replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/ة/g,'ه').replace(/[ًٌٍَُِّْـ]/g,'').replace(/\s+/g,' ').trim();
+ const cleanAliases=(id,aliases)=>id==='m'?(aliases||[]).filter(alias=>!['ام','م'].includes(normalize(alias))):(aliases||[]);
  const COLORS=new Set(['اسود','ابيض','بني','زيتي','سكني','رمادي','سماوي','ازرق','كحلي','برتقالي','احمر','اخضر','بيج','رصاصي','نهدي','زهري','وردي','موف','بنفسجي']);
  const OPERATION_CONTEXT=/(?:^|\s)و?(?:استرجاع|ارجاع|مرتجع|استبدال|تبديل|بدل)(?=\s|$)/i;
  const STOP_CONTEXT=/(?:وزن|كيلو|كغم|كغ|kg|مقاس|قياس|طول|تواصل|توصيل|شامل|السعر|سعر|دينار|هاتف|تلفون|موبايل|رقم|عنوان|ملاحظه|موعد|بعد|يوم|ايام|استرجاع|ارجاع|مرتجع|استبدال|تبديل|بدل)/i;
@@ -93,7 +94,11 @@
  }
  function quantityFor(lines,index,product){
   let quantity=explicitQuantity(lines[index],product);if(quantity)return quantity;
-  if(index>0&&!findAll(lines[index-1]).length){quantity=standaloneQuantity(lines[index-1]);if(quantity)return quantity}
+  if(index>0&&!findAll(lines[index-1]).length){
+   quantity=standaloneQuantity(lines[index-1]);
+   const belongsToPreviousModel=quantity&&index>1&&findAll(lines[index-2]).length;
+   if(quantity&&!belongsToPreviousModel)return quantity;
+  }
   let end=index+1,colorQuantity=0;
   for(;end<lines.length;end++){
    const line=normalize(lines[end]);
@@ -149,10 +154,10 @@
 
  let remoteLoaded=false,remotePromise=null;
  const engine={
-  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-30-v12',
+  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-31-v13',
   async loadRemote(force=false){
    if(remoteLoaded&&!force)return products;if(remotePromise)return remotePromise;
-   remotePromise=(async()=>{try{if(typeof api!=='function')return products;const data=await api('/profit-models');ignoredPhrases=(data.ignored_phrases||[]).map(normalize).filter(Boolean);if(Array.isArray(data.models)&&data.models.length){products=data.models.filter(model=>model.active!==false).map(model=>({id:model.key||String(model.id),databaseId:Number(model.id),name:model.name,cost:Number(model.cost||0),aliases:Array.isArray(model.aliases)?model.aliases:[model.name],offers:model.offers||{},deliveryIncluded:Boolean(model.deliveryIncluded)}));engine.version=`db:${data.version||Date.now()}`;remoteLoaded=true}return products}catch{return products}finally{remotePromise=null}})();
+   remotePromise=(async()=>{try{if(typeof api!=='function')return products;const data=await api('/profit-models');ignoredPhrases=(data.ignored_phrases||[]).map(normalize).filter(Boolean);if(Array.isArray(data.models)&&data.models.length){products=data.models.filter(model=>model.active!==false).map(model=>{const id=model.key||String(model.id);return{id,databaseId:Number(model.id),name:model.name,cost:Number(model.cost||0),aliases:cleanAliases(id,Array.isArray(model.aliases)?model.aliases:[model.name]),offers:model.offers||{},deliveryIncluded:Boolean(model.deliveryIncluded)}});engine.version=`db:${data.version||Date.now()}`;remoteLoaded=true}return products}catch{return products}finally{remotePromise=null}})();
    return remotePromise;
   }
  };
