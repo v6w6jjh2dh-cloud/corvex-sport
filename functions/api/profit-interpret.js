@@ -15,6 +15,7 @@ async function allowed(env,user){
 const outputText=data=>data.output_text||(data.output||[]).flatMap(item=>item.content||[]).find(item=>item.type==='output_text')?.text||'';
 const normalize=value=>String(value||'').toLowerCase().replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/ة/g,'ه').replace(/[ًٌٍَُِّْـ]/g,'').replace(/\s+/g,' ').trim();
 const explicitMModel=text=>/(?:بلوزه|بلوزة|تيشرت|تيشيرت|تشرت|بلايز)\s*(?:حرف\s*)?(?:m6|m|م6|[اأإ]م6|[اأإ]م|م)(?=\s|$)|(?:^|\s)و?حرف\s*(?:m|م|[اأإ]م)(?=\s|$)|(?:^|\s)(?:m6|م6|[اأإ]م6)(?=\s|$)|(?:^|\s)m(?=\s|$)/i.test(String(text||''));
+const clothingLike=value=>/(?:بنطلون|بناطيل|بلوز|تيشرت|تيشيرت|بولو|تريكو|جاكار|ترينغ|جيوب|جيب|سحاب|زرار|رياضه|رياضة|بيجام|بجام|كاردونيه|قطن|اولد|موديل|طقم|بدله|بدلة|قميص|شورت|هودي)/i.test(String(value||''));
 
 export async function onRequestPost({request,env}){
  const user=await auth(request,env);if(!await allowed(env,user))return json({error:'لا تملك صلاحية تحليل الأرباح'},403);
@@ -64,10 +65,10 @@ ${catalog}`;
  try{response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{authorization:`Bearer ${env.OPENAI_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({model:env.OPENAI_MODEL||'gpt-5-nano',instructions,input:text,reasoning:{effort:'minimal'},text:{format:{type:'json_schema',name:'corvex_profit_interpretation',strict:true,schema}}})})}catch{return json({error:'تعذر الاتصال بمحرك فهم الأرباح'},502)}
  const data=await response.json().catch(()=>({}));if(!response.ok)return json({error:data?.error?.message||'فشل الفهم السياقي للأرباح'},502);
  let parsed={};try{parsed=JSON.parse(outputText(data))}catch{return json({error:'نتيجة فهم الأرباح غير صالحة'},502)}
- const byKey=new Map(models.map(model=>[model.key,model])),combined=new Map(),unresolved=new Set((parsed.unresolved_models||[]).map(value=>String(value||'').trim()).filter(Boolean));
+ const byKey=new Map(models.map(model=>[model.key,model])),combined=new Map(),unresolved=new Set((parsed.unresolved_models||[]).map(value=>String(value||'').trim()).filter(value=>value&&clothingLike(value)));
  for(const item of parsed.items||[]){
   const model=byKey.get(String(item.model_key||'')),quantity=Math.max(1,Math.min(100,Number(item.quantity||1))),confidence=Number(item.confidence||0),evidence=String(item.evidence||'').trim();
-  if(!model)continue;if(model.key==='m'&&!explicitMModel(text))continue;if(confidence<0.75){if(evidence)unresolved.add(evidence);continue}
+  if(!model)continue;if(model.key==='m'&&!explicitMModel(text))continue;if(confidence<0.75){if(evidence&&clothingLike(evidence))unresolved.add(evidence);continue}
   const previous=combined.get(model.key)||{id:model.key,name:model.name,qty:0,cost:0};previous.qty+=quantity;previous.cost=Number((previous.qty*model.cost).toFixed(2));combined.set(model.key,previous);
  }
  const items=[...combined.values()],cost=Number(items.reduce((sum,item)=>sum+item.cost,0).toFixed(2));

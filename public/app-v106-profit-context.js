@@ -5,12 +5,19 @@
  async function calculate(text,localResult){
   const fallback=fallbackResult(localResult);
   if(!inProfitView()||typeof api!=='function'||!String(text||'').trim())return fallback;
+  // A complete deterministic result is final. Context is only a recovery
+  // helper for genuinely missing/ambiguous clothing phrases.
+  if(fallback.found&&!(fallback.unknown||[]).length)return fallback;
   const version=window.CORVEX_PRODUCT_RULES?.version||'unknown',key=`${version}:${String(text)}`;
   if(cache.has(key))return cache.get(key);
   try{
    const data=await api('/profit-interpret',{method:'POST',body:JSON.stringify({scope:'profits',text:String(text)})}),result=data?.result;
    if(!result||result.scope!=='profits'||!Array.isArray(result.items)||!Number.isFinite(Number(result.cost)))return fallback;
-   const safe={...result,cost:Number(result.cost),found:Number(result.found||result.items.length),unknown:Array.isArray(result.unknown)?result.unknown:[]};
+   const semanticUnknown=Array.isArray(result.unknown)?result.unknown:[];
+   const safe={...result,cost:Number(result.cost),found:Number(result.found||result.items.length),unknown:semanticUnknown};
+   // Never let contextual guesses turn a partly recognized order into a new
+   // blocking warning. In that case the central deterministic evidence wins.
+   if(fallback.found&&semanticUnknown.length)return fallback;
    cache.set(key,safe);if(cache.size>200)cache.delete(cache.keys().next().value);return safe;
   }catch{return fallback}
  }

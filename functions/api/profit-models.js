@@ -60,12 +60,11 @@ async function ensure(env){
   created_by INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
  )`).run();
- const count=await env.DB.prepare('SELECT COUNT(*) c FROM profit_models').first();
- if(Number(count?.c||0)===0){
-  for(const [key,name,cost,aliases,offers,deliveryIncluded] of SEED_MODELS){
-   await env.DB.prepare(`INSERT OR IGNORE INTO profit_models(model_key,name,cost,aliases_json,offers_json,delivery_included,active) VALUES(?,?,?,?,?,?,1)`)
-    .bind(key,name,cost,JSON.stringify(aliases),JSON.stringify(offers),deliveryIncluded).run();
-  }
+ // Keep the central catalogue complete even when models were added after the
+ // table was first created. Existing rows (including manual edits) stay intact.
+ for(const [key,name,cost,aliases,offers,deliveryIncluded] of SEED_MODELS){
+  await env.DB.prepare(`INSERT OR IGNORE INTO profit_models(model_key,name,cost,aliases_json,offers_json,delivery_included,active) VALUES(?,?,?,?,?,?,1)`)
+   .bind(key,name,cost,JSON.stringify(aliases),JSON.stringify(offers),deliveryIncluded).run();
  }
  const zip=await env.DB.prepare("SELECT id,aliases_json FROM profit_models WHERE model_key='zip_pockets'").first();
  if(zip){
