@@ -9,10 +9,13 @@ async function auth(request,env){
 
 function normalizePhone(value=''){
   const map={'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9','۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9'};
-  let d=String(value||'').replace(/[٠-٩۰-۹]/g,x=>map[x]||x).replace(/\D/g,'');
+  const raw=String(value||'').trim().replace(/[٠-٩۰-۹]/g,x=>map[x]||x);
+  let d=raw.replace(/\D/g,'');
   if(d.startsWith('00962'))d=d.slice(2);
   if(d.startsWith('962')&&d.length>=12)d='0'+d.slice(3);
   else if(d.length===9&&d.startsWith('7'))d='0'+d;
+  else if(raw.startsWith('+'))d='+'+d;
+  else if(raw.startsWith('00'))d='+'+d.slice(2);
   return d;
 }
 
