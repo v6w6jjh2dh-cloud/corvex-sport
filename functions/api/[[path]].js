@@ -1,4 +1,5 @@
 import {dominantSettlementDate,ensureSettlementDateColumn} from './_settlement-date.js';
+import {runSchemaMigrationOnce} from './_schema-migrations.js';
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -118,58 +119,88 @@ function orderSelectSql(where = '') {
 }
 
 async function ensurePartialProfitColumns(env) {
-  const info=await env.DB.prepare("PRAGMA table_info(orders)").all();
-  const cols=new Set((info.results||[]).map(r=>r.name));
-  const wanted=[
-    ['partial_cost_reviewed',"INTEGER NOT NULL DEFAULT 0"],
-    ['partial_received_items',"TEXT NOT NULL DEFAULT ''"],
-    ['profit_reviewed_settlement_id','INTEGER'],
-    ['profit_reviewed_at','TEXT']
-  ];
-  for(const [name,type] of wanted){
-    if(cols.has(name))continue;
-    try{
-      await env.DB.prepare(`ALTER TABLE orders ADD COLUMN ${name} ${type}`).run();
-    }catch(error){
-      if(!/duplicate column name/i.test(String(error?.message||error)))throw error;
+  await runSchemaMigrationOnce(env,'2026-09-01-partial-profit-columns-v1',async()=>{
+    const info=await env.DB.prepare("PRAGMA table_info(orders)").all();
+    const cols=new Set((info.results||[]).map(r=>r.name));
+    const wanted=[
+      ['partial_cost_reviewed',"INTEGER NOT NULL DEFAULT 0"],
+      ['partial_received_items',"TEXT NOT NULL DEFAULT ''"],
+      ['profit_reviewed_settlement_id','INTEGER'],
+      ['profit_reviewed_at','TEXT']
+    ];
+    for(const [name,type] of wanted){
+      if(cols.has(name))continue;
+      try{
+        await env.DB.prepare(`ALTER TABLE orders ADD COLUMN ${name} ${type}`).run();
+      }catch(error){
+        if(!/duplicate column name/i.test(String(error?.message||error)))throw error;
+      }
     }
-  }
-  // Preserve reviews saved by the previous profit page, but bind them to the
-  // exact delivery-company settlement so a later settlement cannot reuse them.
-  if(cols.has('delivery_company_settlement_id')&&cols.has('settlement_note')){
+    // Preserve reviews saved by the previous profit page, but bind them to the
+    // exact delivery-company settlement so a later settlement cannot reuse them.
+    if(cols.has('delivery_company_settlement_id')&&cols.has('settlement_note')){
+      await env.DB.prepare(`UPDATE orders SET
+        profit_reviewed_settlement_id=delivery_company_settlement_id,
+        profit_reviewed_at=COALESCE(profit_reviewed_at,updated_at,datetime('now'))
+        WHERE profit_reviewed_settlement_id IS NULL
+          AND partial_cost_reviewed=1
+          AND delivery_company_settlement_id IS NOT NULL
+          AND settlement_note LIKE '%[MANUAL_COST:%'`).run();
+    }
+    // Older delivery imports classified every "delivered and returned" row as
+    // fee-only refusal. A collected merchandise amount means partial delivery.
     await env.DB.prepare(`UPDATE orders SET
-      profit_reviewed_settlement_id=delivery_company_settlement_id,
-      profit_reviewed_at=COALESCE(profit_reviewed_at,updated_at,datetime('now'))
-      WHERE profit_reviewed_settlement_id IS NULL
-        AND partial_cost_reviewed=1
-        AND delivery_company_settlement_id IS NOT NULL
-        AND settlement_note LIKE '%[MANUAL_COST:%'`).run();
-  }
-  // Older delivery imports classified every "delivered and returned" row as
-  // fee-only refusal. A collected merchandise amount means partial delivery.
-  await env.DB.prepare(`UPDATE orders SET
-    delivery_status='partial',
-    partial_cost_reviewed=0,
-    partial_received_items='',
-    updated_at=datetime('now')
-    WHERE delivery_company_settled=1
-      AND delivery_status='refused_fee_paid'
-      AND COALESCE(delivered_amount,0)>COALESCE(delivery_fee,0)+0.001`).run();
+      delivery_status='partial',
+      partial_cost_reviewed=0,
+      partial_received_items='',
+      updated_at=datetime('now')
+      WHERE delivery_company_settled=1
+        AND delivery_status='refused_fee_paid'
+        AND COALESCE(delivered_amount,0)>COALESCE(delivery_fee,0)+0.001`).run();
+  });
 }
 
+let orderDeparturesReadyPromise=null;
 async function ensureOrderDepartures(env){
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS order_departures (
-    order_id INTEGER PRIMARY KEY,
-    store_id INTEGER,
-    first_batch_id INTEGER,
-    departed_at TEXT NOT NULL,
-    FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
-    FOREIGN KEY(first_batch_id) REFERENCES print_batches(id) ON DELETE SET NULL
-  )`).run();
-  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_order_departures_date_store ON order_departures(departed_at,store_id)').run();
-  // One-time-safe migration for every order printed before this ledger existed.
-  await env.DB.prepare(`INSERT OR IGNORE INTO order_departures(order_id,store_id,departed_at)
-    SELECT id,store_id,first_printed_at FROM orders WHERE first_printed_at IS NOT NULL`).run();
+  if(!orderDeparturesReadyPromise){
+    orderDeparturesReadyPromise=(async()=>{
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS order_departures (
+        order_id INTEGER PRIMARY KEY,
+        store_id INTEGER,
+        first_batch_id INTEGER,
+        departed_at TEXT NOT NULL,
+        FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
+        FOREIGN KEY(first_batch_id) REFERENCES print_batches(id) ON DELETE SET NULL
+      )`).run();
+      await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_order_departures_date_store ON order_departures(departed_at,store_id)').run();
+      // Backfill old printed orders once. New print batches insert their own rows.
+      await runSchemaMigrationOnce(env,'2026-09-01-order-departures-backfill-v1',async()=>{
+        await env.DB.prepare(`INSERT OR IGNORE INTO order_departures(order_id,store_id,departed_at)
+          SELECT id,store_id,first_printed_at FROM orders WHERE first_printed_at IS NOT NULL`).run();
+      });
+    })();
+  }
+  try{
+    await orderDeparturesReadyPromise;
+  }catch(error){
+    orderDeparturesReadyPromise=null;
+    throw error;
+  }
+}
+
+async function ensureD1PerformanceIndexes(env){
+  await runSchemaMigrationOnce(env,'2026-09-01-d1-performance-indexes-v1',async()=>{
+    await ensureSettlementDateColumn(env);
+    const statements=[
+      'CREATE INDEX IF NOT EXISTS idx_orders_store_created_id ON orders(store_id,created_at,id)',
+      'CREATE INDEX IF NOT EXISTS idx_orders_store_first_printed_id ON orders(store_id,first_printed_at,id)',
+      'CREATE INDEX IF NOT EXISTS idx_orders_store_status_id ON orders(store_id,delivery_status,id)',
+      'CREATE INDEX IF NOT EXISTS idx_orders_company_settlement_id ON orders(delivery_company_settlement_id,id)',
+      'CREATE INDEX IF NOT EXISTS idx_orders_settled_at_id ON orders(settled_at,id)',
+      'CREATE INDEX IF NOT EXISTS idx_settlements_statement_store ON delivery_company_settlements(statement_date,store_id,id)'
+    ];
+    for(const sql of statements)await env.DB.prepare(sql).run();
+  });
 }
 
 async function ensureReturnsSchema(env) {
@@ -485,23 +516,24 @@ async function listOrders(url, env) {
   if (fromCode) { where.push('o.order_code >= ?'); params.push(Number(fromCode)); }
   if (toCode) { where.push('o.order_code <= ?'); params.push(Number(toCode)); }
   if(dateBasis==='first_printed'){
-    const firstPrintDate="date(o.first_printed_at,'+3 hours')";
     where.push('o.first_printed_at IS NOT NULL');
-    if(fromDate){where.push(`${firstPrintDate} >= date(?)`);params.push(fromDate)}
-    if(toDate){where.push(`${firstPrintDate} <= date(?)`);params.push(toDate)}
+    if(fromDate){where.push("o.first_printed_at >= datetime(?,'-3 hours')");params.push(fromDate)}
+    if(toDate){where.push("o.first_printed_at < datetime(?,'+1 day','-3 hours')");params.push(toDate)}
   }else if(dateBasis==='delivery'){
     const deliveryDate=`CASE WHEN strftime('%w',o.first_printed_at,'+3 hours')='4' THEN date(o.first_printed_at,'+3 hours','+2 days') ELSE date(o.first_printed_at,'+3 hours','+1 day') END`;
     where.push('o.first_printed_at IS NOT NULL');
     if(fromDate){where.push(`${deliveryDate} >= date(?)`);params.push(fromDate)}
     if(toDate){where.push(`${deliveryDate} <= date(?)`);params.push(toDate)}
   }else if(dateBasis==='settled'){
-    const settlementDate="COALESCE((SELECT ds.statement_date FROM delivery_company_settlements ds WHERE ds.id=o.delivery_company_settlement_id),date(o.settled_at,'+3 hours'))";
-    where.push('o.settled_at IS NOT NULL');
-    if(fromDate){where.push(`${settlementDate} >= date(?)`);params.push(fromDate)}
-    if(toDate){where.push(`${settlementDate} <= date(?)`);params.push(toDate)}
+    if(!settlementId){
+      const settlementDate="COALESCE((SELECT ds.statement_date FROM delivery_company_settlements ds WHERE ds.id=o.delivery_company_settlement_id),date(o.settled_at,'+3 hours'))";
+      where.push('o.settled_at IS NOT NULL');
+      if(fromDate){where.push(`${settlementDate} >= date(?)`);params.push(fromDate)}
+      if(toDate){where.push(`${settlementDate} <= date(?)`);params.push(toDate)}
+    }
   }else{
-    if (fromDate) { where.push("date(o.created_at) >= date(?)"); params.push(fromDate); }
-    if (toDate) { where.push("date(o.created_at) <= date(?)"); params.push(toDate); }
+    if (fromDate) { where.push('o.created_at >= datetime(?)'); params.push(fromDate); }
+    if (toDate) { where.push("o.created_at < datetime(?,'+1 day')"); params.push(toDate); }
   }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -594,12 +626,15 @@ export async function onRequest(context) {
 
     if (path === '/dashboard' && method === 'GET') {
       await ensureOrderDepartures(env);
+      await ensureD1PerformanceIndexes(env);
       const stats = await env.DB.prepare(`SELECT
         COUNT(*) total,
         SUM(CASE WHEN printed=0 THEN 1 ELSE 0 END) unprinted,
         SUM(CASE WHEN printed=1 THEN 1 ELSE 0 END) printed,
         SUM(CASE WHEN date(created_at)=date('now') THEN 1 ELSE 0 END) today,
-        (SELECT COUNT(*) FROM order_departures od WHERE date(od.departed_at,'+3 hours')=date('now','+3 hours')) outgoing_today,
+        (SELECT COUNT(*) FROM order_departures od
+          WHERE od.departed_at>=datetime(date('now','+3 hours'),'-3 hours')
+            AND od.departed_at<datetime(date('now','+3 hours','+1 day'),'-3 hours')) outgoing_today,
         SUM(CASE WHEN delivery_status='delivered' THEN 1 ELSE 0 END) delivered,
         SUM(CASE WHEN delivery_status='delivered_adjusted' THEN 1 ELSE 0 END) delivered_adjusted,
         SUM(CASE WHEN delivery_status='partial' THEN 1 ELSE 0 END) partial,
@@ -620,7 +655,9 @@ export async function onRequest(context) {
         s.name store_name,
         COUNT(od.order_id) outgoing_count
         FROM stores s
-        LEFT JOIN order_departures od ON od.store_id=s.id AND date(od.departed_at,'+3 hours')=date('now','+3 hours')
+        LEFT JOIN order_departures od ON od.store_id=s.id
+          AND od.departed_at>=datetime(date('now','+3 hours'),'-3 hours')
+          AND od.departed_at<datetime(date('now','+3 hours','+1 day'),'-3 hours')
         WHERE s.is_active=1
         GROUP BY s.id,s.name
         HAVING COUNT(od.order_id) > 0
@@ -639,14 +676,15 @@ export async function onRequest(context) {
 
     if(path==='/outgoing-report'&&method==='GET'){
       await ensureOrderDepartures(env);
+      await ensureD1PerformanceIndexes(env);
       const from=(url.searchParams.get('from_date')||'').trim();
       const to=(url.searchParams.get('to_date')||'').trim();
       const storeId=Number(url.searchParams.get('store_id')||0);
       const firstPrintDateExpr="date(od.departed_at,'+3 hours')";
       const where=['1=1'];
       const params=[];
-      if(from){where.push(`${firstPrintDateExpr}>=date(?)`);params.push(from)}
-      if(to){where.push(`${firstPrintDateExpr}<=date(?)`);params.push(to)}
+      if(from){where.push("od.departed_at>=datetime(?,'-3 hours')");params.push(from)}
+      if(to){where.push("od.departed_at<datetime(?,'+1 day','-3 hours')");params.push(to)}
       if(storeId){where.push("od.store_id=?");params.push(storeId)}
 
       const rows=await env.DB.prepare(`SELECT
@@ -1297,6 +1335,7 @@ export async function onRequest(context) {
 
     if (path === '/orders' && method === 'GET') {
       await ensurePartialProfitColumns(env);
+      await ensureD1PerformanceIndexes(env);
       const result = await listOrders(url, env);
       return json({ orders: result.results || [] });
     }

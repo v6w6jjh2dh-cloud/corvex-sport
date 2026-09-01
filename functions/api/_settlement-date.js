@@ -15,13 +15,24 @@ export function dominantSettlementDate(rows=[]){
     .sort((a,b)=>b[1]-a[1]||b[0].localeCompare(a[0]))[0]?.[0]||'';
 }
 
+let settlementDateReadyPromise=null;
 export async function ensureSettlementDateColumn(env){
-  const info=await env.DB.prepare('PRAGMA table_info(delivery_company_settlements)').all();
-  const columns=new Set((info.results||[]).map(row=>row.name));
-  if(columns.has('statement_date'))return;
+  if(!settlementDateReadyPromise){
+    settlementDateReadyPromise=(async()=>{
+      const info=await env.DB.prepare('PRAGMA table_info(delivery_company_settlements)').all();
+      const columns=new Set((info.results||[]).map(row=>row.name));
+      if(columns.has('statement_date'))return;
+      try{
+        await env.DB.prepare('ALTER TABLE delivery_company_settlements ADD COLUMN statement_date TEXT').run();
+      }catch(error){
+        if(!/duplicate column name/i.test(String(error?.message||error)))throw error;
+      }
+    })();
+  }
   try{
-    await env.DB.prepare('ALTER TABLE delivery_company_settlements ADD COLUMN statement_date TEXT').run();
+    await settlementDateReadyPromise;
   }catch(error){
-    if(!/duplicate column name/i.test(String(error?.message||error)))throw error;
+    settlementDateReadyPromise=null;
+    throw error;
   }
 }
