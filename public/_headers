@@ -1,14 +1,8 @@
 /index.html
   Cache-Control: no-cache, no-store, max-age=0, must-revalidate
 
-/app-v62.js
-  Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+/*.js
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
 
-/app-v68-direct-orders.js
-  Cache-Control: no-cache, no-store, max-age=0, must-revalidate
-
-/app-v70-direct-loader.js
-  Cache-Control: no-cache, no-store, max-age=0, must-revalidate
-
-/app.js
-  Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+/*.css
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400

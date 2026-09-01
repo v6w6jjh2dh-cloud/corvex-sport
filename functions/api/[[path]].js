@@ -481,6 +481,10 @@ async function listOrders(url, env) {
   const toCode = url.searchParams.get('to_code');
   const fromDate = url.searchParams.get('from_date');
   const toDate = url.searchParams.get('to_date');
+  const requestedLimit = Number(url.searchParams.get('limit') || 1000);
+  const limit = Math.max(1, Math.min(1000, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 1000));
+  const requestedOffset = Number(url.searchParams.get('offset') || 0);
+  const offset = Math.max(0, Math.min(100000, Number.isFinite(requestedOffset) ? Math.floor(requestedOffset) : 0));
   const params = [];
   const where = [];
 
@@ -537,8 +541,11 @@ async function listOrders(url, env) {
   }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const stmt = env.DB.prepare(`${orderSelectSql(clause)} ORDER BY o.id DESC LIMIT 1000`).bind(...params);
-  return await stmt.all();
+  const stmt = env.DB.prepare(`${orderSelectSql(clause)} ORDER BY o.id DESC LIMIT ? OFFSET ?`)
+    .bind(...params, limit + 1, offset);
+  const result = await stmt.all();
+  const rows = result.results || [];
+  return {results:rows.slice(0,limit),has_more:rows.length>limit,limit,offset};
 }
 
 export async function onRequest(context) {
@@ -1337,7 +1344,7 @@ export async function onRequest(context) {
       await ensurePartialProfitColumns(env);
       await ensureD1PerformanceIndexes(env);
       const result = await listOrders(url, env);
-      return json({ orders: result.results || [] });
+      return json({orders:result.results||[],has_more:result.has_more,limit:result.limit,offset:result.offset});
     }
 
     if (path === '/orders' && method === 'POST') {
@@ -1360,7 +1367,7 @@ export async function onRequest(context) {
         SELECT id,order_code,created_at,phone
         FROM orders
         WHERE store_id=?
-          AND datetime(created_at) >= datetime('now','-48 hours')
+          AND created_at >= datetime('now','-48 hours')
         ORDER BY id DESC
       `).bind(storeId).all();
       const duplicate = (recentOrders.results||[]).find(order=>normalizePhone(order.phone)===phone)||null;

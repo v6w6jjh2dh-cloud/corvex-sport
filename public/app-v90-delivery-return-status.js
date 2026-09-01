@@ -23,5 +23,5 @@
    if(sel.value!==target){sel.value=target;sel.dispatchEvent(new Event('change',{bubbles:true}));}
   });
  }
- new MutationObserver(()=>setTimeout(fixReturnAmounts,40)).observe(document.documentElement,{childList:true,subtree:true});setInterval(fixReturnAmounts,500);
+ new MutationObserver(()=>setTimeout(fixReturnAmounts,40)).observe(document.documentElement,{childList:true,subtree:true});fixReturnAmounts();
 })();

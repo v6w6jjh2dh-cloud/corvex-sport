@@ -16,6 +16,16 @@ function homeView(){
   if(can('returns'))return 'returns-center';
   return 'orders';
 }
+async function openInitialView(){
+  if(document.readyState==='loading'){
+    await new Promise(resolve=>document.addEventListener('DOMContentLoaded',resolve,{once:true}));
+  }
+  if(typeof window.__corvexOpenRememberedView==='function'){
+    const restored=await window.__corvexOpenRememberedView();
+    if(restored)return;
+  }
+  await show(homeView());
+}
 async function loadRegionIndex(force=false){
   try{
     if(!force){
@@ -966,14 +976,14 @@ async function boot(){
       try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v80','1')}catch{}
     }
     renderShell();
-    await show(homeView())
+    await openInitialView();
   }catch{localStorage.removeItem('corvex_token');state.token='';renderLogin()}
 }
 function renderLogin(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>CORVEX SPORT</h1><p>نظام إدارة وطباعة الطلبات</p></div><div class="field"><label>اسم المستخدم</label><input id="lu" class="input"></div><br><div class="field"><label>كلمة المرور</label><input id="lp" type="password" class="input"></div><button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:18px">تسجيل الدخول</button></div></div>`;$('#loginBtn').onclick=async()=>{try{const d=await api('/login',{method:'POST',body:JSON.stringify({username:$('#lu').value,password:$('#lp').value})});state.token=d.token;state.user=d.user;localStorage.setItem('corvex_token',state.token);
     if(state.user?.role==='admin' && localStorage.getItem('corvex_schema_v80')!=='1'){
       try{await api('/migrate',{method:'POST'});localStorage.setItem('corvex_schema_v80','1')}catch{}
     }
-    renderShell();show(homeView())}catch(e){toast(e.message)}}}
+    renderShell();openInitialView()}catch(e){toast(e.message)}}}
 function renderSetup(){app.innerHTML=`<div class="login-page"><div class="login-card"><div class="login-brand"><div class="logo-mark">C</div><h1>تهيئة CORVEX SPORT</h1><p>أنشئ أول حساب مدير</p></div><div class="field"><label>الاسم الظاهر</label><input id="sd" class="input" value="Admin"></div><br><div class="field"><label>اسم المستخدم</label><input id="su" class="input" value="admin"></div><br><div class="field"><label>كلمة المرور</label><input id="sp" type="password" class="input"></div><button id="setupBtn" class="btn btn-accent" style="width:100%;margin-top:18px">إنشاء النظام</button></div></div>`;$('#setupBtn').onclick=async()=>{try{await api('/setup',{method:'POST',body:JSON.stringify({display_name:$('#sd').value,username:$('#su').value,password:$('#sp').value})});toast('تمت التهيئة');renderLogin()}catch(e){toast(e.message)}}}
 function renderShell(){
   app.innerHTML=`<div class="shell">
@@ -1584,17 +1594,20 @@ async function ordersView(){
       </div>
       <div id="ordersTable"></div>
     </div>`;
+  state.ordersOffset=0;
   $('#datePreset').onchange=()=>setDatePreset($('#datePreset').value,$('#fdSearch'),$('#tdSearch'));
-  $('#searchBtn').onclick=loadOrders;
+  $('#searchBtn').onclick=()=>{state.ordersOffset=0;loadOrders()};
   $('#resetSearch').onclick=()=>{
     ['os','statusFilter','ps','q','fc','tc','fdSearch','tdSearch'].forEach(id=>{const e=$('#'+id);if(e)e.value=''});
     $('#datePreset').value='all';
+    state.ordersOffset=0;
     loadOrders();
   };
   await loadOrders();
 }
 async function loadOrders(){
   const p=new URLSearchParams();
+  const pageSize=200;
   if($('#q')?.value)p.set('q',$('#q').value);
   if($('#fc')?.value)p.set('from_code',$('#fc').value);
   if($('#tc')?.value)p.set('to_code',$('#tc').value);
@@ -1603,9 +1616,16 @@ async function loadOrders(){
   if($('#os')?.value)p.set('store_id',$('#os').value);
   if($('#fdSearch')?.value)p.set('from_date',$('#fdSearch').value);
   if($('#tdSearch')?.value)p.set('to_date',$('#tdSearch').value);
+  p.set('limit',String(pageSize));
+  p.set('offset',String(Math.max(0,Number(state.ordersOffset||0))));
   const d=await api('/orders?'+p.toString());
   state.orders=d.orders;
   renderOrdersTable('#ordersTable',state.orders,false);
+  const table=$('#ordersTable');
+  const page=Math.floor(Number(d.offset||0)/pageSize)+1;
+  table.insertAdjacentHTML('beforeend',`<div class="actions orders-pagination" style="justify-content:center;margin-top:16px"><button id="ordersPrevPage" class="btn btn-soft" ${Number(d.offset||0)<=0?'disabled':''}>السابق</button><span class="pill">صفحة ${page}</span><button id="ordersNextPage" class="btn btn-soft" ${d.has_more?'':'disabled'}>التالي</button></div>`);
+  $('#ordersPrevPage').onclick=()=>{state.ordersOffset=Math.max(0,Number(state.ordersOffset||0)-pageSize);loadOrders()};
+  $('#ordersNextPage').onclick=()=>{state.ordersOffset=Number(state.ordersOffset||0)+pageSize;loadOrders()};
 }
 const DELIVERY_STATUS_LABELS={
   pending:'قيد التوصيل',

@@ -15,5 +15,5 @@
   });
  }
  new MutationObserver(()=>setTimeout(applyTwoDinarRule,40)).observe(document.documentElement,{childList:true,subtree:true});
- setInterval(applyTwoDinarRule,500);applyTwoDinarRule();
+ applyTwoDinarRule();
 })();

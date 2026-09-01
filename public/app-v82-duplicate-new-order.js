@@ -18,5 +18,5 @@
   };
  }
  new MutationObserver(()=>setTimeout(install,20)).observe(document.documentElement,{childList:true,subtree:true});
- setInterval(install,500);install();
+ install();
 })();

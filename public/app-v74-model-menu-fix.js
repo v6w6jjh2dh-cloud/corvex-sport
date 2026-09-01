@@ -8,5 +8,5 @@
  const originalRenderShell=window.renderShell;
  if(typeof originalRenderShell==='function')window.renderShell=function(){const r=originalRenderShell.apply(this,arguments);setTimeout(install,0);return r};
  new MutationObserver(install).observe(document.documentElement,{childList:true,subtree:true});
- setInterval(()=>{if(state?.user)install()},1000);install();
+ install();
 })();
