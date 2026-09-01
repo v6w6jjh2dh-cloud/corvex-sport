@@ -1,3 +1,5 @@
+import {dominantSettlementDate,ensureSettlementDateColumn} from './_settlement-date.js';
+
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
   headers: { 'content-type': 'application/json; charset=utf-8' }
@@ -393,6 +395,7 @@ async function ensureBusinessSchema(env) {
     match_type TEXT NOT NULL DEFAULT '',
     PRIMARY KEY(settlement_id,phone,order_id)
   )`).run();
+  await ensureSettlementDateColumn(env);
 
   const dci=await env.DB.prepare("PRAGMA table_info(orders)").all();
   const dcc=new Set((dci.results||[]).map(r=>r.name));
@@ -450,6 +453,8 @@ async function listOrders(url, env) {
   const params = [];
   const where = [];
 
+  if(dateBasis==='settled')await ensureSettlementDateColumn(env);
+
   if (q) {
     where.push('(CAST(o.order_code AS TEXT) LIKE ? OR o.phone LIKE ? OR o.recipient_name LIKE ? OR o.detailed_address LIKE ?)');
     params.push(`%${q}%`,`%${q}%`,`%${q}%`,`%${q}%`);
@@ -490,9 +495,10 @@ async function listOrders(url, env) {
     if(fromDate){where.push(`${deliveryDate} >= date(?)`);params.push(fromDate)}
     if(toDate){where.push(`${deliveryDate} <= date(?)`);params.push(toDate)}
   }else if(dateBasis==='settled'){
+    const settlementDate="COALESCE((SELECT ds.statement_date FROM delivery_company_settlements ds WHERE ds.id=o.delivery_company_settlement_id),date(o.settled_at,'+3 hours'))";
     where.push('o.settled_at IS NOT NULL');
-    if(fromDate){where.push("date(o.settled_at,'+3 hours') >= date(?)");params.push(fromDate)}
-    if(toDate){where.push("date(o.settled_at,'+3 hours') <= date(?)");params.push(toDate)}
+    if(fromDate){where.push(`${settlementDate} >= date(?)`);params.push(fromDate)}
+    if(toDate){where.push(`${settlementDate} <= date(?)`);params.push(toDate)}
   }else{
     if (fromDate) { where.push("date(o.created_at) >= date(?)"); params.push(fromDate); }
     if (toDate) { where.push("date(o.created_at) <= date(?)"); params.push(toDate); }
@@ -998,6 +1004,7 @@ export async function onRequest(context) {
 
     if(path==='/delivery-reconcile/commit'&&method==='POST'){
       await ensurePartialProfitColumns(env);
+      await ensureSettlementDateColumn(env);
       const b=await readBody(request);
       const storeId=Number(b.store_id||0);
       const sourceName=String(b.source_name||'').trim();
@@ -1057,6 +1064,7 @@ export async function onRequest(context) {
           deliveryFee,
           note:String(row.note||'').trim(),
           phone:normalizePhone(row.phone||order.phone),
+          shipment_date:String(row.shipment_date||'').trim(),
           match_type:String(row.match_type||'matched')
         });
       }
@@ -1074,11 +1082,12 @@ export async function onRequest(context) {
       }
 
       const code='DC-'+Date.now();
+      const statementDate=dominantSettlementDate(accepted.map(x=>({shipment_date:x.shipment_date||x.order.delivery_date})));
       const settlementRes=await env.DB.prepare(`INSERT INTO delivery_company_settlements(
         settlement_code,store_id,source_name,matched_count,unmatched_count,duplicate_count,
-        delivered_count,refused_count,pending_count,collected_amount,delivery_fees,net_due,created_by
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .bind(code,storeId,sourceName,accepted.length,unmatched,duplicate,deliveredCount,refusedCount,pendingCount,collected,fees,netDue,me.id).run();
+        delivered_count,refused_count,pending_count,collected_amount,delivery_fees,net_due,created_by,statement_date
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .bind(code,storeId,sourceName,accepted.length,unmatched,duplicate,deliveredCount,refusedCount,pendingCount,collected,fees,netDue,me.id,statementDate||null).run();
       const settlementId=settlementRes.meta.last_row_id;
 
       const statements=[];
@@ -1113,7 +1122,7 @@ export async function onRequest(context) {
       }
 
       return json({settlement:{
-        id:settlementId,settlement_code:code,matched_count:accepted.length,
+        id:settlementId,settlement_code:code,statement_date:statementDate||null,matched_count:accepted.length,
         unmatched_count:unmatched,duplicate_count:duplicate,
         delivered_count:deliveredCount,refused_count:refusedCount,pending_count:pendingCount,
         collected_amount:collected,delivery_fees:fees,net_due:netDue
