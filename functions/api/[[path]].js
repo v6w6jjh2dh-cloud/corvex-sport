@@ -203,6 +203,27 @@ async function ensureD1PerformanceIndexes(env){
   });
 }
 
+async function refreshDeliveryCompanySettlementTotals(env,settlementId){
+  const id=Number(settlementId||0);
+  if(!id)return;
+  const totals=await env.DB.prepare(`SELECT
+    COUNT(*) matched_count,
+    COALESCE(SUM(CASE WHEN delivery_status IN ('delivered','delivered_adjusted','partial') THEN 1 ELSE 0 END),0) delivered_count,
+    COALESCE(SUM(CASE WHEN delivery_status IN ('refused_fee_paid','refused_no_fee','canceled_before_arrival') THEN 1 ELSE 0 END),0) refused_count,
+    COALESCE(SUM(CASE WHEN delivery_status='pending' THEN 1 ELSE 0 END),0) pending_count,
+    COALESCE(SUM(CASE WHEN delivery_status IN ('delivered','delivered_adjusted','partial','refused_fee_paid') THEN delivered_amount ELSE 0 END),0) collected_amount,
+    COALESCE(SUM(CASE WHEN delivery_status IN ('delivered','delivered_adjusted','partial','refused_fee_paid','refused_no_fee','canceled_before_arrival') THEN delivery_fee ELSE 0 END),0) delivery_fees,
+    COALESCE(SUM(CASE WHEN delivery_status<>'pending' THEN cash_collected ELSE 0 END),0) net_due
+    FROM orders WHERE delivery_company_settlement_id=?`).bind(id).first();
+  await env.DB.prepare(`UPDATE delivery_company_settlements SET
+    matched_count=?,delivered_count=?,refused_count=?,pending_count=?,
+    collected_amount=?,delivery_fees=?,net_due=? WHERE id=?`)
+    .bind(Number(totals?.matched_count||0),Number(totals?.delivered_count||0),
+      Number(totals?.refused_count||0),Number(totals?.pending_count||0),
+      Number(totals?.collected_amount||0),Number(totals?.delivery_fees||0),
+      Number(totals?.net_due||0),id).run();
+}
+
 async function ensureReturnsSchema(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS return_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1482,7 +1503,13 @@ export async function onRequest(context) {
       if(!ids.length)return json({error:'حدد طلباً واحداً على الأقل'},400);
       if(!allowed.has(status))return json({error:'حالة الطلب غير صحيحة'},400);
       const marks=ids.map(()=>'?').join(',');
-      const rows=await env.DB.prepare(`SELECT id,amount,delivered_amount,delivery_fee FROM orders WHERE id IN (${marks})`).bind(...ids).all();
+      const rows=await env.DB.prepare(`SELECT id,amount,delivered_amount,delivery_fee,delivery_company_settled,delivery_company_settlement_id FROM orders WHERE id IN (${marks})`).bind(...ids).all();
+      const reopenedSettlementIds=status==='pending'
+        ?[...new Set((rows.results||[]).map(o=>Number(o.delivery_company_settlement_id||0)).filter(Boolean))]
+        :[];
+      if(status==='pending'&&me.role!=='admin'&&(rows.results||[]).some(o=>Number(o.delivery_company_settled||0)===1)){
+        return json({error:'إرجاع طلب مُسوّى إلى قيد التوصيل يحتاج صلاحية مدير'},423);
+      }
       const statements=(rows.results||[]).map(o=>{
         const deliveredAmount=status==='delivered'?Number(o.amount||0):
           (['delivered_adjusted','partial'].includes(status)?Number(o.delivered_amount||o.amount||0):0);
@@ -1491,11 +1518,17 @@ export async function onRequest(context) {
         return env.DB.prepare(`UPDATE orders SET delivery_status=?,delivered_amount=?,delivery_fee=?,cash_collected=?,
           partial_cost_reviewed=CASE WHEN ?='partial' THEN 0 ELSE partial_cost_reviewed END,
           partial_received_items=CASE WHEN ?='partial' THEN '' ELSE partial_received_items END,
-          settled_at=CASE WHEN ?='pending' THEN NULL ELSE datetime('now') END,updated_at=datetime('now') WHERE id=?`)
-          .bind(status,deliveredAmount,fee,cash,status,status,status,o.id);
+          settled_at=CASE WHEN ?='pending' THEN NULL ELSE datetime('now') END,
+          delivery_company_settled=CASE WHEN ?='pending' THEN 0 ELSE delivery_company_settled END,
+          delivery_company_settlement_id=CASE WHEN ?='pending' THEN NULL ELSE delivery_company_settlement_id END,
+          profit_reviewed_settlement_id=CASE WHEN ?='pending' THEN NULL ELSE profit_reviewed_settlement_id END,
+          profit_reviewed_at=CASE WHEN ?='pending' THEN NULL ELSE profit_reviewed_at END,
+          updated_at=datetime('now') WHERE id=?`)
+          .bind(status,deliveredAmount,fee,cash,status,status,status,status,status,status,status,o.id);
       });
       for(let i=0;i<statements.length;i+=40)await env.DB.batch(statements.slice(i,i+40));
-      return json({ok:true,updated:statements.length,status_label:STATUS_LABELS[status]||status});
+      for(const settlementId of reopenedSettlementIds)await refreshDeliveryCompanySettlementTotals(env,settlementId);
+      return json({ok:true,updated:statements.length,status_label:STATUS_LABELS[status]||status,reopened_settlements:reopenedSettlementIds});
     }
 
     const printedMatch=path.match(/^\/orders\/(\d+)\/printed$/);
@@ -1562,6 +1595,9 @@ export async function onRequest(context) {
       const returnedPieces = Math.max(0, Number(b.returned_pieces || 0));
       const note = String(b.settlement_note || '').trim();
       const printed = Number(b.printed) === 1 ? 1 : 0;
+      const current=await env.DB.prepare('SELECT delivery_company_settled,delivery_company_settlement_id FROM orders WHERE id=?').bind(id).first();
+      if(!current)return json({error:'الطلب غير موجود'},404);
+      const reopenedSettlementId=status==='pending'?Number(current.delivery_company_settlement_id||0):0;
 
       await env.DB.prepare(`UPDATE orders SET
         delivery_status=?,
@@ -1576,13 +1612,20 @@ export async function onRequest(context) {
         returned_pieces=?,
         settlement_note=?,
         settled_at=CASE WHEN ?='pending' THEN NULL ELSE datetime('now') END,
+        delivery_company_settled=CASE WHEN ?='pending' THEN 0 ELSE delivery_company_settled END,
+        delivery_company_settlement_id=CASE WHEN ?='pending' THEN NULL ELSE delivery_company_settlement_id END,
+        profit_reviewed_settlement_id=CASE WHEN ?='pending' THEN NULL ELSE profit_reviewed_settlement_id END,
+        profit_reviewed_at=CASE WHEN ?='pending' THEN NULL ELSE profit_reviewed_at END,
         updated_at=datetime('now')
         WHERE id=?`)
-        .bind(status, printed, deliveryFee, deliveredAmount, cashCollected, costOfGoods,
-          partialCostReviewed, partialReceivedItems, deliveredPieces, returnedPieces, note, status, id).run();
+      .bind(status, printed, deliveryFee, deliveredAmount, cashCollected, costOfGoods,
+          partialCostReviewed, partialReceivedItems, deliveredPieces, returnedPieces, note,
+          status,status,status,status,status,id).run();
+
+      if(reopenedSettlementId)await refreshDeliveryCompanySettlementTotals(env,reopenedSettlementId);
 
       const order = await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(id).first();
-      return json({ order, status_label: STATUS_LABELS[status] || status });
+      return json({ order, status_label: STATUS_LABELS[status] || status, reopened_settlement_id:reopenedSettlementId||null });
     }
 
 
@@ -1658,9 +1701,9 @@ export async function onRequest(context) {
           parsed.cost_of_goods=parsed.items[0].total_cost;
         }
       }
-      if(/زيزيا|القسطل|بدر الجديده|الجاردنز|طبربور|المقابلين|الجندويل/.test(normalizedOrder)){
+      if(/زيزيا|القسطل|بدر الجديده|الجاردنز|طبربور|المقابلين|الجندويل|ضاحيه الامير حسن/.test(normalizedOrder)){
         parsed.governorate='عمان';
-        const localities=['زيزيا','القسطل','بدر الجديدة','الجاردنز','طبربور','المقابلين','الجندويل']
+        const localities=['زيزيا','القسطل','بدر الجديدة','الجاردنز','طبربور','المقابلين','الجندويل','ضاحية الأمير حسن']
           .filter(x=>normalizedOrder.includes(duplicateText(x).replace(/ة/g,'ه')));
         if(localities.length&&!localities.some(x=>String(parsed.detailed_address||'').includes(x))){
           parsed.detailed_address=[...localities,String(parsed.detailed_address||'')].filter(Boolean).join(' - ');

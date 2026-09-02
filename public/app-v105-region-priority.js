@@ -10,6 +10,9 @@
   if(has(line,/(?:^|\s)(?:الغور|غور|الاغوار|اغوار)(?:\s|$)/)){
    return {governorate:'الأغوار',alias:'الاغوار',raw:String(line||'')};
   }
+  if(has(line,/(?:^|\s)ضاحي(?:ة|ه)\s+الامير\s+حسن(?:\s|$)/)){
+   return {governorate:'عمان',alias:'ضاحية الامير حسن',raw:String(line||'')};
+  }
   return typeof originalPriority==='function'?originalPriority(line):null;
  };
 
