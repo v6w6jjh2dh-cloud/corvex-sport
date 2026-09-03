@@ -1,6 +1,6 @@
 (()=>{
  const KEY='corvex_last_view_v1';
- const restorable=new Set(['dashboard','orders','new','deleted-orders','stores','store-add','store-orders','reports','daily-profits','returns-center','direct-orders','model-performance','permissions','users','regions','couriers','courier-add','courier-settlement','delivery-reconcile','store-account','print','batches','admin-reset']);
+ const restorable=new Set(['dashboard','orders','new','deleted-orders','stores','store-add','store-orders','reports','daily-profits','inventory','returns-center','direct-orders','model-performance','permissions','users','regions','couriers','courier-add','courier-settlement','delivery-reconcile','store-account','print','batches','admin-reset']);
  function remember(){try{if(state?.user&&restorable.has(state.view))localStorage.setItem(KEY,state.view)}catch{}}
  const obs=new MutationObserver(remember);obs.observe(document.documentElement,{childList:true,subtree:true});
  window.__corvexOpenRememberedView=async function(){

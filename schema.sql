@@ -124,6 +124,44 @@ CREATE TABLE IF NOT EXISTS profit_ignored_phrases (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS inventory_balances (
+  model_id INTEGER PRIMARY KEY,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  updated_by INTEGER,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY(model_id) REFERENCES profit_models(id)
+);
+
+CREATE TABLE IF NOT EXISTS inventory_order_items (
+  order_id INTEGER NOT NULL,
+  model_id INTEGER NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(order_id,model_id),
+  FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  FOREIGN KEY(model_id) REFERENCES profit_models(id)
+);
+
+CREATE TABLE IF NOT EXISTS inventory_order_tracking (
+  order_id INTEGER PRIMARY KEY,
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS inventory_movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  model_id INTEGER NOT NULL,
+  order_id INTEGER,
+  quantity_delta INTEGER NOT NULL,
+  movement_type TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY(model_id) REFERENCES profit_models(id),
+  FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE SET NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_code ON orders(order_code);
 CREATE INDEX IF NOT EXISTS idx_orders_phone ON orders(phone);
 CREATE INDEX IF NOT EXISTS idx_orders_printed ON orders(printed);
@@ -133,3 +171,5 @@ CREATE INDEX IF NOT EXISTS idx_return_items_return_id ON return_items(return_id)
 CREATE INDEX IF NOT EXISTS idx_profit_models_active ON profit_models(active);
 CREATE INDEX IF NOT EXISTS idx_profit_model_audit_model ON profit_model_audit(model_id);
 CREATE INDEX IF NOT EXISTS idx_profit_ignored_phrases_phrase ON profit_ignored_phrases(phrase);
+CREATE INDEX IF NOT EXISTS idx_inventory_movements_model_date ON inventory_movements(model_id,id DESC);
+CREATE INDEX IF NOT EXISTS idx_inventory_movements_order ON inventory_movements(order_id);

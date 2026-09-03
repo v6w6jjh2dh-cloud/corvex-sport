@@ -1029,6 +1029,7 @@ function renderShell(){
 
           ${can('print')?'<button data-view="print">▣ جاهز للطباعة</button>':''}
           ${can('batches')?'<button data-view="batches">↻ دفعات الطباعة</button>':''}
+          ${state.user?.role==='admin'?'<button data-view="inventory">📦 المستودع والجرد</button>':''}
           ${can('profits')?'<button data-view="daily-profits">💰 الأرباح اليومية</button>':''}
           ${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}${can('delivery_reconcile')?'<button data-view="delivery-reconcile">⇄ تسوية شركة التوصيل</button>':''}
           ${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}
@@ -1093,6 +1094,7 @@ async function show(v){
   if(v==='store-orders')return storeOrdersHub();
   if(v==='print')return printView();
   if(v==='batches')return batchesView();
+  if(v==='inventory')return inventoryView();
   if(v==='daily-profits')return dailyProfitsView();
   if(v==='reports')return reportsView();
   if(v==='delivery-reconcile')return deliveryReconcileView();
@@ -1104,6 +1106,42 @@ async function show(v){
   if(v==='permissions')return permissionsView();
   if(v==='users')return usersView();
   if(v==='returns-center')return returnsCenterView();
+}
+async function inventoryView(){
+  const c=$('#content');
+  if(state.user?.role!=='admin'){c.innerHTML='<div class="empty">صلاحية مدير مطلوبة</div>';return}
+  c.innerHTML='<div class="empty">جاري تحميل رصيد المستودع...</div>';
+  try{
+    const data=await api('/inventory'),models=data.models||[],movements=data.movements||[];
+    const total=models.reduce((sum,item)=>sum+Number(item.quantity||0),0);
+    c.innerHTML=`<div class="page-title"><div><h1>المستودع والجرد</h1><div class="sub">الرصيد ينقص تلقائياً مرة واحدة عند تسليم الطلب، ويرجع عند إعادته لقيد التوصيل.</div></div><span class="pill" style="background:#e8f0f5;color:#173750">${total} قطعة</span></div>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-bottom:20px">
+        ${models.length?models.map(model=>`<div class="card inventory-model" data-model-id="${model.id}">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><b style="font-size:19px">${esc(model.name)}</b><b style="font-size:30px;color:${Number(model.quantity)<0?'#b42318':'#0d304d'}">${Number(model.quantity)}</b></div>
+          <div class="sub">الرصيد المتوفر الآن</div>
+          <input class="input inventory-qty" type="number" min="0" step="1" inputmode="numeric" placeholder="اكتب عدد القطع" style="margin-top:14px">
+          <div class="actions" style="margin-top:10px">
+            <button class="btn btn-primary inventory-action" data-action="set">تعيين الرصيد</button>
+            <button class="btn btn-accent inventory-action" data-action="add">＋ إضافة</button>
+            <button class="btn btn-soft inventory-action" data-action="subtract">− إنقاص</button>
+          </div>
+        </div>`).join(''):'<div class="empty">لا توجد موديلات فعالة. عرّف الموديلات من شاشة الأرباح أولاً.</div>'}
+      </div>
+      <div class="card"><div class="page-title" style="margin-bottom:12px"><div><h1 style="font-size:21px">آخر حركات الجرد</h1><div class="sub">التسليم يظهر بالسالب، وإرجاع الطلب أو الإضافة يظهر بالموجب.</div></div></div>
+        <div style="overflow:auto"><table class="table"><thead><tr><th>الموديل</th><th>الحركة</th><th>السبب</th><th>الطلب</th><th>الوقت</th></tr></thead><tbody>
+          ${movements.length?movements.map(m=>`<tr><td>${esc(m.model_name)}</td><td style="font-weight:900;color:${Number(m.quantity_delta)<0?'#b42318':'#067647'}">${Number(m.quantity_delta)>0?'+':''}${Number(m.quantity_delta)}</td><td>${esc(m.note||'')}</td><td>${m.order_code?'#'+esc(m.order_code):'—'}</td><td>${fmtDate(m.created_at)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">لا توجد حركات بعد</td></tr>'}
+        </tbody></table></div>
+      </div>`;
+    document.querySelectorAll('.inventory-action').forEach(button=>button.onclick=async()=>{
+      const card=button.closest('.inventory-model'),input=card.querySelector('.inventory-qty'),quantity=Number(input.value);
+      if(!Number.isInteger(quantity)||quantity<0){toast('اكتب عدد قطع صحيح');input.focus();return}
+      const action=button.dataset.action,label=action==='set'?'تعيين الرصيد':action==='add'?'إضافة القطع':'إنقاص القطع';
+      if(!confirm(`${label}: ${quantity} قطعة؟`))return;
+      card.querySelectorAll('button').forEach(x=>x.disabled=true);
+      try{await api('/inventory',{method:'POST',body:JSON.stringify({model_id:Number(card.dataset.modelId),action,quantity})});toast('تم تحديث رصيد المستودع');inventoryView()}
+      catch(e){card.querySelectorAll('button').forEach(x=>x.disabled=false);toast(e.message)}
+    });
+  }catch(e){c.innerHTML=`<div class="empty">${esc(e.message)}</div>`}
 }
 async function deletedOrdersView(){
   const c=$('#content');

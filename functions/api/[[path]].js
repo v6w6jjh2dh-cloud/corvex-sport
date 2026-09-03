@@ -1,5 +1,6 @@
 import {dominantSettlementDate,ensureSettlementDateColumn} from './_settlement-date.js';
 import {runSchemaMigrationOnce} from './_schema-migrations.js';
+import {loadInventoryModels,syncOrderInventory} from './_inventory.js';
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -1186,6 +1187,11 @@ export async function onRequest(context) {
       for(let i=0;i<statements.length;i+=40){
         await env.DB.batch(statements.slice(i,i+40));
       }
+      const inventoryModels=await loadInventoryModels(env);
+      for(const x of accepted){
+        const afterOrder=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(x.order.id).first();
+        await syncOrderInventory(env,x.order,afterOrder,me.id,inventoryModels);
+      }
 
       return json({settlement:{
         id:settlementId,settlement_code:code,statement_date:statementDate||null,matched_count:accepted.length,
@@ -1480,6 +1486,8 @@ export async function onRequest(context) {
     if (orderMatch && method === 'PUT') {
       const b = await readBody(request);
       const id = Number(orderMatch[1]);
+      const beforeOrder=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
+      if(!beforeOrder)return json({error:'الطلب غير موجود'},404);
       const storeId = Number(b.store_id || 0);
       if (!storeId) return json({error:'اختر المتجر صاحب الطلب'},400);
       const store = await env.DB.prepare('SELECT id FROM stores WHERE id=? AND is_active=1').bind(storeId).first();
@@ -1488,6 +1496,7 @@ export async function onRequest(context) {
       await env.DB.prepare(`UPDATE orders SET recipient_name=?,phone=?,area=?,detailed_address=?,amount=?,order_notes=?,cost_of_goods=?,store_id=?,courier_id=?,courier_settled=CASE WHEN courier_id IS NOT ? THEN 0 ELSE courier_settled END,updated_at=datetime('now') WHERE id=?`)
         .bind(String(b.recipient_name||'').trim(), normalizePhone(b.phone), String(b.area||'').trim(), String(b.detailed_address||'').trim(), Number(b.amount||0), String(b.order_notes||'').trim(), Math.max(0,Number(b.cost_of_goods||0)), storeId, Number(b.courier_id||0)||null, Number(b.courier_id||0)||null, id).run();
       const order = await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(id).first();
+      await syncOrderInventory(env,beforeOrder,order,me.id);
       return json({order});
     }
 
@@ -1503,7 +1512,7 @@ export async function onRequest(context) {
       if(!ids.length)return json({error:'حدد طلباً واحداً على الأقل'},400);
       if(!allowed.has(status))return json({error:'حالة الطلب غير صحيحة'},400);
       const marks=ids.map(()=>'?').join(',');
-      const rows=await env.DB.prepare(`SELECT id,amount,delivered_amount,delivery_fee,delivery_company_settled,delivery_company_settlement_id FROM orders WHERE id IN (${marks})`).bind(...ids).all();
+      const rows=await env.DB.prepare(`SELECT * FROM orders WHERE id IN (${marks})`).bind(...ids).all();
       const reopenedSettlementIds=status==='pending'
         ?[...new Set((rows.results||[]).map(o=>Number(o.delivery_company_settlement_id||0)).filter(Boolean))]
         :[];
@@ -1527,6 +1536,11 @@ export async function onRequest(context) {
           .bind(status,deliveredAmount,fee,cash,status,status,status,status,status,status,status,o.id);
       });
       for(let i=0;i<statements.length;i+=40)await env.DB.batch(statements.slice(i,i+40));
+      const inventoryModels=await loadInventoryModels(env);
+      for(const beforeOrder of (rows.results||[])){
+        const afterOrder=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(beforeOrder.id).first();
+        await syncOrderInventory(env,beforeOrder,afterOrder,me.id,inventoryModels);
+      }
       for(const settlementId of reopenedSettlementIds)await refreshDeliveryCompanySettlementTotals(env,settlementId);
       return json({ok:true,updated:statements.length,status_label:STATUS_LABELS[status]||status,reopened_settlements:reopenedSettlementIds});
     }
@@ -1572,6 +1586,7 @@ export async function onRequest(context) {
         .bind(amount,fee,Math.max(0,amount-fee),cost,isPartial?1:Number(current.partial_cost_reviewed||0),
           partialItems,note,settlementId,id,settlementId).run();
       const order=await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(id).first();
+      await syncOrderInventory(env,current,order,me.id);
       return json({order,reviewed:true,settlement_id:settlementId});
     }
 
@@ -1595,7 +1610,7 @@ export async function onRequest(context) {
       const returnedPieces = Math.max(0, Number(b.returned_pieces || 0));
       const note = String(b.settlement_note || '').trim();
       const printed = Number(b.printed) === 1 ? 1 : 0;
-      const current=await env.DB.prepare('SELECT delivery_company_settled,delivery_company_settlement_id FROM orders WHERE id=?').bind(id).first();
+      const current=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
       if(!current)return json({error:'الطلب غير موجود'},404);
       const reopenedSettlementId=status==='pending'?Number(current.delivery_company_settlement_id||0):0;
 
@@ -1625,6 +1640,7 @@ export async function onRequest(context) {
       if(reopenedSettlementId)await refreshDeliveryCompanySettlementTotals(env,reopenedSettlementId);
 
       const order = await env.DB.prepare(orderSelectSql('WHERE o.id=?')).bind(id).first();
+      await syncOrderInventory(env,current,order,me.id);
       return json({ order, status_label: STATUS_LABELS[status] || status, reopened_settlement_id:reopenedSettlementId||null });
     }
 
