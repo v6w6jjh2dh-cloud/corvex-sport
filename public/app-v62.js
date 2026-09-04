@@ -1923,7 +1923,8 @@ async function printView(){
     if(!$('#printStore').value)return toast('اختر المتجر أولاً');
     const ids=[...document.querySelectorAll('.rowcheck:checked')].map(x=>Number(x.dataset.id));
     if(!ids.length)return toast('حدد طلباً واحداً على الأقل');
-    try{const r=await api('/print-batches',{method:'POST',body:JSON.stringify({order_ids:ids})});openPrintWindow(r.orders,`دفعة ${r.batch.store_name||''} - ${r.batch.batch_code}`);toast(`تم إنشاء دفعة ${r.batch.order_count} طلب لمتجر ${r.batch.store_name||''}`);setTimeout(loadStore,600)}catch(e){toast(e.message)}
+    const printWindow=reservePrintWindow();if(!printWindow)return;
+    try{const r=await api('/print-batches',{method:'POST',body:JSON.stringify({order_ids:ids})});openPrintWindow(r.orders,`دفعة ${r.batch.store_name||''} - ${r.batch.batch_code}`,printWindow);toast(`تم إنشاء دفعة ${r.batch.order_count} طلب لمتجر ${r.batch.store_name||''}`);setTimeout(loadStore,600)}catch(e){try{printWindow.close()}catch{}toast(e.message)}
   };
 }
 function nextDeliveryDateLabel(){
@@ -1957,7 +1958,13 @@ function labelHtml(o){
   const returnAlert=hasReturn?'<div class="return-alert">⚠ يوجد مرتجع</div>':'';
   return `<div class="label"><div class="label-head"><span class="label-code">#${o.order_code}</span><b class="label-brand">CORVEX SPORT</b><span class="label-barcode">${code128Svg(`CV-${o.order_code}`)}</span></div><div class="label-store">اسم المتجر: ${esc(o.store_name||'—')}</div><div class="recipient-date-row"><div><strong>المستلم:</strong> ${esc(o.recipient_name)}</div><strong class="delivery-date">${nextDeliveryDateLabel()}</strong></div><div><strong>الهاتف:</strong> ${esc(o.phone)}</div><div><strong>العنوان:</strong> ${esc(o.area)} ${esc(o.detailed_address)}</div><div><strong>القيمة:</strong> ${money(o.amount)} د.أ</div><div class="note" style="--note-cols:${Math.max(1,noteColumns.length)}">${notesHtml}</div>${returnAlert}</div>`;
 }
-function openPrintWindow(orders,title='طباعة'){const w=window.open('','_blank');const pages=[];for(let i=0;i<orders.length;i+=8)pages.push(orders.slice(i,i+8));w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}body{margin:0;font-family:Tahoma,Arial,sans-serif}.page{width:200mm;height:287mm;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:3mm;page-break-after:always}.page:last-child{page-break-after:auto}.label{border:1px solid #555;padding:3mm 4mm;font-size:10.5pt;overflow:hidden}.label-head{display:grid;grid-template-columns:32mm 1fr 34mm;gap:2mm;align-items:center;border-bottom:1px solid #999;padding-bottom:1mm;margin-bottom:1mm;font-size:12pt;direction:rtl}.label-code{justify-self:start;font-weight:900}.label-brand{justify-self:center;text-align:center;white-space:nowrap}.label-barcode{width:34mm;height:10mm;display:block;direction:ltr}.barcode-svg{display:block;width:100%;height:100%}.label-store{text-align:center;font-size:12pt;font-weight:900;margin:0 0 1mm;padding-bottom:1mm;border-bottom:1px solid #777}.recipient-date-row{display:flex;align-items:center;justify-content:space-between;gap:3mm}.delivery-date{direction:ltr;white-space:nowrap}.note{margin-top:1mm;border-top:1px dashed #aaa;padding-top:1mm;font-weight:700;display:grid;grid-template-columns:repeat(var(--note-cols),minmax(0,1fr));gap:2mm;line-height:1.18;word-break:break-word}.note-column{min-width:0}.note-column+.note-column{border-right:1px dotted #bbb;padding-right:2mm}.note-line{margin:0 0 .45mm}.return-alert{margin-top:1mm;padding:.8mm 1.5mm;border:2px solid #000;text-align:center;font-size:13pt;font-weight:900;background:#fff}</style></head><body>${pages.map(pg=>`<section class="page">${pg.map(labelHtml).join('')}</section>`).join('')}<script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);w.document.close()}
+function reservePrintWindow(){
+  const w=window.open('about:blank','_blank');
+  if(!w){toast('المتصفح منع نافذة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع.');return null}
+  w.document.write('<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>تجهيز الطباعة</title></head><body style="font-family:Tahoma,Arial;text-align:center;padding:60px"><h2>جاري تجهيز الطلبات للطباعة...</h2></body></html>');w.document.close();
+  return w;
+}
+function openPrintWindow(orders,title='طباعة',reservedWindow=null){const w=reservedWindow||window.open('about:blank','_blank');if(!w){toast('المتصفح منع نافذة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع.');return false}const pages=[];for(let i=0;i<orders.length;i+=8)pages.push(orders.slice(i,i+8));w.document.open();w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}body{margin:0;font-family:Tahoma,Arial,sans-serif}.page{width:200mm;height:287mm;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:3mm;page-break-after:always}.page:last-child{page-break-after:auto}.label{border:1px solid #555;padding:3mm 4mm;font-size:10.5pt;overflow:hidden}.label-head{display:grid;grid-template-columns:32mm 1fr 34mm;gap:2mm;align-items:center;border-bottom:1px solid #999;padding-bottom:1mm;margin-bottom:1mm;font-size:12pt;direction:rtl}.label-code{justify-self:start;font-weight:900}.label-brand{justify-self:center;text-align:center;white-space:nowrap}.label-barcode{width:34mm;height:10mm;display:block;direction:ltr}.barcode-svg{display:block;width:100%;height:100%}.label-store{text-align:center;font-size:12pt;font-weight:900;margin:0 0 1mm;padding-bottom:1mm;border-bottom:1px solid #777}.recipient-date-row{display:flex;align-items:center;justify-content:space-between;gap:3mm}.delivery-date{direction:ltr;white-space:nowrap}.note{margin-top:1mm;border-top:1px dashed #aaa;padding-top:1mm;font-weight:700;display:grid;grid-template-columns:repeat(var(--note-cols),minmax(0,1fr));gap:2mm;line-height:1.18;word-break:break-word}.note-column{min-width:0}.note-column+.note-column{border-right:1px dotted #bbb;padding-right:2mm}.note-line{margin:0 0 .45mm}.return-alert{margin-top:1mm;padding:.8mm 1.5mm;border:2px solid #000;text-align:center;font-size:13pt;font-weight:900;background:#fff}</style></head><body>${pages.map(pg=>`<section class="page">${pg.map(labelHtml).join('')}</section>`).join('')}<script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);w.document.close();return true}
 async function batchesView(){
   const c=$('#content');
   const stores=await getActiveStores();
@@ -1966,7 +1973,7 @@ async function batchesView(){
     const q=$('#batchStore').value?('?store_id='+encodeURIComponent($('#batchStore').value)):'';
     const d=await api('/print-batches'+q);state.batches=d.batches;
     $('#batchList').innerHTML=state.batches.length?state.batches.map(b=>`<div class="batch-card"><div><b>${esc(b.batch_code)}</b><div class="batch-meta">${esc(b.store_name||'متجر غير محدد')} • ${b.order_count} طلب • ${Math.max(1,Math.ceil(Number(b.order_count||0)/8))} صفحة • طبعة واحدة • ${esc(b.created_by_name||'')} • ${fmtDate(b.created_at)}</div></div><div class="actions" style="margin:0"><button class="btn btn-outline" data-batch="${b.id}" data-mode="all">إعادة الدفعة</button><button class="btn btn-soft" data-batch="${b.id}" data-mode="page">إعادة صفحة</button>${state.user?.role==='admin'?`<button class="btn btn-danger" data-delete-batch="${b.id}" data-batch-code="${esc(b.batch_code)}">حذف الدفعة</button>`:''}</div></div>`).join(''):'<div class="empty">لا توجد دفعات</div>';
-    document.querySelectorAll('[data-batch]').forEach(btn=>btn.onclick=async()=>{const d=await api('/print-batches/'+btn.dataset.batch);if(btn.dataset.mode==='all')openPrintWindow(d.orders,`إعادة ${d.batch.batch_code}`);else{const max=Math.ceil(d.orders.length/8);const p=Number(prompt(`رقم الصفحة من 1 إلى ${max}`,'1'));if(p>=1&&p<=max)openPrintWindow(d.orders.slice((p-1)*8,p*8),`صفحة ${p} - ${d.batch.batch_code}`)}})
+    document.querySelectorAll('[data-batch]').forEach(btn=>btn.onclick=async()=>{const printWindow=reservePrintWindow();if(!printWindow)return;try{const d=await api('/print-batches/'+btn.dataset.batch);if(btn.dataset.mode==='all')openPrintWindow(d.orders,`إعادة ${d.batch.batch_code}`,printWindow);else{const max=Math.ceil(d.orders.length/8);const p=Number(prompt(`رقم الصفحة من 1 إلى ${max}`,'1'));if(p>=1&&p<=max)openPrintWindow(d.orders.slice((p-1)*8,p*8),`صفحة ${p} - ${d.batch.batch_code}`,printWindow);else printWindow.close()}}catch(e){try{printWindow.close()}catch{}toast(e.message)}})
     document.querySelectorAll('[data-delete-batch]').forEach(btn=>btn.onclick=async()=>{
       if(!confirm(`حذف دفعة ${btn.dataset.batchCode||''}؟\nلن يتم حذف الطلبات نفسها.`))return;
       btn.disabled=true;
@@ -3281,12 +3288,13 @@ async function storeShipmentsView(storeId){
   $('#storeShipmentPrintSelected').onclick=async()=>{
     const ids=[...document.querySelectorAll('#storeShipmentsTable .rowcheck:checked')].map(x=>Number(x.dataset.id));
     if(!ids.length)return toast('حدد طلباً واحداً على الأقل');
+    const printWindow=reservePrintWindow();if(!printWindow)return;
     try{
       const r=await api('/print-batches',{method:'POST',body:JSON.stringify({order_ids:ids})});
-      openPrintWindow(r.orders,`دفعة ${r.batch.store_name||''} - ${r.batch.batch_code}`);
+      openPrintWindow(r.orders,`دفعة ${r.batch.store_name||''} - ${r.batch.batch_code}`,printWindow);
       toast(`تم تجهيز ${r.batch.order_count} طلب للطباعة`);
       setTimeout(load,600);
-    }catch(e){toast(e.message)}
+    }catch(e){try{printWindow.close()}catch{}toast(e.message)}
   };
   await load();
 }
