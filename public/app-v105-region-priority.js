@@ -4,6 +4,9 @@
 
  const originalPriority=globalThis.priorityLocalMatch;
  globalThis.priorityLocalMatch=function(line){
+  if(has(line,/(?:^|\s)(?:(?:محافظه\s+)?الكرك|جامع[هة]\s+موت[هة])(?:\s|$)/)){
+   return {governorate:'الكرك',alias:'الكرك / جامعة مؤتة',raw:String(line||'')};
+  }
   if(has(line,/(?:^|\s)شارع\s+مادبا(?:\s|$)/)){
    return {governorate:'عمان',alias:'شارع مادبا',raw:String(line||'')};
   }
@@ -27,7 +30,7 @@
   return typeof originalExplicit==='function'?originalExplicit(line):null;
  };
 
- const cleanPrefix=value=>String(value||'').replace(/^\s*(?:سكان|[اأ]نا\s+ساكن(?:ه|ة)?|[اأ]نا\s+في\s+مكان|[اأ]نا\s+قاعد(?:ه|ة)?)\s*[:،,-]?\s*/u,'').trim();
+ const cleanPrefix=value=>String(value||'').replace(/^\s*(?:الموقع|سكان|[اأ]نا\s+ساكن(?:ه|ة)?|[اأ]نا\s+في\s+مكان|[اأ]نا\s+قاعد(?:ه|ة)?)\s*[:،,-]?\s*/u,'').trim();
  const cleanAddress=value=>String(value||'').split(/\s+-\s+/).map(cleanPrefix).filter(Boolean).join(' - ');
  const originalParse=globalThis.parseSmart;
  if(typeof originalParse==='function')globalThis.parseSmart=function(text){
