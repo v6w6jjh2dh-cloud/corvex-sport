@@ -24,6 +24,9 @@
 
  const originalExplicit=globalThis.explicitGovernorateMatch;
  globalThis.explicitGovernorateMatch=function(line){
+  if(has(line,/(?:^|\s)(?:محافظه\s+)?اربد(?:\s|$)/)){
+   return {governorate:'إربد',alias:'إربد',raw:String(line||'')};
+  }
   if(has(line,/(?:^|\s)(?:الزرقاء|الزرقا)(?:\s|$)/)){
    return {governorate:'الزرقاء',alias:'الزرقاء',raw:String(line||'')};
   }
