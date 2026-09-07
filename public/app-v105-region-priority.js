@@ -4,8 +4,11 @@
 
  const originalPriority=globalThis.priorityLocalMatch;
  globalThis.priorityLocalMatch=function(line){
-  if(has(line,/(?:^|\s)(?:(?:محافظه\s+)?الكرك|جامع[هة]\s+موت[هة])(?:\s|$)/)){
+  if(has(line,/(?:^|\s)(?:(?:(?:منطق[هة]|محافظ[هة])\s+)?الكرك|موجود\s+ب(?:ال)?كرك|ب(?:ال)?كرك|جامع[هة]\s+موت[هة])(?:\s|$)/)){
    return {governorate:'الكرك',alias:'الكرك / جامعة مؤتة',raw:String(line||'')};
+  }
+  if(has(line,/(?:^|\s)المكان\s+اربد(?:\s|$)/)){
+   return {governorate:'إربد',alias:'المكان إربد',raw:String(line||'')};
   }
   if(has(line,/(?:^|\s)شارع\s+مادبا(?:\s|$)/)){
    return {governorate:'عمان',alias:'شارع مادبا',raw:String(line||'')};
@@ -30,7 +33,7 @@
   return typeof originalExplicit==='function'?originalExplicit(line):null;
  };
 
- const cleanPrefix=value=>String(value||'').replace(/^\s*(?:الموقع|سكان|[اأ]نا\s+ساكن(?:ه|ة)?|[اأ]نا\s+في\s+مكان|[اأ]نا\s+قاعد(?:ه|ة)?)\s*[:،,-]?\s*/u,'').trim();
+ const cleanPrefix=value=>String(value||'').replace(/^\s*(?:(?:المكان\s+[اإ]ربد|(?:الموقع|منطق[هة]|محافظ[هة])\s+الكرك|موجود\s+ب(?:ال)?كرك)|المكان|الموقع|سكان|[اأ]نا\s+ساكن(?:ه|ة)?|[اأ]نا\s+في\s+مكان|[اأ]نا\s+قاعد(?:ه|ة)?)\s*[:،,-]?\s*/u,'').trim();
  const cleanAddress=value=>String(value||'').split(/\s+-\s+/).map(cleanPrefix).filter(Boolean).join(' - ');
  const originalParse=globalThis.parseSmart;
  if(typeof originalParse==='function')globalThis.parseSmart=function(text){
