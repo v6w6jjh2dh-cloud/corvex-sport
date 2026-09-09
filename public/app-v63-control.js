@@ -112,6 +112,7 @@
 
   dashboard=async function(){
     await originalDashboard();
+    if(state.user?.role!=='admin')return;
     try{
       const d=await originalApi('/control?action=summary'),daily=d.daily||{},rec=d.reconcile||{};
       const c=$('#content');if(!c)return;
