@@ -2377,17 +2377,17 @@ async function deliveryReconcileView(){
             ${previewRows.map((r,i)=>{
               let orderCell='—';
               const autoMatched=['matched','matched_partial'].includes(r.match_type);
-              const manualReview=['duplicate','review_amount','review_amount_higher'].includes(r.match_type);
+              const manualReview=['duplicate','review_amount','review_amount_higher','other_store'].includes(r.match_type);
               if(autoMatched&&r.order){
-                orderCell=`#${r.order.order_code} • ${esc(r.order.recipient_name||'لا يوجد')}`;
+                orderCell=`#${r.order.order_code} • ${esc(r.order.recipient_name||'لا يوجد')}<div class="sub">المتجر: ${esc(r.order.store_name||'—')}</div>`;
               }else if(manualReview){
                 orderCell=`<select class="select delivery-order-choice" data-i="${i}">
                   <option value="">اختر الطلب الصحيح...</option>
-                  ${(r.candidates||[]).map(o=>`<option value="${o.id}">#${o.order_code} • ${esc(o.recipient_name||'لا يوجد')} • ${money(o.amount)}</option>`).join('')}
+                  ${(r.candidates||[]).map(o=>`<option value="${o.id}">#${o.order_code} • ${esc(o.store_name||'—')} • ${esc(o.recipient_name||'لا يوجد')} • ${money(o.amount)}</option>`).join('')}
                 </select>`;
               }else if(r.match_type==='already_settled'){
                 const o=(r.candidates||[])[0]||{};
-                orderCell=`#${esc(o.order_code||'—')} • ${esc(o.recipient_name||'لا يوجد')}<div class="sub">${esc(o.settlement_code||'كشف سابق')}</div>`;
+                orderCell=`#${esc(o.order_code||'—')} • ${esc(o.recipient_name||'لا يوجد')}<div class="sub">${esc(o.store_name||'—')} • ${esc(o.settlement_code||'كشف سابق')}</div>`;
               }else if(r.match_type==='other_store'){
                 const stores=[...new Set((r.candidates||[]).map(o=>o.store_name).filter(Boolean))];
                 orderCell=`موجود في: ${esc(stores.join('، ')||'متجر آخر')}`;
@@ -2429,7 +2429,7 @@ async function deliveryReconcileView(){
       </div>
 
       <div class="delivery-commit-bar">
-        <div><b>المطابقة تعتمد على الهاتف داخل المتجر المختار فقط.</b><div class="sub">إذا تكرر نفس الهاتف، اختر الطلب الصحيح يدويًا.</div></div>
+        <div><b>كل سطر يعرض رقم الطلب ومتجره الصحيح.</b><div class="sub">إذا ظهر الطلب في متجر آخر، اختره من القائمة؛ ولا يمكن اعتماد نفس الطلب مرتين.</div></div>
         <button id="commitDeliveryReport" class="btn btn-accent">اعتماد وتسكير الكشف</button>
       </div>`;
 
