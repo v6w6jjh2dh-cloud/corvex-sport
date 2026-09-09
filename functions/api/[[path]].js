@@ -1380,7 +1380,8 @@ export async function onRequest(context) {
       const phone = normalizePhone(b.phone);
       const storeId = Number(b.store_id || 0);
       let courierId = Number(b.courier_id || 0);
-      const duplicateOverride = String(b.duplicate_override_reason || '') === 'exchange';
+      const entryMode = String(b.duplicate_override_reason || '').trim();
+      const duplicateOverride = ['exchange','new_order','negative_return'].includes(entryMode);
 
       if (!phone) return json({ error:'رقم الهاتف مطلوب' }, 400);
       if (!storeId) return json({ error:'اختر المتجر صاحب الطلب' }, 400);
@@ -1418,9 +1419,17 @@ export async function onRequest(context) {
       let rawText = String(b.raw_text||'');
       let amount = Number(b.amount||0);
       if (!Number.isFinite(amount)) amount = 0;
-      if (isReturnOrderText(rawText+' '+orderNotes)) amount = -Math.abs(amount);
-      if (duplicateOverride && !/(?:تبديل|استبدال|مرتجع|ارجاع)/.test(normalizedArabicText(rawText+' '+orderNotes))) {
-        rawText = [rawText,'تبديل'].filter(Boolean).join('\n');
+      const combinedOrderText=rawText+' '+orderNotes;
+      if(entryMode==='negative_return'){
+        amount=-Math.abs(amount);
+        if(!/(?:مرتجع|استرجاع|ارجاع|إرجاع)/.test(normalizedArabicText(combinedOrderText)))rawText=[rawText,'إرجاع'].filter(Boolean).join('\n');
+      }else if(entryMode==='exchange'){
+        amount=Math.abs(amount);
+        if(!/(?:تبديل|استبدال)/.test(normalizedArabicText(combinedOrderText)))rawText=[rawText,'تبديل'].filter(Boolean).join('\n');
+      }else if(entryMode==='new_order'){
+        amount=Math.abs(amount);
+      }else if(isReturnOrderText(combinedOrderText)){
+        amount=-Math.abs(amount);
       }
 
       const result = await env.DB.prepare(`INSERT INTO orders(order_code,recipient_name,phone,area,detailed_address,amount,order_notes,raw_text,cost_of_goods,created_by,store_id,courier_id)
