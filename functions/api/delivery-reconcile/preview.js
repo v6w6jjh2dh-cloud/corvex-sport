@@ -61,7 +61,7 @@ export async function onRequestPost({request,env}){
  const variants=[...new Set(reportPhones.flatMap(phoneVariants))];
  for(let offset=0;offset<variants.length;offset+=80){
   const chunk=variants.slice(offset,offset+80),placeholders=chunk.map(()=>'?').join(',');
-  const other=(await env.DB.prepare(orderSql(`WHERE o.store_id<>? AND o.phone IN (${placeholders})`)).bind(storeId,...chunk).all()).results||[];
+  const other=(await env.DB.prepare(orderSql(`WHERE o.store_id<>? AND COALESCE(o.delivery_company_settled,0)=0 AND o.phone IN (${placeholders})`)).bind(storeId,...chunk).all()).results||[];
   addByPhone(otherStoreByPhone,other);
  }
 
