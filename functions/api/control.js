@@ -61,8 +61,9 @@ function scoreRow(row,order){
 
 export async function onRequest(context){
   const {request,env}=context;const user=await auth(request,env);if(!user)return json({error:'غير مصرح'},401);
-  await ensure(env);
   const url=new URL(request.url),action=url.searchParams.get('action')||'',method=request.method.toUpperCase();
+  if(method==='GET'&&action==='summary'&&user.role!=='admin')return json({error:'الرقابة اليومية متاحة للمدير فقط'},403);
+  await ensure(env);
 
   if(method==='GET'&&action==='summary'){
     const daily=await env.DB.prepare(`SELECT
