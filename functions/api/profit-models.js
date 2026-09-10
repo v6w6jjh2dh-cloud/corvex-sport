@@ -19,6 +19,11 @@ const SEED_MODELS=[
  ['old_money','Old Money',3.5,['اولد ماني','أولد ماني','اولد موني','أولد موني','اولد مني','أولد مني','بلوزه اولد ماني','بلوزه اولد موني','بلوزة أولد ماني','بلوزة أولد موني','old money'],{1:[7],2:[12],3:[15]},0]
 ];
 
+const COTTON_SPORT_COST=3.5;
+const COTTON_SPORT_ALIASES=['رياضة قطن','رياضه قطن','قطن رياضة','قطن رياضه','بنطلون رياضة قطن','بنطلون رياضه قطن','بنطلون قطن رياضة','بنطلون قطن رياضه','بنطال رياضة قطن','بنطال رياضه قطن','بنطال قطن رياضة','بنطال قطن رياضه','بناطيل رياضة قطن','بناطيل رياضه قطن','بناطيل قطن رياضة','بناطيل قطن رياضه'];
+const normalizeModelText=value=>String(value||'').toLowerCase().replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/ة/g,'ه').replace(/[ًٌٍَُِّْـ]/g,'').replace(/\s+/g,' ').trim();
+const isCottonSportText=value=>{const words=new Set(normalizeModelText(value).split(/\s+/).filter(Boolean));return words.has('رياضه')&&words.has('قطن')};
+
 async function auth(request,env){
  const h=request.headers.get('authorization')||'',token=h.startsWith('Bearer ')?h.slice(7):'';
  if(!token)return null;
@@ -91,6 +96,25 @@ async function ensure(env){
   const required=['بلوزه m','بلوزة m','بلوزه ام','بلوزة ام','تيشيرت ام','تيشرت ام','حرف m','حرف ام','وحرف ام','m6','ام6'];
   const next=[...new Set([...cleaned,...required])];
   if(JSON.stringify(next)!==JSON.stringify(aliases))await env.DB.prepare("UPDATE profit_models SET aliases_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify(next),mModel.id).run();
+ }
+
+ // Canonical rule: "رياضة قطن" and all normal wording variants are one model,
+ // with an approved cost of 3.5 JOD per piece. Reuse an existing matching row
+ // when present so we do not create a duplicate model or disturb inventory ids.
+ const cottonRows=(await env.DB.prepare('SELECT id,model_key,name,cost,aliases_json,active FROM profit_models').all()).results||[];
+ const cottonMatches=cottonRows.filter(row=>{
+  let aliases=[];try{aliases=JSON.parse(row.aliases_json||'[]')}catch{}
+  return [row.name,...aliases].some(isCottonSportText);
+ });
+ if(cottonMatches.length){
+  for(const cotton of cottonMatches){
+   let aliases=[];try{aliases=JSON.parse(cotton.aliases_json||'[]')}catch{}
+   const nextAliases=[...new Set([...aliases,...COTTON_SPORT_ALIASES])];
+   const needsUpdate=Number(cotton.cost)!==COTTON_SPORT_COST||Number(cotton.active)!==1||JSON.stringify(nextAliases)!==JSON.stringify(aliases);
+   if(needsUpdate)await env.DB.prepare("UPDATE profit_models SET cost=?,aliases_json=?,active=1,updated_at=datetime('now') WHERE id=?").bind(COTTON_SPORT_COST,JSON.stringify(nextAliases),cotton.id).run();
+  }
+ }else{
+  await env.DB.prepare(`INSERT OR IGNORE INTO profit_models(model_key,name,cost,aliases_json,offers_json,delivery_included,active) VALUES('sport_cotton','رياضة قطن',?,?, '{}',0,1)`).bind(COTTON_SPORT_COST,JSON.stringify(COTTON_SPORT_ALIASES)).run();
  }
 }
 
