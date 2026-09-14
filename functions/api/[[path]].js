@@ -1618,9 +1618,14 @@ export async function onRequest(context) {
       const deliveredPieces = Math.max(0, Number(b.delivered_pieces || 0));
       const returnedPieces = Math.max(0, Number(b.returned_pieces || 0));
       const note = String(b.settlement_note || '').trim();
-      const printed = Number(b.printed) === 1 ? 1 : 0;
       const current=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
       if(!current)return json({error:'الطلب غير موجود'},404);
+      // Editing an order does not imply changing its print state. Older clients
+      // omit `printed` from this request, so preserve the stored value unless
+      // the caller explicitly sends a print-state change.
+      const printed = Object.prototype.hasOwnProperty.call(b,'printed')
+        ? (Number(b.printed)===1?1:0)
+        : Number(current.printed||0);
       const reopenedSettlementId=status==='pending'?Number(current.delivery_company_settlement_id||0):0;
 
       await env.DB.prepare(`UPDATE orders SET
