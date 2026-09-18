@@ -11,20 +11,30 @@ export async function onRequestGet({request,env}){
   const user=await auth(request,env);
   if(!user)return json({error:'غير مصرح'},401);
   try{
-    const returnScansTable=await env.DB.prepare(`
+    const returnTables=(await env.DB.prepare(`
       SELECT name
       FROM sqlite_master
-      WHERE type='table' AND name='return_reconcile_scans'
-      LIMIT 1
-    `).first();
-    const receivedReturnFilter=returnScansTable
-      ? `AND NOT EXISTS (
-          SELECT 1
-          FROM return_reconcile_scans rrs
-          WHERE rrs.order_id=o.id
-            AND rrs.result IN ('matched','review','extra')
-        )`
-      : '';
+      WHERE type='table'
+        AND name IN ('return_events','return_reconcile_scans')
+    `).all()).results||[];
+    const tableNames=new Set(returnTables.map(row=>String(row.name||'')));
+    const receivedReturnFilters=[];
+    if(tableNames.has('return_events')){
+      receivedReturnFilters.push(`AND NOT EXISTS (
+        SELECT 1
+        FROM return_events re
+        WHERE re.order_id=o.id
+      )`);
+    }
+    if(tableNames.has('return_reconcile_scans')){
+      receivedReturnFilters.push(`AND NOT EXISTS (
+        SELECT 1
+        FROM return_reconcile_scans rrs
+        WHERE rrs.order_id=o.id
+          AND rrs.result IN ('matched','review','extra')
+      )`);
+    }
+    const receivedReturnFilter=receivedReturnFilters.join('\n        ');
 
     const rows=(await env.DB.prepare(`
       SELECT
