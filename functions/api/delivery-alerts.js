@@ -11,6 +11,21 @@ export async function onRequestGet({request,env}){
   const user=await auth(request,env);
   if(!user)return json({error:'غير مصرح'},401);
   try{
+    const returnScansTable=await env.DB.prepare(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type='table' AND name='return_reconcile_scans'
+      LIMIT 1
+    `).first();
+    const receivedReturnFilter=returnScansTable
+      ? `AND NOT EXISTS (
+          SELECT 1
+          FROM return_reconcile_scans rrs
+          WHERE rrs.order_id=o.id
+            AND rrs.result IN ('matched','review','extra')
+        )`
+      : '';
+
     const rows=(await env.DB.prepare(`
       SELECT
         o.id,o.order_code,o.recipient_name,o.phone,o.area,o.detailed_address,
@@ -25,6 +40,7 @@ export async function onRequestGet({request,env}){
         AND date(o.first_printed_at,'+3 hours')>=date('2026-09-08')
         AND julianday('now')-julianday(o.first_printed_at)>=4
         AND NOT EXISTS (SELECT 1 FROM deleted_orders d WHERE d.original_order_id=o.id)
+        ${receivedReturnFilter}
       ORDER BY o.first_printed_at ASC,o.id ASC
       LIMIT 500
     `).all()).results||[];
