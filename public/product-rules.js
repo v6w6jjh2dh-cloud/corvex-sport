@@ -1,5 +1,12 @@
 (()=>{
  let products=[
+  {id:'prada_tee',name:'تيشيرت برادا',cost:2.4,aliases:[/تيش(?:رت|يرت)\s*برادا/i,/بلوز[هة]?\s*برادا/i,/(?:^|\s)برادا(?:\s|$)/i],offers:{},deliveryIncluded:false},
+  {id:'fur_jacket',name:'جاكيت فرو',cost:4,aliases:[/جاكيت\s*فرو/i,/جكيت\s*فرو/i,/فرو\s*جاكيت/i],offers:{},deliveryIncluded:false},
+  {id:'trend_jacket',name:'جاكيت ترند',cost:4,aliases:[/جاكيت\s*ترند/i,/جكيت\s*ترند/i,/ترند\s*جاكيت/i],offers:{},deliveryIncluded:false},
+  {id:'plain_kom',name:'بلوزة سادة كوم',cost:3.5,aliases:[/بلوز[هة]?\s*ساد[هة]\s*كوم/i,/ساد[هة]\s*كوم/i],offers:{},deliveryIncluded:false},
+  {id:'n_tee',name:'تيشيرت N',cost:3,aliases:[/(?:تيشرت|تيشيرت|بلوز[هة]?)\s*(?:حرف\s*)?n(?=\s|\d|$)/i,/(?:^|\s)حرف\s*n(?=\s|\d|$)/i],offers:{},deliveryIncluded:false},
+  {id:'nike_jacket',name:'جاكيت نايك',cost:6,aliases:[/جاكيت\s*نايك/i,/جكيت\s*نايك/i,/نايك\s*جاكيت/i],offers:{},deliveryIncluded:false},
+  {id:'wool_top',name:'بلوز صوف',cost:3.5,aliases:[/بلوز[هة]?\s*صوف/i,/صوف\s*بلوز[هة]?/i],offers:{},deliveryIncluded:false},
   {id:'jakar',name:'جاكار',cost:4.25,aliases:[/جاكار/i,/ترينغ/i,/تريننغ/i],offers:{1:[8],2:[15],3:[20]},deliveryIncluded:false},
   {id:'paris',name:'باريس',cost:2.5,aliases:[/باريس/i],offers:{3:[15]},deliveryIncluded:true},
   {id:'reebok',name:'ريبوك',cost:2.5,aliases:[/ريبوك/i,/reebok/i,/ري\s*bok/i],offers:{3:[15]},deliveryIncluded:true},
