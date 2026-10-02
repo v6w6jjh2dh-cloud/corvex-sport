@@ -1259,7 +1259,7 @@ async function newOrder(){
           ${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}
         </select>
       </div>
-      <button id="quickAddStore" class="btn btn-soft" type="button">＋ متجر جديد</button>
+      
     </div>
 
     ${stores.length?'':'<div class="store-warning">لا يوجد متجر مضاف بعد. أضف متجر أولاً حتى تحفظ الطلب.</div>'}
@@ -1332,7 +1332,7 @@ async function newOrder(){
     else localStorage.removeItem('corvex_selected_store');
   };
 
-  $('#quickAddStore').onclick=()=>show('store-add');
+
 
   async function save(next){
     try{
