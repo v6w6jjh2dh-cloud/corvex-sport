@@ -1,0 +1,9 @@
+{
+  "name": "Corvex Orders",
+  "short_name": "Orders",
+  "start_url": "/?corvex_orders=1",
+  "display": "standalone",
+  "background_color": "#0b0b0b",
+  "theme_color": "#075e54",
+  "description": "Corvex internal order chat"
+}
