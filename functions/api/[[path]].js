@@ -1865,9 +1865,16 @@ export async function onRequest(context) {
       const b = await readBody(request);
       const ids = Array.isArray(b.order_ids) ? [...new Set(b.order_ids.map(Number).filter(Boolean))] : [];
       if (!ids.length) return json({error:'حدد طلبات للطباعة'},400);
-      const placeholders = ids.map(()=>'?').join(',');
-      const rows = await env.DB.prepare(`${orderSelectSql(`WHERE o.id IN (${placeholders})`)} ORDER BY o.order_code ASC`).bind(...ids).all();
-      const orders = rows.results || [];
+      // D1/SQLite has a host-parameter limit. Large print selections must be queried in chunks.
+      const orders=[];
+      const chunkSize=80;
+      for(let offset=0;offset<ids.length;offset+=chunkSize){
+        const chunk=ids.slice(offset,offset+chunkSize);
+        const placeholders=chunk.map(()=>'?').join(',');
+        const rows=await env.DB.prepare(`${orderSelectSql(`WHERE o.id IN (${placeholders})`)} ORDER BY o.order_code ASC`).bind(...chunk).all();
+        orders.push(...(rows.results||[]));
+      }
+      orders.sort((a,b)=>Number(a.order_code||0)-Number(b.order_code||0));
       if (!orders.length) return json({error:'لا توجد طلبات صالحة'},400);
 
       const storeIds=[...new Set(orders.map(o=>Number(o.store_id||0)))];
