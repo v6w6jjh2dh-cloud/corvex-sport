@@ -1867,7 +1867,9 @@ export async function onRequest(context) {
       if (!ids.length) return json({error:'حدد طلبات للطباعة'},400);
       // D1/SQLite has a host-parameter limit. Large print selections must be queried in chunks.
       const orders=[];
-      const chunkSize=80;
+      // Keep each IN() safely below D1/SQLite host-parameter limits.
+      // 25 is intentionally conservative because this query is used by large print runs.
+      const chunkSize=25;
       for(let offset=0;offset<ids.length;offset+=chunkSize){
         const chunk=ids.slice(offset,offset+chunkSize);
         const placeholders=chunk.map(()=>'?').join(',');
