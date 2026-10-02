@@ -9,7 +9,6 @@
  function preview(raw,i){const p=parseSmart(raw),type=typeOf(raw),phone=p.phone||'',issues=[];if(!phone)issues.push('بدون هاتف');if(type==='new'&&!p.area)issues.push('المنطقة غير واضحة');if(type==='new'&&!p.amount&&p.amount!==0)issues.push('السعر غير واضح');return{raw,p,type,issues,i}}
  function typeLabel(t){return t==='edit'?'🛑 تعديل':t==='return'?'↩️ إرجاع':'✅ طلب جديد'}
  function mount(){
-  if(state?.view!=='new-order')return;
   const raw=document.getElementById('raw');if(!raw||document.getElementById('bulkWhatsAppBtn'))return;
   const actions=raw.closest('.smart-box')?.querySelector('.smart-actions');if(!actions)return;
   const b=document.createElement('button');b.id='bulkWhatsAppBtn';b.type='button';b.className='btn btn-soft';b.textContent='📥 إدخال عدة طلبات واتساب';actions.appendChild(b);
