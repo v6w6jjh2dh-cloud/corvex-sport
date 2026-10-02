@@ -1,9 +1,18 @@
 (()=>{
  function splitWhatsApp(text=''){
-  const src=String(text||'').replace(/\r/g,'');
-  const re=/^\s*\[[^\]\n]+\]\s*[^:\n]+:\s*/gm,ms=[...src.matchAll(re)];
-  if(!ms.length)return src.trim()?[src.trim()]:[];
-  const out=[];for(let i=0;i<ms.length;i++){const start=ms[i].index+ms[i][0].length,end=i+1<ms.length?ms[i+1].index:src.length,body=src.slice(start,end).replace(/\s*<تم تعديل هذه الرسالة>\s*$/,'').trim();if(body)out.push(body)}return out;
+  const src=String(text||'').replace(/\r/g,'').trim();if(!src)return[];
+  // iPhone/WhatsApp Arabic exports may contain RTL marks, NBSPs and Arabic AM/PM.
+  // Split at every line that starts with a WhatsApp [date,time] header; sender text is not required.
+  const header=/^[\u200e\u200f\u202a-\u202e\u2066-\u2069\s]*\[[^\]\n]{3,80}\][^\n]*?:[\s\u00a0]*/gm;
+  const ms=[...src.matchAll(header)];
+  if(ms.length<2){
+    // Fallback: split before each bracketed date even when the copied sender/header punctuation is malformed.
+    const loose=/(?=^[\u200e\u200f\u202a-\u202e\u2066-\u2069\s]*\[[\u200e\u200f\u202a-\u202e\u2066-\u2069\s]*[0-9٠-٩]{1,2}\s*[\/\-]\s*[0-9٠-٩]{1,2}\s*[\/\-]\s*[0-9٠-٩]{2,4}[^\]\n]*\])/gm;
+    const parts=src.split(loose).map(x=>x.trim()).filter(Boolean);
+    if(parts.length>1)return parts.map(x=>x.replace(/^[\s\u200e\u200f\u202a-\u202e\u2066-\u2069]*\[[^\]\n]+\][^\n]*?:[\s\u00a0]*/,'').replace(/\s*<تم تعديل هذه الرسالة>\s*$/,'').trim()).filter(Boolean);
+  }
+  if(!ms.length)return[src];
+  const out=[];for(let i=0;i<ms.length;i++){const begin=ms[i].index+ms[i][0].length,finish=i+1<ms.length?ms[i+1].index:src.length,body=src.slice(begin,finish).replace(/\s*<تم تعديل هذه الرسالة>\s*$/,'').trim();if(body)out.push(body)}return out;
  }
  function typeOf(raw){const n=normalizeArabic(raw);if(/(?:^|\s)تعديل(?:\s|$)/.test(n))return 'edit';if(/طلب\s*(?:ارجاع|استرجاع)|استرجاع|ترجيع/.test(n))return 'return';return 'new'}
  function preview(raw,i){const p=parseSmart(raw),type=typeOf(raw),phone=p.phone||'',issues=[];if(!phone)issues.push('بدون هاتف');if(type==='new'&&!p.area)issues.push('المنطقة غير واضحة');if(type==='new'&&!p.amount&&p.amount!==0)issues.push('السعر غير واضح');return{raw,p,type,issues,i}}
