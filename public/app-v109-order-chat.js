@@ -1,5 +1,5 @@
 (()=>{
- const GROUPS=[{id:'orders-1',name:'طلبات 1',members:['محمد']},{id:'orders-2',name:'طلبات 2',members:['محمد']},{id:'orders-3',name:'طلبات 3',members:['محمد']}];
+ const GROUPS=[{id:'orders-1',name:'تأكيد كورفكس',members:['محمد']},{id:'orders-2',name:'تأكيد العساف',members:['محمد']},{id:'orders-3',name:'تأكيد ابو سلطان',members:['محمد']}];
  const KEY='corvex_order_chat_v1';
  const read=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'{}')}catch{return{}}};
  const write=x=>localStorage.setItem(KEY,JSON.stringify(x));
