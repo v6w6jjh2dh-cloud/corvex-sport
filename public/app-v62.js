@@ -272,12 +272,14 @@ function priceFrom(line){
   if(!/\d/.test(n))return '';
 
   const number='(-?\\d+(?:\\.\\d+)?)';
-  const currency='(?:دينار|دنانير|د\\s*ا|jd|jod)';
+  const currency='(?:دينار|دنانير|د\\s*ا|jd|jod|dinar|dinars|jordanian\\s+dinars?)';
   const afterNumber=new RegExp(number+'\\s*(?:'+currency+'\\s*)?(?:شامل(?:\\s+السعر)?(?:\\s+و?\\s*التوصيل)?|مع\\s+التوصيل|و\\s*توصيل)(?=\\s|$)');
   const beforeNumber=new RegExp('(?:السعر|سعر|المجموع|شامل\\s+السعر(?:\\s+و?\\s*التوصيل)?|شامل\\s+التوصيل|مع\\s+التوصيل)(?:\\s+شامل\\s+السعر)?(?:\\s+و?\\s*التوصيل)?[^0-9-]{0,24}'+number);
   const withCurrency=new RegExp(number+'\\s*'+currency+'(?=\\s|$|مرتجع|ارجاع|استرجاع)');
+  const englishPrice=new RegExp('(?:price|total|amount)\\s*[:=]?\\s*'+number+'(?:\\s*'+currency+')?(?=\\s|$)');
+  const englishDelivery=new RegExp(number+'\\s*(?:delivery\\s+included|including\\s+delivery|with\\s+delivery|incl\\.?\\s*delivery)(?=\\s|$)');
 
-  const match=n.match(afterNumber)||n.match(beforeNumber)||n.match(withCurrency);
+  const match=n.match(afterNumber)||n.match(beforeNumber)||n.match(withCurrency)||n.match(englishPrice)||n.match(englishDelivery);
   return match ? match[1] : '';
 }
 
