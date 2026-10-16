@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>ربط سي ايبوكسي | كورفكس</title>
+<style>
+:root{font-family:Tahoma,Arial,sans-serif;color:#18342f;background:#f4f7f6;font-size:16px;line-height:1.8}*{box-sizing:border-box}body{margin:0}main{max-width:950px;margin:auto;padding:28px 18px 60px}header{display:flex;justify-content:space-between;gap:12px;align-items:center}h1{font-size:26px;margin:20px 0 5px}h2{font-size:19px;margin:0 0 12px}p{margin:8px 0 16px}.muted{color:#576d67}.card{background:#fff;border:1px solid #dbe5e1;border-radius:14px;padding:22px;margin:18px 0}button,.button{display:inline-block;font:inherit;cursor:pointer;border:1px solid #056b53;border-radius:8px;background:#056b53;color:white;padding:10px 16px;text-decoration:none}button.secondary,.button.secondary{background:white;color:#056b53}button:disabled{opacity:.5;cursor:wait}a{color:#056b53}#status,#notice{white-space:pre-wrap;padding:14px;border-radius:9px;background:#edf3f0}#notice{display:none}#notice.error{background:#fff1e7;color:#7f3410}.controls{display:flex;gap:12px;flex-wrap:wrap}.step{border-bottom:1px solid #e1e9e5;padding:14px 0}.step:last-child{border:0}.event{border-top:1px solid #e1e9e5;padding:16px 0}.event:first-child{border:0}.event strong{display:block}.event details{margin:8px 0}pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0;background:#f4f7f6;padding:12px;border-radius:8px}.pill{font-size:14px;padding:3px 8px;background:#edf3f0;border-radius:5px}.warn{background:#fff0da;color:#874c00}.good{background:#e8f7ec;color:#246333}small{display:block;margin-top:8px;color:#576d67}[hidden]{display:none!important}@media(max-width:560px){.card{padding:16px}header{align-items:start}h1{font-size:23px}.controls>*{flex:1;text-align:center}}
+</style></head>
+<body><main>
+<header><b>CORVEX · سي ايبوكسي</b><a href="/">العودة للطلبات</a></header>
+<h1>طلبات الواتساب في كورفكس</h1><p class="muted">الطلبات الجديدة المؤكدة تصل إلى متجر «سي ايبوكسي» مع رقم الهاتف والعنوان والكمية والمبلغ شامل التوصيل.</p>
+<div id="notice" role="alert"></div>
+<section class="card"><h2>حالة الربط</h2><p id="status" aria-live="polite">جارٍ فحص الحالة…</p><div class="controls"><button id="refresh" class="secondary">تحديث الحالة</button><button id="toggle" class="secondary" hidden></button></div><small>إيقاف الربط يؤجل النقل؛ الطلبات المحفوظة في الواتساب تبقى في انتظار إعادة المحاولة.</small></section>
+<section class="card" id="setup"><h2>تفعيل الربط مرة واحدة</h2>
+<div class="step"><b>١. جهّز ملف الربط</b><p>الملف مخصص لمتجر «سي ايبوكسي» ويحتوي مفتاح الربط الخاص بك. احتفظ به عندك.</p><button id="download">تجهيز وتحميل ملف الربط</button></div>
+<div class="step"><b>٢. شغّله في قاعدة طلبات الواتساب</b><p>افتح الملف الذي نزل باسم <bdi>cepoxy-corvex-setup.sql</bdi>، انسخ محتواه، والصقه في محرر SQL ثم اضغط Run.</p><a class="button secondary" href="https://supabase.com/dashboard/project/pvskozqwjiqtlmybckad/sql/new" target="_blank" rel="noopener noreferrer">فتح محرر SQL الصحيح</a></div>
+<div class="step"><b>٣. ارجع واضغط «تحديث الحالة»</b><p>تظهر «تم التحقق من الاتصال» بعد وصول رسالة الفحص. بعدها أنشئ طلبًا تجريبيًا جديدًا من الواتساب وتحقق من وصوله، ثم ألغِه قبل الطباعة.</p></div>
+</section>
+<section class="card"><h2>آخر الطلبات وحالات المراجعة</h2><p id="counts" class="muted"></p><p class="muted">التعديل والإلغاء التلقائيان متاحان قبل الطباعة والتسوية. إذا تعدّل الطلب يدويًا أو دخل التوصيل، يظهر هنا للمراجعة. الطلبات القديمة قبل التفعيل لا تُنقل تلقائيًا.</p><div id="events">لم تُحمّل الحالة بعد.</div></section>
+</main><script src="/cepoxy-connect.js?v=20261016-1" defer></script></body></html>

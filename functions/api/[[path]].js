@@ -658,7 +658,7 @@ export async function onRequest(context) {
       await ensureD1PerformanceIndexes(env);
       const stats = await env.DB.prepare(`SELECT
         COUNT(*) total,
-        SUM(CASE WHEN printed=0 THEN 1 ELSE 0 END) unprinted,
+        SUM(CASE WHEN printed=0 AND delivery_status<>'canceled_before_arrival' THEN 1 ELSE 0 END) unprinted,
         SUM(CASE WHEN printed=1 THEN 1 ELSE 0 END) printed,
         SUM(CASE WHEN date(created_at)=date('now') THEN 1 ELSE 0 END) today,
         (SELECT COUNT(*) FROM order_departures od
@@ -1879,6 +1879,10 @@ export async function onRequest(context) {
       orders.sort((a,b)=>Number(a.order_code||0)-Number(b.order_code||0));
       if (!orders.length) return json({error:'لا توجد طلبات صالحة'},400);
 
+      if (orders.some(order=>order.delivery_status==='canceled_before_arrival')) {
+        return json({error:'تحتوي القائمة طلبًا ملغيًا قبل الوصول. حدّث قائمة الطباعة.'},409);
+      }
+
       const storeIds=[...new Set(orders.map(o=>Number(o.store_id||0)))];
       if(storeIds.length!==1 || !storeIds[0]) return json({error:'دفعة الطباعة يجب أن تكون لمتجر واحد فقط'},400);
       const storeId=storeIds[0];
@@ -1939,7 +1943,7 @@ export async function onRequest(context) {
     if (path === '/unprinted' && method === 'GET') {
       const storeId=Number(url.searchParams.get('store_id')||0);
       if(!storeId) return json({orders:[]});
-      const rows = await env.DB.prepare(`${orderSelectSql('WHERE o.printed=0 AND o.store_id=?')} ORDER BY o.order_code ASC`).bind(storeId).all();
+      const rows = await env.DB.prepare(`${orderSelectSql("WHERE o.printed=0 AND o.store_id=? AND o.delivery_status<>'canceled_before_arrival'")} ORDER BY o.order_code ASC`).bind(storeId).all();
       return json({orders:rows.results||[]});
     }
 
