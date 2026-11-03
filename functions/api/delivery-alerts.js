@@ -48,7 +48,7 @@ export async function onRequestGet({request,env}){
         AND o.printed=1
         AND o.first_printed_at IS NOT NULL
         AND o.first_printed_at >= '2026-09-07 21:00:00'
-        AND julianday('now')-julianday(o.first_printed_at)>=4
+        AND o.first_printed_at <= datetime('now','-4 days')
         AND NOT EXISTS (SELECT 1 FROM deleted_orders d WHERE d.original_order_id=o.id)
         ${receivedReturnFilter}
       ORDER BY o.first_printed_at ASC,o.id ASC
