@@ -1,6 +1,6 @@
 (()=>{
- const VIEW='delivery-alerts',CACHE_MS=60000;
- let cachedAt=0,cachedOrders=[],loadingBadge=false;
+ const VIEW='delivery-alerts',CACHE_MS=300000;
+ let cachedAt=0,cachedOrders=[],loadingBadge=false,inFlight=null;
 
  function dateText(v){
   if(!v)return '—';
@@ -9,11 +9,15 @@
  }
  async function fetchAlerts(force=false){
   if(!force&&cachedAt&&Date.now()-cachedAt<CACHE_MS)return cachedOrders;
-  const data=await api('/delivery-alerts');
-  cachedOrders=Array.isArray(data.orders)?data.orders:[];
-  cachedAt=Date.now();
-  updateBadge(cachedOrders.length);
-  return cachedOrders;
+  if(inFlight)return inFlight;
+  inFlight=(async()=>{
+   const data=await api('/delivery-alerts');
+   cachedOrders=Array.isArray(data.orders)?data.orders:[];
+   cachedAt=Date.now();
+   updateBadge(cachedOrders.length);
+   return cachedOrders;
+  })();
+  try{return await inFlight}finally{inFlight=null}
  }
  function updateBadge(count){
   const badge=document.querySelector('#deliveryAlertsCount');
@@ -50,7 +54,7 @@
   const c=document.querySelector('#content');if(!c)return;
   c.innerHTML=`<div class="page-title"><div><h1>🔔 تنبيه</h1><div class="sub">طلبات أُرسلت لشركة التوصيل من 8/9/2026 وبقيت بلا نتيجة 4 أيام كاملة أو أكثر.</div></div><button id="deliveryAlertsRefresh" class="btn btn-soft">تحديث</button></div><div class="card"><div id="deliveryAlertsBody" class="empty">جاري تحميل التنبيهات...</div></div>`;
   document.querySelector('#deliveryAlertsRefresh').onclick=()=>loadIntoView(true);
-  await loadIntoView(true);
+  await loadIntoView(false);
  }
  async function loadIntoView(force){
   const body=document.querySelector('#deliveryAlertsBody');if(!body)return;
