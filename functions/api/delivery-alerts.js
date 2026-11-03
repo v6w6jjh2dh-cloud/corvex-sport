@@ -47,7 +47,7 @@ export async function onRequestGet({request,env}){
       WHERE COALESCE(NULLIF(TRIM(o.delivery_status),''),'pending')='pending'
         AND o.printed=1
         AND o.first_printed_at IS NOT NULL
-        AND date(o.first_printed_at,'+3 hours')>=date('2026-09-08')
+        AND o.first_printed_at >= '2026-09-07 21:00:00'
         AND julianday('now')-julianday(o.first_printed_at)>=4
         AND NOT EXISTS (SELECT 1 FROM deleted_orders d WHERE d.original_order_id=o.id)
         ${receivedReturnFilter}
