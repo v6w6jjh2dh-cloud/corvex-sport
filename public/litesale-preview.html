@@ -22,7 +22,7 @@ btn.addEventListener('click',async()=>{
     try{
      const response=await post('/api/litesale-order-detail',token,{id:String(o.id)});const d=response.detail;
      detail.remove();const more=document.createElement('dl');
-     for(const [label,key] of [['اسم المنتج / الرقم','product'],['الإجمالي','amount'],['الكمية','quantity'],['اللون','color'],['المقاس','size'],['المدينة','city'],['العنوان','address'],['ملاحظات','notes']])field(more,label,d[key]);
+     for(const [label,key] of [['اسم المنتج / الرقم','product'],['الإجمالي','amount'],['الكمية','quantity'],['اللون','color'],['المقاس','size'],['الوزن (كغ)','weight_kg'],['المدينة','city'],['العنوان','address'],['ملاحظات','notes']])field(more,label,d[key]);
      article.append(more);
      const diagnostics=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
      summary.textContent='تشخيص الحقول (للمدير)';pre.style.whiteSpace='pre-wrap';pre.style.overflowWrap='anywhere';
