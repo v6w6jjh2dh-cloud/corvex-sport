@@ -1,12 +1,39 @@
-<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>معاينة طلبات LiteSale — كورفكس</title><style>body{font-family:system-ui,-apple-system,sans-serif;background:#f4f5fa;color:#1d2340;margin:0;padding:16px}main{max-width:850px;margin:auto}.card{background:white;border-radius:16px;padding:20px;margin:14px 0;box-shadow:0 1px 10px #0001}button{background:#4536d4;color:white;border:0;border-radius:10px;padding:13px 20px;font-size:16px;cursor:pointer}button:disabled{opacity:.6}.notice{background:#f0edff;padding:12px;border-radius:10px}dl{display:grid;grid-template-columns:110px 1fr;gap:8px;margin:0}dt{color:#555}dd{margin:0;overflow-wrap:anywhere}small{color:#666}#error{color:#ae2020;white-space:pre-wrap}</style></head><body><main><div class="card"><h2>معاينة طلبات LiteSale</h2><p class="notice">عرض فقط: لا يتم إدخال أي طلب إلى كورفكس أو إرساله للطباعة. لا يوجد تحديث تلقائي؛ المعاينة تبدأ فقط عند الضغط على الزر.</p><button id="load">عرض آخر 10 طلبات</button><p id="status" aria-live="polite">لم يتم طلب البيانات بعد.</p><p id="error" role="alert"></p></div><section id="orders"></section><p><a href="/">العودة إلى كورفكس</a></p></main><script>
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>معاينة طلبات LiteSale — كورفكس</title><style>body{font-family:system-ui,-apple-system,sans-serif;background:#f4f5fa;color:#1d2340;margin:0;padding:16px}main{max-width:850px;margin:auto}.card{background:white;border-radius:16px;padding:20px;margin:14px 0;box-shadow:0 1px 10px #0001}button{background:#4536d4;color:white;border:0;border-radius:10px;padding:13px 20px;font-size:16px;cursor:pointer}button:disabled{opacity:.6}.notice{background:#f0edff;padding:12px;border-radius:10px}dl{display:grid;grid-template-columns:110px 1fr;gap:8px;margin:0}dt{color:#555}dd{margin:0;overflow-wrap:anywhere}small{color:#666}.muted{color:#666;font-size:14px}#error{color:#ae2020;white-space:pre-wrap}</style></head><body><main><div class="card"><h2>معاينة طلبات LiteSale</h2><p class="notice">معاينة يدوية فقط. لا يتم إدخال أو تعديل أي طلب في كورفكس، ولا إرسال شيء للطباعة. تُقرأ التفاصيل عند الضغط على الزر فقط.</p><button id="load">عرض آخر 10 طلبات بتفاصيلها</button><p id="status" aria-live="polite">لم يبدأ الفحص.</p><p id="error" role="alert"></p></div><section id="orders"></section><p><a href="/">العودة إلى كورفكس</a></p></main><script>
 const btn=document.getElementById('load'),status=document.getElementById('status'),err=document.getElementById('error'),list=document.getElementById('orders');
-function field(dl,label,value){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=value==null||value===''?'—':typeof value==='object'?JSON.stringify(value):String(value);dl.append(dt,dd)}
-btn.addEventListener('click',async()=>{btn.disabled=true;err.textContent='';list.replaceChildren();status.textContent='جارٍ قراءة الطلبات...';try{
- const token=localStorage.getItem('corvex_token');if(!token)throw Error('سجّل الدخول بحساب المدير في كورفكس أولًا.');
- const res=await fetch('/api/litesale-preview',{method:'POST',headers:{Authorization:'Bearer '+token},cache:'no-store'});const data=await res.json();
- if(!res.ok)throw Error(data.error+(data.required?' — '+data.required.join(', '):'')+(data.keys?' — '+data.keys.join(', '):''));
- status.textContent='تم عرض '+data.shown+' طلبات من LiteSale. لم يتم إدخال أي طلب في كورفكس.';
- if(!data.orders.length){list.textContent='لا توجد طلبات في النتيجة.';return}
- for(const o of data.orders){const article=document.createElement('article');article.className='card';const heading=document.createElement('h3');heading.textContent='طلب '+(o.id??'بدون رقم');const dl=document.createElement('dl');for(const [label,key] of [['العميل','name'],['الهاتف','phone'],['المنتج','product'],['المبلغ','amount'],['الحالة','status'],['التاريخ','created_at']])field(dl,label,o[key]);article.append(heading,dl);const detailBtn=document.createElement('button');detailBtn.textContent='عرض تفاصيل المنتج والمبلغ';detailBtn.style.marginTop='14px';detailBtn.addEventListener('click',async()=>{detailBtn.disabled=true;detailBtn.textContent='جارٍ جلب التفاصيل...';try{const token=localStorage.getItem('corvex_token');const res=await fetch('/api/litesale-order-detail',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:String(o.id)}),cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.error||'تعذر جلب التفاصيل');const d=data.detail;for(const [label,key] of [['المنتج / القطع','product'],['المبلغ التفصيلي','amount'],['الكمية','quantity'],['اللون','color'],['المدينة','city'],['العنوان','address'],['ملاحظات','notes']])field(dl,label,d[key]);const diagnostic=document.createElement('details');const summary=document.createElement('summary');summary.textContent='تشخيص حقول السعر والمنتج (للمدير)';const pre=document.createElement('pre');pre.style.whiteSpace='pre-wrap';pre.style.overflowWrap='anywhere';pre.textContent=(data.diagnostic?.candidate_fields||[]).map(x=>x.path+' ['+x.type+']'+(x.value!==undefined?' = '+x.value:'')).join('\n')||'لم يتم العثور على حقول مطابقة';diagnostic.append(summary,pre);article.append(diagnostic);detailBtn.textContent='تم عرض التفاصيل';}catch(e){detailBtn.textContent='تعذر جلب التفاصيل: '+e.message;}finally{detailBtn.disabled=true}});article.append(detailBtn);list.append(article)}
- }catch(e){status.textContent='تعذرت المعاينة.';err.textContent=e.message}finally{btn.disabled=false}});
+function show(v){return v==null||v===''?'—':typeof v==='object'?JSON.stringify(v):String(v)}
+function field(dl,label,value){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=show(value);dl.append(dt,dd)}
+async function post(path,token,body){const res=await fetch(path,{method:'POST',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),cache:'no-store'});const data=await res.json();if(!res.ok)throw Error(data.error||'تعذر قراءة البيانات');return data}
+btn.addEventListener('click',async()=>{
+ btn.disabled=true;err.textContent='';list.replaceChildren();status.textContent='جارٍ جلب آخر الطلبات...';
+ try{
+  const token=localStorage.getItem('corvex_token');if(!token)throw Error('سجّل الدخول بحساب المدير في كورفكس أولًا.');
+  const data=await post('/api/litesale-preview',token);
+  if(!data.orders.length){status.textContent='لا توجد طلبات للعرض.';return}
+  const jobs=[];
+  for(const o of data.orders){
+   const article=document.createElement('article');article.className='card';
+   const heading=document.createElement('h3');heading.textContent='طلب '+show(o.id);
+   const dl=document.createElement('dl');
+   for(const [label,key] of [['العميل','name'],['الهاتف','phone'],['الحالة','status'],['التاريخ','created_at']])field(dl,label,o[key]);
+   const detail=document.createElement('div');detail.className='muted';detail.textContent='جارٍ قراءة التفاصيل...';
+   article.append(heading,dl,detail);list.append(article);
+   jobs.push(async()=>{
+    if(o.id==null){detail.textContent='لا يوجد رقم طلب لجلب التفاصيل.';return}
+    try{
+     const response=await post('/api/litesale-order-detail',token,{id:String(o.id)});const d=response.detail;
+     detail.remove();const more=document.createElement('dl');
+     for(const [label,key] of [['المنتج / الرقم','product'],['الإجمالي','amount'],['الكمية','quantity'],['اللون','color'],['المدينة','city'],['العنوان','address'],['ملاحظات','notes']])field(more,label,d[key]);
+     article.append(more);
+     const diagnostics=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
+     summary.textContent='تشخيص الحقول (للمدير)';pre.style.whiteSpace='pre-wrap';pre.style.overflowWrap='anywhere';
+     pre.textContent=(response.diagnostic?.candidate_fields||[]).map(x=>x.path+' ['+x.type+']'+(x.value!==undefined?' = '+x.value:'')).join('\n')||'لا توجد حقول إضافية';
+     diagnostics.append(summary,pre);article.append(diagnostics);
+    }catch(e){detail.textContent='تعذر تحميل تفاصيل هذا الطلب: '+e.message}
+   });
+  }
+  // Limit simultaneous requests to avoid LiteSale rate limits. No timer or polling.
+  let cursor=0,done=0;const worker=async()=>{while(cursor<jobs.length){const index=cursor++;await jobs[index]();done++;status.textContent='تم عرض '+data.shown+' طلبات؛ اكتملت تفاصيل '+done+' من '+jobs.length+'. لم يتم إدخال أي طلب في كورفكس.'}};
+  await Promise.all([worker(),worker()]);
+ }catch(e){status.textContent='تعذرت المعاينة.';err.textContent=e.message}finally{btn.disabled=false}
+});
 </script></body></html>
