@@ -139,7 +139,24 @@ export async function onRequest({request,env}){
   const submittedColor=readAnswer('لون الجاكيت')??readAnswer('اللون');
   const submittedOffer=readAnswer('العرض')??readAnswer('اختيار العرض')??readAnswer('الكمية')??null;
   const submittedWeightRaw=readAnswer('الوزن')??readAnswer('وزن العميل')??null;
-  const weightLabelText=(typeof submittedWeightRaw==='string'&&submittedWeightRaw.trim()&&!normalizeWeight(submittedWeightRaw))?submittedWeightRaw.trim().slice(0,100):null;
+  // Textual sizing may be submitted under weight, size, or custom-form choices.
+  const answerSources=[o.additional_choices,o.raw_additional_choices,o.selected_options,o.choices,o.custom_fields,o.form_data,o.form_fields,o.answers];
+  const getAnswerValue=v=>v&&typeof v==='object'?(v.value??v.answer??v.selected??v.text??v.label??null):v;
+  const sizeWords=/اصغر\s*مقاس|أصغر\s*مقاس|ازغر\s*مقاس|اكبر\s*مقاس|أكبر\s*مقاس/i;
+  let textualSize=null;
+  for(const src of answerSources){
+   if(!src)continue;
+   let obj=src;
+   if(typeof obj==='string'){try{obj=JSON.parse(obj)}catch{continue}}
+   const entries=Array.isArray(obj)?obj.map(x=>[String(x?.label??x?.name??x?.key??''),getAnswerValue(x)]):Object.entries(obj);
+   for(const [key,raw] of entries){
+    const val=getAnswerValue(raw);
+    if(typeof val!=='string'||!val.trim())continue;
+    if(sizeWords.test(val)||(/وزن|weight|مقاس|size/i.test(key)&&!normalizeWeight(val)&&/مقاس|صغير|كبير|small|large/i.test(val))){textualSize=val.trim().slice(0,100);break}
+   }
+   if(textualSize)break;
+  }
+  const weightLabelText=textualSize??((typeof submittedWeightRaw==='string'&&submittedWeightRaw.trim()&&!normalizeWeight(submittedWeightRaw))?submittedWeightRaw.trim().slice(0,100):null);
   let actualColor=(typeof submittedColor==='string'&&submittedColor.trim())?submittedColor.trim():selectedColor;
   const offerText=String(submittedOffer??'');
   const totalValue=Number(o.price_total??o.total??o.total_amount??o.total_price??o.grand_total??o.order_total??o.amount??NaN);
