@@ -125,7 +125,20 @@ export async function onRequest({request,env}){
    }
   };
   for(const [k,v] of Object.entries(o)){if(/additional|choice|form|custom|answer|field|option|metadata/i.test(k))inspect(v,k)}
+  // LiteSale custom-form answers are often keyed by their Arabic field labels.
+  // Prefer the exact submitted answer over defaults or product variants.
+  const customAnswers=o.additional_choices??o.raw_additional_choices??null;
+  const readAnswer=(key)=>{
+   if(!customAnswers||typeof customAnswers!=='object')return null;
+   const raw=customAnswers[key];
+   if(raw==null)return null;
+   return raw&&typeof raw==='object'?(raw.value??raw.answer??raw.selected??raw.text??null):raw;
+  };
+  const submittedWeight=normalizeWeight(readAnswer('الوزن'));
+  if(submittedWeight!==null){customerWeight=submittedWeight;weightSource='additional_choices.الوزن'}
+  const submittedColor=readAnswer('لون الجاكيت')??readAnswer('اللون');
+  const actualColor=(typeof submittedColor==='string'&&submittedColor.trim())?submittedColor.trim():selectedColor;
   const schemaPaths=[]; const scan=(v,path='',depth=0)=>{if(!v||typeof v!=='object'||depth>3||schemaPaths.length>=90)return;for(const [k,x] of Object.entries(v).slice(0,35)){const p=path?path+'.'+k:k; if(/price|total|amount|cost|subtotal|discount|shipping|currency|product|item|variant|line|payment|order_value|quantity|weight|وزن/i.test(k)){schemaPaths.push({path:p,type:Array.isArray(x)?'array':typeof x,value:(typeof x==='number'||(typeof x==='string'&&/^\d+(?:\.\d+)?$/.test(x)))?String(x).slice(0,35):undefined});}if(x&&typeof x==='object')scan(Array.isArray(x)?x[0]:x,p+(Array.isArray(x)?'[0]':''),depth+1);if(schemaPaths.length>=90)break}};scan(o);
-  return out({ok:true,diagnostic:{candidate_fields:schemaPaths,custom_field_hints:customFieldHints.slice(0,35)},detail:{id:o.id??o.order_id??id,product:productName??product,product_id:pid??null,product_lookup:productLookup,amount,quantity:o.quantity??o.qty??o.items?.length??null,address:o.address??o.shipping_address??o.customer?.address??null,city:o.city??o.customer?.city??null,color:selectedColor,size:selectedSize,weight_kg:customerWeight,weight_source:weightSource,notes:o.notes??o.customer_notes??null},available_fields:Object.keys(o).slice(0,45),read_only:true,imported:0});
+  return out({ok:true,diagnostic:{candidate_fields:schemaPaths,custom_field_hints:customFieldHints.slice(0,35)},detail:{id:o.id??o.order_id??id,product:productName??product,product_id:pid??null,product_lookup:productLookup,amount,quantity:o.quantity??o.qty??o.items?.length??null,address:o.address??o.shipping_address??o.customer?.address??null,city:o.city??o.customer?.city??null,color:actualColor,size:selectedSize,weight_kg:customerWeight,weight_source:weightSource,notes:o.notes??o.customer_notes??null},available_fields:Object.keys(o).slice(0,45),read_only:true,imported:0});
  }catch(e){return out({error:String(e?.message||'detail_failed').slice(0,130)},502)}
 }
