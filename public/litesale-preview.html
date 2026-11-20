@@ -26,7 +26,7 @@ btn.addEventListener('click',async()=>{
      article.append(more);
      const diagnostics=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
      summary.textContent='تشخيص الحقول (للمدير)';pre.style.whiteSpace='pre-wrap';pre.style.overflowWrap='anywhere';
-     pre.textContent=(response.diagnostic?.candidate_fields||[]).map(x=>x.path+' ['+x.type+']'+(x.value!==undefined?' = '+x.value:'')).join('\n')||'لا توجد حقول إضافية';
+     pre.textContent='حقول النموذج:\n'+((response.diagnostic?.custom_field_hints||[]).map(x=>x.path+' — '+x.label+(x.value!=null?' = '+x.value:'')).join('\n')||'لم يتم العثور على حقول نموذج مطابقة')+'\n\nحقول تقنية:\n'+((response.diagnostic?.candidate_fields||[]).map(x=>x.path+' ['+x.type+']'+(x.value!==undefined?' = '+x.value:'')).join('\n')||'لا توجد حقول إضافية');
      diagnostics.append(summary,pre);article.append(diagnostics);
     }catch(e){detail.textContent='تعذر تحميل تفاصيل هذا الطلب: '+e.message}
    });
