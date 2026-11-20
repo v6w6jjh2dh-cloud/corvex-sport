@@ -34,11 +34,11 @@ export async function onRequest({request,env}) {
   const tool=(listing.result?.tools||[]).find(t=>t.name==='list_orders');
   if(!tool)return reply({error:'list_orders_not_available'},502);
   const props=tool.inputSchema?.properties||{};
-  const args={};
-  if('page'in props)args.page=1;
-  if('limit'in props)args.limit=10;
-  if('page_size'in props)args.page_size=10;
-  if('per_page'in props)args.per_page=10;
+  let body={};try{body=await request.json()}catch{}const page=Math.max(1,Math.min(100,Number(body.page)||1));const batchSize=50;const args={};
+  if('page'in props)args.page=page;
+  if('limit'in props)args.limit=batchSize;
+  if('page_size'in props)args.page_size=batchSize;
+  if('per_page'in props)args.per_page=batchSize;
   const required=tool.inputSchema?.required||[];
   const missing=required.filter(k=>!(k in args));
   if(missing.length)return reply({error:'tool_requires_parameters',required:missing},422);
@@ -53,7 +53,7 @@ export async function onRequest({request,env}) {
   const arr=Array.isArray(value)?value:[value?.orders,value?.data?.orders,value?.data,value?.results,value?.items].find(Array.isArray);
   if(!arr)return reply({error:'unrecognized_orders_shape',keys:Object.keys(value||{}).slice(0,20)},502);
   // Only the first ten entries are sent to the authenticated administrator.
-  const orders=arr.slice(0,10).map(o=>({
+  const orders=arr.slice(0,batchSize).map(o=>({
    id:o.id??o.order_id??o.order_number??o.number??null,
    name:o.customer_name??o.customer?.name??o.name??o.full_name??null,
    phone:o.customer_phone??o.customer?.phone??o.phone??null,
@@ -62,6 +62,6 @@ export async function onRequest({request,env}) {
    status:o.status??o.order_status??null,
    created_at:o.created_at??o.createdAt??o.date??null
   }));
-  return reply({ok:true,orders,shown:orders.length,read_only:true,imported:0,has_more:arr.length>10});
+  return reply({ok:true,orders,shown:orders.length,read_only:true,imported:0,has_more:arr.length>=batchSize,page,pagination_supported:'page'in props,returned:arr.length});
  }catch(e){return reply({error:String(e?.message||'connection_failed').slice(0,160)},502)}
 }
