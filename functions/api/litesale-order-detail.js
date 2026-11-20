@@ -36,7 +36,34 @@ export async function onRequest({request,env}){
   if(!o||typeof o!=='object'||Array.isArray(o))return out({error:'unexpected_order_shape'},502);
   const product=o.product_name??o.product?.name??o.product??o.items??o.order_items??o.products??o.line_items??o.variant??(o.product_id!=null?'منتج #'+o.product_id:null);
   const amount=o.total??o.total_amount??o.total_price??o.grand_total??o.order_total??o.price??o.amount??o.total_jod??o.price_total??o.pricing??null;
+  // Prefer actual product metadata when LiteSale exposes a read-only get_product tool.
+  let productName=null,productLookup='unavailable';
+  const pid=o.product_id??o.product?.id;
+  if(pid!=null){
+   const ptool=list.value?.tools?.find(t=>t.name==='get_product');
+   if(ptool){
+    const pp=ptool.inputSchema?.properties||{},pr=ptool.inputSchema?.required||[];
+    const pf=['product_id','id','productId'].find(x=>x in pp)||(pr.length===1?pr[0]:null);
+    if(pf&&pr.every(x=>x===pf)){
+     try{
+      const p=await rpc('tools/call',4,{name:'get_product',arguments:{[pf]:pid}},result.session);
+      if(!p.value?.isError){
+       let pd=p.value?.structuredContent;
+       if(pd==null){const pt=(p.value?.content||[]).filter(x=>x.type==='text').map(x=>x.text).join('\\n');pd=JSON.parse(pt)}
+       const item=pd?.product??pd?.data?.product??pd?.data??pd;
+       const candidate=item?.name??item?.title??item?.product_name;
+       if(typeof candidate==='string'&&candidate.trim()){productName=candidate.slice(0,180);productLookup='found'}
+      }
+     }catch{productLookup='failed'}
+    }else productLookup='unsupported_schema';
+   }
+  }
+  const choices=o.raw_additional_choices??o.additional_choices??o.selected_options??o.choices??null;
+  const choiceValues=(choices&&typeof choices==='object')?choices:{};
+  const findChoice=(regex)=>{const entries=Object.entries(choiceValues).filter(([k])=>regex.test(k));for(const [,v] of entries){if(typeof v==='string'||typeof v==='number')return String(v);if(v&&typeof v==='object'){const val=v.value??v.label??v.name??v.selected;if(typeof val==='string'||typeof val==='number')return String(val)}}return null};
+  const selectedColor=o.color??o.variant?.color??o.selected_color??findChoice(/color|colour|لون/i)??null;
+  const selectedSize=o.size??o.variant?.size??o.selected_size??findChoice(/size|مقاس|قياس/i)??null;
   const schemaPaths=[]; const scan=(v,path='',depth=0)=>{if(!v||typeof v!=='object'||depth>3||schemaPaths.length>=90)return;for(const [k,x] of Object.entries(v).slice(0,35)){const p=path?path+'.'+k:k; if(/price|total|amount|cost|subtotal|discount|shipping|currency|product|item|variant|line|payment|order_value|quantity/i.test(k)){schemaPaths.push({path:p,type:Array.isArray(x)?'array':typeof x,value:(typeof x==='number'||(typeof x==='string'&&/^\d+(?:\.\d+)?$/.test(x)))?String(x).slice(0,35):undefined});}if(x&&typeof x==='object')scan(Array.isArray(x)?x[0]:x,p+(Array.isArray(x)?'[0]':''),depth+1);if(schemaPaths.length>=90)break}};scan(o);
-  return out({ok:true,diagnostic:{candidate_fields:schemaPaths},detail:{id:o.id??o.order_id??id,product,amount,quantity:o.quantity??o.qty??o.items?.length??null,address:o.address??o.shipping_address??o.customer?.address??null,city:o.city??o.customer?.city??null,color:o.color??o.variant?.color??null,notes:o.notes??o.customer_notes??null},available_fields:Object.keys(o).slice(0,45),read_only:true,imported:0});
+  return out({ok:true,diagnostic:{candidate_fields:schemaPaths},detail:{id:o.id??o.order_id??id,product:productName??product,product_id:pid??null,product_lookup:productLookup,amount,quantity:o.quantity??o.qty??o.items?.length??null,address:o.address??o.shipping_address??o.customer?.address??null,city:o.city??o.customer?.city??null,color:selectedColor,size:selectedSize,notes:o.notes??o.customer_notes??null},available_fields:Object.keys(o).slice(0,45),read_only:true,imported:0});
  }catch(e){return out({error:String(e?.message||'detail_failed').slice(0,130)},502)}
 }
