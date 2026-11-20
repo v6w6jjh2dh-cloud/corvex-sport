@@ -52,7 +52,7 @@
  async function view(){
   state.view=VIEW;
   const c=document.querySelector('#content');if(!c)return;
-  c.innerHTML=`<div class="page-title"><div><h1>🔔 تنبيه</h1><div class="sub">طلبات أُرسلت لشركة التوصيل من 20/11/2026 وبقيت بلا نتيجة 4 أيام كاملة أو أكثر.</div></div><button id="deliveryAlertsRefresh" class="btn btn-soft">تحديث</button></div><div class="card"><div id="deliveryAlertsBody" class="empty">جاري تحميل التنبيهات...</div></div>`;
+  c.innerHTML=`<div class="page-title"><div><h1>🔔 تنبيه</h1><div class="sub">طلبات أُرسلت لشركة التوصيل بدءًا من 21/11/2026 (وتشمل طلبات 20/11) وبقيت بلا نتيجة 4 أيام كاملة أو أكثر.</div></div><button id="deliveryAlertsRefresh" class="btn btn-soft">تحديث</button></div><div class="card"><div id="deliveryAlertsBody" class="empty">جاري تحميل التنبيهات...</div></div>`;
   document.querySelector('#deliveryAlertsRefresh').onclick=()=>loadIntoView(true);
   await loadIntoView(false);
  }
