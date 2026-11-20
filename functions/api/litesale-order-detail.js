@@ -63,7 +63,37 @@ export async function onRequest({request,env}){
   const findChoice=(regex)=>{const entries=Object.entries(choiceValues).filter(([k])=>regex.test(k));for(const [,v] of entries){if(typeof v==='string'||typeof v==='number')return String(v);if(v&&typeof v==='object'){const val=v.value??v.label??v.name??v.selected;if(typeof val==='string'||typeof val==='number')return String(val)}}return null};
   const selectedColor=o.color??o.variant?.color??o.selected_color??findChoice(/color|colour|لون/i)??null;
   const selectedSize=o.size??o.variant?.size??o.selected_size??findChoice(/size|مقاس|قياس/i)??null;
-  const schemaPaths=[]; const scan=(v,path='',depth=0)=>{if(!v||typeof v!=='object'||depth>3||schemaPaths.length>=90)return;for(const [k,x] of Object.entries(v).slice(0,35)){const p=path?path+'.'+k:k; if(/price|total|amount|cost|subtotal|discount|shipping|currency|product|item|variant|line|payment|order_value|quantity/i.test(k)){schemaPaths.push({path:p,type:Array.isArray(x)?'array':typeof x,value:(typeof x==='number'||(typeof x==='string'&&/^\d+(?:\.\d+)?$/.test(x)))?String(x).slice(0,35):undefined});}if(x&&typeof x==='object')scan(Array.isArray(x)?x[0]:x,p+(Array.isArray(x)?'[0]':''),depth+1);if(schemaPaths.length>=90)break}};scan(o);
-  return out({ok:true,diagnostic:{candidate_fields:schemaPaths},detail:{id:o.id??o.order_id??id,product:productName??product,product_id:pid??null,product_lookup:productLookup,amount,quantity:o.quantity??o.qty??o.items?.length??null,address:o.address??o.shipping_address??o.customer?.address??null,city:o.city??o.customer?.city??null,color:selectedColor,size:selectedSize,notes:o.notes??o.customer_notes??null},available_fields:Object.keys(o).slice(0,45),read_only:true,imported:0});
+  // Customer-entered weight only; never infer from quantity, shipping weight or size.
+  const weightKeys=/^(?:weight|customer_weight|body_weight|selected_weight|weight_kg|customerWeight|وزن|الوزن|وزن العميل|وزنك|الوزن بالكيلو|الوزن بالكيلوغرام)$/i;
+  const weightLabel=/وزن|weight/i;
+  const normalizeWeight=(v)=>{
+   if(v&&typeof v==='object')v=v.value??v.selected??v.answer??v.label??v.text??null;
+   if(typeof v!=='number'&&typeof v!=='string')return null;
+   const s=String(v).trim().replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[۰-۹]/g,d=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))).replace(',', '.');
+   const m=s.match(/^(\\d{2,3}(?:\\.\\d)?)(?:\\s*(?:kg|kgs|كيلو|كغ|كيلوغرام))?$/i);
+   if(!m)return null;
+   const n=Number(m[1]);return n>=20&&n<=300?n:null;
+  };
+  let customerWeight=null,weightSource=null;
+  const candidates=[['weight',o.weight],['customer_weight',o.customer_weight],['body_weight',o.body_weight],['weight_kg',o.weight_kg],['customer.weight',o.customer?.weight],['customer.weight_kg',o.customer?.weight_kg]];
+  for(const [k,v] of candidates){const n=normalizeWeight(v);if(n!==null){customerWeight=n;weightSource=k;break}}
+  if(customerWeight===null){
+   const walk=(v,path='',depth=0)=>{
+    if(customerWeight!==null||depth>5||!v||typeof v!=='object')return;
+    if(Array.isArray(v)){for(let i=0;i<Math.min(v.length,35);i++)walk(v[i],path+'['+i+']',depth+1);return}
+    const label=v.label??v.name??v.title??v.question??v.field_name??v.key;
+    if(typeof label==='string'&&weightLabel.test(label)&&!/shipping|package|parcel|شحن|طرد/i.test(label)){
+     const n=normalizeWeight(v.value??v.answer??v.selected??v.input??v.text);
+     if(n!==null){customerWeight=n;weightSource=path+'.'+label;return}
+    }
+    for(const [k,x] of Object.entries(v).slice(0,50)){
+     if(weightKeys.test(k)){const n=normalizeWeight(x);if(n!==null){customerWeight=n;weightSource=path?path+'.'+k:k;return}}
+     if(x&&typeof x==='object')walk(x,path?path+'.'+k:k,depth+1);
+    }
+   };
+   for(const [k,v] of [['raw_additional_choices',o.raw_additional_choices],['additional_choices',o.additional_choices],['selected_options',o.selected_options],['choices',o.choices],['custom_fields',o.custom_fields],['form_data',o.form_data],['form_fields',o.form_fields],['answers',o.answers]])walk(v,k);
+  }
+  const schemaPaths=[]; const scan=(v,path='',depth=0)=>{if(!v||typeof v!=='object'||depth>3||schemaPaths.length>=90)return;for(const [k,x] of Object.entries(v).slice(0,35)){const p=path?path+'.'+k:k; if(/price|total|amount|cost|subtotal|discount|shipping|currency|product|item|variant|line|payment|order_value|quantity|weight|وزن/i.test(k)){schemaPaths.push({path:p,type:Array.isArray(x)?'array':typeof x,value:(typeof x==='number'||(typeof x==='string'&&/^\d+(?:\.\d+)?$/.test(x)))?String(x).slice(0,35):undefined});}if(x&&typeof x==='object')scan(Array.isArray(x)?x[0]:x,p+(Array.isArray(x)?'[0]':''),depth+1);if(schemaPaths.length>=90)break}};scan(o);
+  return out({ok:true,diagnostic:{candidate_fields:schemaPaths},detail:{id:o.id??o.order_id??id,product:productName??product,product_id:pid??null,product_lookup:productLookup,amount,quantity:o.quantity??o.qty??o.items?.length??null,address:o.address??o.shipping_address??o.customer?.address??null,city:o.city??o.customer?.city??null,color:selectedColor,size:selectedSize,weight_kg:customerWeight,weight_source:weightSource,notes:o.notes??o.customer_notes??null},available_fields:Object.keys(o).slice(0,45),read_only:true,imported:0});
  }catch(e){return out({error:String(e?.message||'detail_failed').slice(0,130)},502)}
 }
