@@ -164,7 +164,47 @@ export async function onRequest({request,env}){
   const isTwoOffer=/قطعتين|قطعتان|2\s*قطع|٢\s*قطع|2\s*جاكيت|٢\s*جاكيت/i.test(offerText);
   const twoJackets=isCasualJacket&&isTwoOffer&&totalValue===20;
   if(twoJackets)actualColor='أسود + بيج';
+  // Capture each piece independently from LiteSale custom form (up to four).
+  const normalizeArabicDigits=s=>String(s??'').replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+  const pieceIndex=key=>{
+   const k=normalizeArabicDigits(key).replace(/[()]/g,' ').replace(/\s+/g,' ').trim();
+   const n=k.match(/(?:القطعة|قطعه|piece|item)\s*(?:رقم)?\s*([1-4])/i);
+   if(n)return Number(n[1]);
+   if(/(?:الأولى|الاولى|الاول|first)/i.test(k))return 1;
+   if(/(?:الثانية|الثانيه|الثاني|second)/i.test(k))return 2;
+   if(/(?:الثالثة|الثالثه|الثالث|third)/i.test(k))return 3;
+   if(/(?:الرابعة|الرابعه|الرابع|fourth)/i.test(k))return 4;
+   return null;
+  };
+  const pieces=[1,2,3,4].map(index=>({index,color:null,weight_kg:null,weight_text:null}));
+  const putPiece=(key,value)=>{
+   const i=pieceIndex(key);if(!i||value==null)return;
+   const p=pieces[i-1],s=String(value).trim();if(!s)return;
+   if(/لون|color|colour/i.test(key))p.color=s.slice(0,100);
+   else if(/وزن|weight|مقاس|size/i.test(key)){
+    const n=normalizeWeight(s);
+    if(n!==null)p.weight_kg=n;
+    else p.weight_text=s.slice(0,100);
+   }
+  };
+  const scanPieces=(obj,depth=0)=>{
+   if(depth>5||obj==null)return;
+   if(typeof obj==='string'){if(obj.startsWith('{')||obj.startsWith('[')){try{scanPieces(JSON.parse(obj),depth+1)}catch{}}return}
+   if(typeof obj!=='object')return;
+   if(Array.isArray(obj)){for(const item of obj.slice(0,60))scanPieces(item,depth+1);return}
+   const label=obj.label??obj.question??obj.field_label??obj.name??obj.key;
+   if(typeof label==='string')putPiece(label,obj.value??obj.answer??obj.selected??obj.text);
+   for(const [key,v] of Object.entries(obj).slice(0,90)){
+    if(/لون|color|colour|وزن|weight|مقاس|size/i.test(key))putPiece(key,v&&typeof v==='object'?(v.value??v.answer??v.selected??v.text):v);
+    if(v&&typeof v==='object')scanPieces(v,depth+1);
+   }
+  };
+  for(const src of answerSources)scanPieces(src);
+  const selectedPieces=pieces.filter(p=>p.color!==null||p.weight_kg!==null||p.weight_text!==null);
+  const pieceColors=selectedPieces.map(p=>p.color).filter(Boolean);
+  const resolvedColor=pieceColors.length?pieceColors.join(' + '):actualColor;
+  const resolvedQuantity=selectedPieces.length>1?selectedPieces.length:(twoJackets?2:(o.quantity??o.qty??o.items?.length??null));
   const schemaPaths=[]; const scan=(v,path='',depth=0)=>{if(!v||typeof v!=='object'||depth>3||schemaPaths.length>=90)return;for(const [k,x] of Object.entries(v).slice(0,35)){const p=path?path+'.'+k:k; if(/price|total|amount|cost|subtotal|discount|shipping|currency|product|item|variant|line|payment|order_value|quantity|weight|وزن/i.test(k)){schemaPaths.push({path:p,type:Array.isArray(x)?'array':typeof x,value:(typeof x==='number'||(typeof x==='string'&&/^\d+(?:\.\d+)?$/.test(x)))?String(x).slice(0,35):undefined});}if(x&&typeof x==='object')scan(Array.isArray(x)?x[0]:x,p+(Array.isArray(x)?'[0]':''),depth+1);if(schemaPaths.length>=90)break}};scan(o);
-  return out({ok:true,diagnostic:{candidate_fields:schemaPaths,custom_field_hints:customFieldHints.slice(0,35)},detail:{id:o.id??o.order_id??id,product:productName??product,product_id:pid??null,product_lookup:productLookup,amount,quantity:twoJackets?2:(o.quantity??o.qty??o.items?.length??null),address:o.address??o.shipping_address??o.customer?.address??null,city:o.city??o.customer?.city??null,color:actualColor,size:selectedSize,weight_kg:customerWeight,weight_text:weightLabelText,weight_source:weightSource,notes:o.notes??o.customer_notes??null},available_fields:Object.keys(o).slice(0,45),read_only:true,imported:0});
+  return out({ok:true,diagnostic:{candidate_fields:schemaPaths,custom_field_hints:customFieldHints.slice(0,35)},detail:{id:o.id??o.order_id??id,product:productName??product,product_id:pid??null,product_lookup:productLookup,amount,quantity:resolvedQuantity,address:o.address??o.shipping_address??o.customer?.address??null,city:o.city??o.customer?.city??null,color:resolvedColor,pieces:selectedPieces,size:selectedSize,weight_kg:customerWeight,weight_text:weightLabelText,weight_source:weightSource,notes:o.notes??o.customer_notes??null},available_fields:Object.keys(o).slice(0,45),read_only:true,imported:0});
  }catch(e){return out({error:String(e?.message||'detail_failed').slice(0,130)},502)}
 }
