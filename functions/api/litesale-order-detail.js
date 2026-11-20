@@ -137,8 +137,17 @@ export async function onRequest({request,env}){
   const submittedWeight=normalizeWeight(readAnswer('الوزن'));
   if(submittedWeight!==null){customerWeight=submittedWeight;weightSource='additional_choices.الوزن'}
   const submittedColor=readAnswer('لون الجاكيت')??readAnswer('اللون');
-  const actualColor=(typeof submittedColor==='string'&&submittedColor.trim())?submittedColor.trim():selectedColor;
+  const submittedOffer=readAnswer('العرض')??readAnswer('اختيار العرض')??readAnswer('الكمية')??null;
+  const submittedWeightRaw=readAnswer('الوزن')??readAnswer('وزن العميل')??null;
+  const weightLabelText=(typeof submittedWeightRaw==='string'&&submittedWeightRaw.trim()&&!normalizeWeight(submittedWeightRaw))?submittedWeightRaw.trim().slice(0,100):null;
+  let actualColor=(typeof submittedColor==='string'&&submittedColor.trim())?submittedColor.trim():selectedColor;
+  const offerText=String(submittedOffer??'');
+  const totalValue=Number(o.price_total??o.total??o.total_amount??o.total_price??o.grand_total??o.order_total??o.amount??NaN);
+  const isCasualJacket=/جاكيت\s*جوخ\s*كاج(?:و)?ال/i.test(String(productName??product??''));
+  const isTwoOffer=/قطعتين|قطعتان|2\s*قطع|٢\s*قطع|2\s*جاكيت|٢\s*جاكيت/i.test(offerText);
+  const twoJackets=isCasualJacket&&isTwoOffer&&totalValue===20;
+  if(twoJackets)actualColor='أسود + بيج';
   const schemaPaths=[]; const scan=(v,path='',depth=0)=>{if(!v||typeof v!=='object'||depth>3||schemaPaths.length>=90)return;for(const [k,x] of Object.entries(v).slice(0,35)){const p=path?path+'.'+k:k; if(/price|total|amount|cost|subtotal|discount|shipping|currency|product|item|variant|line|payment|order_value|quantity|weight|وزن/i.test(k)){schemaPaths.push({path:p,type:Array.isArray(x)?'array':typeof x,value:(typeof x==='number'||(typeof x==='string'&&/^\d+(?:\.\d+)?$/.test(x)))?String(x).slice(0,35):undefined});}if(x&&typeof x==='object')scan(Array.isArray(x)?x[0]:x,p+(Array.isArray(x)?'[0]':''),depth+1);if(schemaPaths.length>=90)break}};scan(o);
-  return out({ok:true,diagnostic:{candidate_fields:schemaPaths,custom_field_hints:customFieldHints.slice(0,35)},detail:{id:o.id??o.order_id??id,product:productName??product,product_id:pid??null,product_lookup:productLookup,amount,quantity:o.quantity??o.qty??o.items?.length??null,address:o.address??o.shipping_address??o.customer?.address??null,city:o.city??o.customer?.city??null,color:actualColor,size:selectedSize,weight_kg:customerWeight,weight_source:weightSource,notes:o.notes??o.customer_notes??null},available_fields:Object.keys(o).slice(0,45),read_only:true,imported:0});
+  return out({ok:true,diagnostic:{candidate_fields:schemaPaths,custom_field_hints:customFieldHints.slice(0,35)},detail:{id:o.id??o.order_id??id,product:productName??product,product_id:pid??null,product_lookup:productLookup,amount,quantity:twoJackets?2:(o.quantity??o.qty??o.items?.length??null),address:o.address??o.shipping_address??o.customer?.address??null,city:o.city??o.customer?.city??null,color:actualColor,size:selectedSize,weight_kg:customerWeight,weight_text:weightLabelText,weight_source:weightSource,notes:o.notes??o.customer_notes??null},available_fields:Object.keys(o).slice(0,45),read_only:true,imported:0});
  }catch(e){return out({error:String(e?.message||'detail_failed').slice(0,130)},502)}
 }
