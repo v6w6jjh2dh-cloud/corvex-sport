@@ -70,7 +70,7 @@ export async function onRequest({request,env}){
    if(v&&typeof v==='object')v=v.value??v.selected??v.answer??v.label??v.text??null;
    if(typeof v!=='number'&&typeof v!=='string')return null;
    const s=String(v).trim().replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[۰-۹]/g,d=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))).replace(',', '.');
-   const m=s.match(/^(\\d{2,3}(?:\\.\\d)?)(?:\\s*(?:kg|kgs|كيلو|كغ|كيلوغرام))?$/i);
+   const m=s.match(/^(\d{2,3}(?:\.\d)?)(?:\s*(?:kg|kgs|كيلو|كغ|كيلوغرام))?$/i);
    if(!m)return null;
    const n=Number(m[1]);return n>=20&&n<=300?n:null;
   };
@@ -93,7 +93,39 @@ export async function onRequest({request,env}){
    };
    for(const [k,v] of [['raw_additional_choices',o.raw_additional_choices],['additional_choices',o.additional_choices],['selected_options',o.selected_options],['choices',o.choices],['custom_fields',o.custom_fields],['form_data',o.form_data],['form_fields',o.form_fields],['answers',o.answers]])walk(v,k);
   }
+  // Diagnose custom-form structure without exposing unrelated customer fields.
+  const customFieldHints=[];
+  const inspect=(v,path,depth=0)=>{
+   if(depth>5||customFieldHints.length>=35||v==null)return;
+   if(typeof v==='string'){
+    if((v.startsWith('{')||v.startsWith('['))&&v.length<20000){try{inspect(JSON.parse(v),path+'(json)',depth+1)}catch{}}
+    return;
+   }
+   if(typeof v!=='object')return;
+   if(Array.isArray(v)){for(let i=0;i<Math.min(v.length,25);i++)inspect(v[i],path+'['+i+']',depth+1);return}
+   const label=v.label??v.title??v.question??v.field_label??v.name??v.key;
+   if(typeof label==='string'&&/وزن|weight|لون|color|colour|عرض|offer|bundle/i.test(label)){
+    const raw=v.value??v.answer??v.selected??v.input??v.text??v.field_value??null;
+    const val=(typeof raw==='string'||typeof raw==='number')?String(raw).slice(0,80):null;
+    customFieldHints.push({path,label:label.slice(0,80),value:val});
+    if(customerWeight===null&&/وزن|weight/i.test(label)&&!/شحن|طرد|shipping|parcel/i.test(label)){
+     const n=normalizeWeight(raw);if(n!==null){customerWeight=n;weightSource=path}
+    }
+   }
+   for(const [k,x] of Object.entries(v).slice(0,45)){
+    if(/وزن|weight|لون|color|colour|عرض|offer|bundle/i.test(k)&&!/(?:shipping|parcel|package|شحن|طرد)/i.test(k)){
+     const raw=(x&&typeof x==='object')?(x.value??x.answer??x.selected??x.text):x;
+     if(typeof raw==='string'||typeof raw==='number'){
+      customFieldHints.push({path:path+'.'+k,label:k.slice(0,80),value:String(raw).slice(0,80)});
+      if(customerWeight===null&&/وزن|weight/i.test(k)){const n=normalizeWeight(raw);if(n!==null){customerWeight=n;weightSource=path+'.'+k}}
+     }
+    }
+    if(x&&typeof x==='object')inspect(x,path+'.'+k,depth+1);
+    else if(typeof x==='string'&&(x.startsWith('{')||x.startsWith('[')))inspect(x,path+'.'+k,depth+1);
+   }
+  };
+  for(const [k,v] of Object.entries(o)){if(/additional|choice|form|custom|answer|field|option|metadata/i.test(k))inspect(v,k)}
   const schemaPaths=[]; const scan=(v,path='',depth=0)=>{if(!v||typeof v!=='object'||depth>3||schemaPaths.length>=90)return;for(const [k,x] of Object.entries(v).slice(0,35)){const p=path?path+'.'+k:k; if(/price|total|amount|cost|subtotal|discount|shipping|currency|product|item|variant|line|payment|order_value|quantity|weight|وزن/i.test(k)){schemaPaths.push({path:p,type:Array.isArray(x)?'array':typeof x,value:(typeof x==='number'||(typeof x==='string'&&/^\d+(?:\.\d+)?$/.test(x)))?String(x).slice(0,35):undefined});}if(x&&typeof x==='object')scan(Array.isArray(x)?x[0]:x,p+(Array.isArray(x)?'[0]':''),depth+1);if(schemaPaths.length>=90)break}};scan(o);
-  return out({ok:true,diagnostic:{candidate_fields:schemaPaths},detail:{id:o.id??o.order_id??id,product:productName??product,product_id:pid??null,product_lookup:productLookup,amount,quantity:o.quantity??o.qty??o.items?.length??null,address:o.address??o.shipping_address??o.customer?.address??null,city:o.city??o.customer?.city??null,color:selectedColor,size:selectedSize,weight_kg:customerWeight,weight_source:weightSource,notes:o.notes??o.customer_notes??null},available_fields:Object.keys(o).slice(0,45),read_only:true,imported:0});
+  return out({ok:true,diagnostic:{candidate_fields:schemaPaths,custom_field_hints:customFieldHints.slice(0,35)},detail:{id:o.id??o.order_id??id,product:productName??product,product_id:pid??null,product_lookup:productLookup,amount,quantity:o.quantity??o.qty??o.items?.length??null,address:o.address??o.shipping_address??o.customer?.address??null,city:o.city??o.customer?.city??null,color:selectedColor,size:selectedSize,weight_kg:customerWeight,weight_source:weightSource,notes:o.notes??o.customer_notes??null},available_fields:Object.keys(o).slice(0,45),read_only:true,imported:0});
  }catch(e){return out({error:String(e?.message||'detail_failed').slice(0,130)},502)}
 }
