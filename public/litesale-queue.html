@@ -24,7 +24,8 @@ if(sync){
  const preview=await api('/api/litesale-preview',{page:scanPage});const fingerprint=(preview.orders||[]).map(x=>x.id).join('|');if(scanPage>1&&seenPages.has(fingerprint)){scanPage=1;seenPages.clear();throw Error('LiteSale أعاد نفس الطلبات عند تغيير الصفحة؛ لا يمكن جلب صفحات أخرى بهذا الربط.')}seenPages.add(fingerprint);
  if(preview.pagination_supported===false&&scanPage>1){scanPage=1;throw Error('LiteSale لا يدعم الصفحات المتعددة عبر الربط الحالي')}
  const known=await api('/api/litesale-queue');const knownIds=new Set((known.orders||[]).map(x=>String(x.source_id)));
- const eligible=(preview.orders||[]).filter(o=>o.id&&!knownIds.has(String(o.id)));
+ const shippedStatus=s=>{const v=String(s??'').trim().toLowerCase().replace(/[ًٌٍَُِّْـ]/g,'').replace(/أ|إ|آ/g,'ا');return /تم\\s*الشحن|مشحون|shipped|dispatched|fulfilled/.test(v)};
+ const eligible=(preview.orders||[]).filter(o=>o.id&&!knownIds.has(String(o.id))&&!shippedStatus(o.status));
  const staged=[];let failures=0;
  for(const o of eligible){try{const d=(await api('/api/litesale-order-detail',{id:String(o.id)})).detail;staged.push({source_id:String(o.id),name:o.name,phone:o.phone,product:d.product,color:d.color,size:d.size,weight_kg:d.weight_kg,weight_text:d.weight_text,pieces:d.pieces,quantity:d.quantity,amount:d.amount,address:d.address,city:d.city,notes:d.notes,status:o.status,source_created_at:o.created_at})}catch(e){failures++;if(String(e.message).includes('429'))break}}
  if(failures)error.textContent='تعذر جلب تفاصيل '+failures+' طلب مؤقتًا. ستتم إعادة المحاولة عند التحديث.';
