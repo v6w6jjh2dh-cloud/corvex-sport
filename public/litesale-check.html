@@ -1,0 +1,9 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>فحص LiteSale — كورفكس</title><style>body{font-family:system-ui,sans-serif;background:#f5f6fa;color:#172034;margin:0;padding:24px}main{max-width:650px;margin:auto;background:white;padding:24px;border-radius:18px;box-shadow:0 2px 15px #0001}button{background:#4235cb;color:white;border:0;padding:13px 22px;border-radius:10px;font-size:16px}button:disabled{opacity:.6}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f3f7;padding:16px;border-radius:10px}small{color:#596175}</style></head><body><main><h1>فحص اتصال LiteSale</h1><p>هذا الفحص يكتشف الأدوات المتاحة في LiteSale فقط. لا يسحب الطلبات ولا ينشئ أو يعدّل طلبات كورفكس، ولا يعمل تلقائيًا.</p><p><small>يجب تسجيل الدخول إلى كورفكس بحساب مدير أولًا.</small></p><button id="check">فحص الاتصال يدويًا</button><pre id="result" aria-live="polite">لم يبدأ الفحص بعد.</pre><p><a href="/">العودة إلى كورفكس</a></p></main><script>
+document.getElementById('check').addEventListener('click',async()=>{
+ const button=document.getElementById('check'),out=document.getElementById('result');button.disabled=true;out.textContent='جارٍ فحص الاتصال...';
+ try{const token=localStorage.getItem('corvex_token');if(!token)throw Error('سجّل الدخول بحساب المدير في كورفكس أولًا.');
+ const res=await fetch('/api/litesale-check',{method:'POST',headers:{Authorization:'Bearer '+token},cache:'no-store'});
+ const data=await res.json();if(!res.ok)throw Error(data.error||'تعذر الاتصال');
+ out.textContent='تم الاتصال بخادم: '+data.server+'\n\nالأدوات المتاحة:\n'+data.tools.map(t=>'• '+t.name+' — '+t.description).join('\n')+'\n\nلم يتم استيراد أي طلب.';
+ }catch(e){out.textContent='فشل الفحص: '+e.message}finally{button.disabled=false}
+});</script></body></html>
