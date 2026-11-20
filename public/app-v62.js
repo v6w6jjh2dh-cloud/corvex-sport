@@ -1024,6 +1024,8 @@ function renderShell(){
             </div>
           </div>`:''}
 
+          ${state.user?.role==='admin'?'<button id="litesaleInboxNav" type="button">🛍️ طلبات LiteSale</button>':''}
+
           ${can('couriers')?`
           <div class="nav-group">
             <button class="nav-parent" data-nav-toggle="couriersMenu">🚚 المناديب <span>⌄</span></button>
@@ -1060,6 +1062,8 @@ function renderShell(){
     document.querySelector('.sidebar')?.classList.remove('open');
     document.querySelector('#sidebarOverlay')?.classList.remove('show');
   });
+
+  const liteNav=$('#litesaleInboxNav');if(liteNav)liteNav.onclick=()=>{window.location.href='/litesale-queue.html'};
 
   const mobileMenuBtn=$('#mobileMenuBtn');
   const sidebar=$('.sidebar');
