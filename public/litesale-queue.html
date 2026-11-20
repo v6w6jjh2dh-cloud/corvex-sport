@@ -17,7 +17,7 @@ async function load(sync=true){if(busy)return;busy=true;refresh.disabled=true;er
 if(!token)throw Error('افتح كورفكس وسجّل الدخول بحساب المدير أولًا.');
 if(sync){
  status.textContent='جارٍ استقبال الطلبات الحديثة من LiteSale...';
- const preview=await api('/api/litesale-preview',{});const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Amman',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ const preview=await api('/api/litesale-preview',{});const dateParts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Amman',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const parts=Object.fromEntries(dateParts.map(p=>[p.type,p.value]));const today=parts.year+'-'+parts.month+'-'+parts.day;
  const eligible=(preview.orders||[]).filter(o=>o.id&&(!o.created_at||String(o.created_at).slice(0,10)>=today));
  const staged=[];
  for(const o of eligible){try{const d=(await api('/api/litesale-order-detail',{id:String(o.id)})).detail;staged.push({source_id:String(o.id),name:o.name,phone:o.phone,product:d.product,color:d.color,size:d.size,weight_kg:d.weight_kg,quantity:d.quantity,amount:d.amount,address:d.address,city:d.city,notes:d.notes,status:o.status,source_created_at:o.created_at})}catch(e){error.textContent='بعض الطلبات تعذر قراءة تفاصيلها، ولن تُضاف قبل اكتمالها.'}}
