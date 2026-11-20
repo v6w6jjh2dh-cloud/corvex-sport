@@ -47,14 +47,14 @@ export async function onRequestGet({request,env}){
       WHERE COALESCE(NULLIF(TRIM(o.delivery_status),''),'pending')='pending'
         AND o.printed=1
         AND o.first_printed_at IS NOT NULL
-        AND o.first_printed_at >= '2026-11-20 21:00:00'
+        AND o.first_printed_at >= '2026-11-19 21:00:00'
         AND o.first_printed_at <= datetime('now','-4 days')
         AND NOT EXISTS (SELECT 1 FROM deleted_orders d WHERE d.original_order_id=o.id)
         ${receivedReturnFilter}
       ORDER BY o.first_printed_at ASC,o.id ASC
       LIMIT 500
     `).all()).results||[];
-    return json({orders:rows,count:rows.length,monitoring_from:'2026-11-21',minimum_days:4});
+    return json({orders:rows,count:rows.length,monitoring_from:'2026-11-20',minimum_days:4});
   }catch(error){
     return json({error:'تعذر تحميل طلبات التنبيه',details:String(error?.message||error)},500);
   }
