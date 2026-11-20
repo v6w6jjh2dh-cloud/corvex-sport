@@ -2,7 +2,7 @@
 const json=(x,s=200)=>new Response(JSON.stringify(x),{status:s,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 const clean=x=>String(x??'').trim();
 const norm=x=>{let s=clean(x).replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g,'');if(s.startsWith('00962'))s=s.slice(2);if(s.startsWith('962')&&s.length>=12)s='0'+s.slice(3);if(s.length===9&&s.startsWith('7'))s='0'+s;return s};
-async function init(env){await env.DB.prepare(`CREATE TABLE IF NOT EXISTS litesale_review_queue(source_id TEXT PRIMARY KEY, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','dismissed')),corvex_order_id INTEGER,reviewed_by INTEGER,reviewed_at TEXT,created_at TEXT NOT NULL DEFAULT (datetime('now')),updated_at TEXT NOT NULL DEFAULT (datetime('now')))`).run();await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_litesale_queue_state ON litesale_review_queue(state,created_at)').run()}
+async function init(env){await env.DB.prepare(`CREATE TABLE IF NOT EXISTS litesale_review_queue(source_id TEXT PRIMARY KEY, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','dismissed')),corvex_order_id INTEGER,reviewed_by INTEGER,reviewed_at TEXT,created_at TEXT NOT NULL DEFAULT (datetime('now')),updated_at TEXT NOT NULL DEFAULT (datetime('now')))`).run();await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_litesale_queue_state ON litesale_review_queue(state,created_at)').run();await env.DB.prepare('CREATE TABLE IF NOT EXISTS litesale_approval_lock(source_id TEXT PRIMARY KEY,approved_at TEXT NOT NULL DEFAULT (datetime(\'now\')))').run()}
 export async function onRequest({request,env}){
  const origin=request.headers.get('origin');if(origin&&origin!==new URL(request.url).origin)return json({error:'invalid_origin'},403);
  const token=(request.headers.get('authorization')||'').replace(/^Bearer /,'');
@@ -46,5 +46,5 @@ export async function onRequest({request,env}){
  const notes=[spec,d.notes,'LiteSale: '+id].filter(Boolean).join('\n');
  const insert=env.DB.prepare("INSERT INTO orders(order_code,recipient_name,phone,area,detailed_address,amount,order_notes,raw_text,cost_of_goods,created_by,store_id,courier_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(Number(codeRow.code),d.name,phone,d.city,d.address,Number(d.amount),notes,notes,0,user.id,storeId,courier?.id||null);
  const update=env.DB.prepare("UPDATE litesale_review_queue SET state='approved',corvex_order_id=(SELECT id FROM orders WHERE order_code=?),reviewed_by=?,reviewed_at=datetime('now'),updated_at=datetime('now') WHERE source_id=? AND state='pending'").bind(Number(codeRow.code),user.id,id);
- try{await env.DB.batch([insert,update]);return json({ok:true,order_code:Number(codeRow.code)})}catch(e){return json({error:'approval_failed',detail:clean(e.message).slice(0,130)},409)}
+ try{await env.DB.batch([env.DB.prepare('INSERT INTO litesale_approval_lock(source_id) VALUES(?)').bind(id),insert,update]);return json({ok:true,order_code:Number(codeRow.code)})}catch(e){return json({error:'approval_failed',detail:clean(e.message).slice(0,130)},409)}
 }
