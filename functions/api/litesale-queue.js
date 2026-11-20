@@ -10,7 +10,7 @@ export async function onRequest({request,env}){
  if(!user||user.role!=='admin')return json({error:'admin_required'},403);
  await init(env);
  if(request.method==='GET'){
-  const rows=await env.DB.prepare("SELECT source_id,payload,created_at FROM litesale_review_queue WHERE state='pending' ORDER BY created_at DESC LIMIT 500").all();
+  const rows=await env.DB.prepare("SELECT source_id,payload,created_at FROM litesale_review_queue WHERE state='pending' ORDER BY COALESCE(json_extract(payload,'$.source_created_at'),created_at) DESC, created_at DESC LIMIT 500").all();
   const stores=await env.DB.prepare('SELECT id,name FROM stores WHERE is_active=1 ORDER BY name').all();
   return json({orders:(rows.results||[]).map(r=>({source_id:r.source_id,...JSON.parse(r.payload),queued_at:r.created_at})),stores:stores.results||[],approval_requires_click:true});
  }
@@ -21,9 +21,9 @@ export async function onRequest({request,env}){
   let added=0;
   for(const o of b.orders){
    const id=clean(o.source_id);if(!/^[-\w]{1,100}$/.test(id))continue;
-   const data={name:clean(o.name).slice(0,180),phone:clean(o.phone).slice(0,45),product:clean(o.product).slice(0,200),color:clean(o.color).slice(0,100),size:clean(o.size).slice(0,80),weight_kg:o.weight_kg==null?null:Number(o.weight_kg),quantity:Number(o.quantity)||1,amount:o.amount==null?null:Number(o.amount),address:clean(o.address).slice(0,500),city:clean(o.city).slice(0,120),notes:clean(o.notes).slice(0,700),status:clean(o.status).slice(0,50),source_created_at:clean(o.source_created_at).slice(0,80)};
+   const data={name:clean(o.name).slice(0,180),phone:clean(o.phone).slice(0,45),product:clean(o.product).slice(0,200),color:clean(o.color).slice(0,100),size:clean(o.size).slice(0,80),weight_kg:o.weight_kg==null?null:Number(o.weight_kg),weight_text:clean(o.weight_text).slice(0,100),quantity:Number(o.quantity)||1,amount:o.amount==null?null:Number(o.amount),address:clean(o.address).slice(0,500),city:clean(o.city).slice(0,120),notes:clean(o.notes).slice(0,700),status:clean(o.status).slice(0,50),source_created_at:clean(o.source_created_at).slice(0,80)};
    if(!data.name||!data.phone||!Number.isFinite(data.amount)||data.amount<0||!Number.isInteger(data.quantity)||data.quantity<1||data.quantity>500|| (data.weight_kg!=null&&(!Number.isFinite(data.weight_kg)||data.weight_kg<20||data.weight_kg>300)))continue;
-   const r=await env.DB.prepare("INSERT OR IGNORE INTO litesale_review_queue(source_id,payload) VALUES(?,?)").bind(id,JSON.stringify(data)).run();added+=r.meta?.changes||0;
+   const r=await env.DB.prepare("INSERT INTO litesale_review_queue(source_id,payload) VALUES(?,?) ON CONFLICT(source_id) DO UPDATE SET payload=excluded.payload,updated_at=datetime('now') WHERE litesale_review_queue.state='pending'").bind(id,JSON.stringify(data)).run();added+=r.meta?.changes||0;
   }
   return json({ok:true,added,imported:0});
  }
@@ -42,7 +42,7 @@ export async function onRequest({request,env}){
  if(existing)return json({error:'possible_duplicate_phone',existing_order_code:existing.order_code},409);
  const codeRow=await env.DB.prepare('SELECT COALESCE(MAX(order_code),4400)+1 AS code FROM orders').first();
  const courier=await env.DB.prepare("SELECT id FROM couriers WHERE name='مندوب' AND is_active=1 ORDER BY id LIMIT 1").first();
- const spec=[d.product,d.color&&'اللون: '+d.color,d.size&&'المقاس: '+d.size,d.weight_kg!=null&&'الوزن: '+d.weight_kg+' كغ','الكمية: '+d.quantity].filter(Boolean).join(' | ');
+ const spec=[d.product,d.color&&'اللون: '+d.color,d.size&&'المقاس: '+d.size,(d.weight_text?'الوزن/المقاس: '+d.weight_text:(d.weight_kg!=null?'الوزن: '+d.weight_kg+' كغ':null)),'الكمية: '+d.quantity].filter(Boolean).join(' | ');
  const notes=[spec,d.notes,'LiteSale: '+id].filter(Boolean).join('\n');
  const insert=env.DB.prepare("INSERT INTO orders(order_code,recipient_name,phone,area,detailed_address,amount,order_notes,raw_text,cost_of_goods,created_by,store_id,courier_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(Number(codeRow.code),d.name,phone,d.city,d.address,Number(d.amount),notes,notes,0,user.id,storeId,courier?.id||null);
  const update=env.DB.prepare("UPDATE litesale_review_queue SET state='approved',corvex_order_id=(SELECT id FROM orders WHERE order_code=?),reviewed_by=?,reviewed_at=datetime('now'),updated_at=datetime('now') WHERE source_id=? AND state='pending'").bind(Number(codeRow.code),user.id,id);
