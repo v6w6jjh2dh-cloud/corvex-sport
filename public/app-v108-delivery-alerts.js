@@ -31,10 +31,11 @@
   try{await fetchAlerts(false)}catch{}finally{loadingBadge=false}
  }
  function locationOf(o){return [o.area,o.detailed_address].filter(Boolean).join(' — ')||'—'}
+ function whatsappUrl(phone){let n=String(phone||'').replace(/\D/g,'');if(n.startsWith('00'))n=n.slice(2);else if(n.startsWith('0'))n='962'+n.slice(1);else if(n.length===9&&n.startsWith('7'))n='962'+n;return n.length>=10&&n.length<=15?'https://wa.me/'+n:null}
  function rowsHtml(orders){
   return orders.map(o=>`<tr>
    <td><button class="btn btn-soft delivery-alert-order" data-id="${Number(o.id)}">${esc(o.order_code||o.id)}</button></td>
-   <td><b>${esc(o.recipient_name||'—')}</b><div class="sub">${esc(o.phone||'—')}</div></td>
+   <td><b>${esc(o.recipient_name||'—')}</b><div class="sub">${esc(o.phone||'—')}</div>${whatsappUrl(o.phone)?`<a class="btn btn-soft" style="display:inline-block;margin-top:5px;color:#128c4a;font-weight:700" href="${whatsappUrl(o.phone)}" target="_blank" rel="noopener noreferrer">🟢 واتساب</a>`:''} </td>
    <td>${esc(o.store_name||'—')}</td>
    <td>${esc(locationOf(o))}</td>
    <td>${dateText(o.first_printed_at)}</td>
