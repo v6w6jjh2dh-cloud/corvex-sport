@@ -2,7 +2,7 @@
 const json=(x,s=200)=>new Response(JSON.stringify(x),{status:s,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 const clean=x=>String(x??'').trim();
 const norm=x=>{let s=clean(x).replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g,'');if(s.startsWith('00962'))s=s.slice(2);if(s.startsWith('962')&&s.length>=12)s='0'+s.slice(3);if(s.length===9&&s.startsWith('7'))s='0'+s;return s};
-async function init(env){await env.DB.prepare(`CREATE TABLE IF NOT EXISTS litesale_review_queue(source_id TEXT PRIMARY KEY, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','dismissed')),corvex_order_id INTEGER,reviewed_by INTEGER,reviewed_at TEXT,created_at TEXT NOT NULL DEFAULT (datetime('now')),updated_at TEXT NOT NULL DEFAULT (datetime('now')))`).run();await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_litesale_queue_state ON litesale_review_queue(state,created_at)').run();await env.DB.prepare('CREATE TABLE IF NOT EXISTS litesale_approval_lock(source_id TEXT PRIMARY KEY,approved_at TEXT NOT NULL DEFAULT (datetime(\'now\')))').run()}
+async function init(env){await env.DB.prepare(`CREATE TABLE IF NOT EXISTS litesale_review_queue(source_id TEXT PRIMARY KEY, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','dismissed')),corvex_order_id INTEGER,reviewed_by INTEGER,reviewed_at TEXT,created_at TEXT NOT NULL DEFAULT (datetime('now')),updated_at TEXT NOT NULL DEFAULT (datetime('now')))`).run();await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_litesale_queue_state ON litesale_review_queue(state,created_at)').run();const cols=await env.DB.prepare('PRAGMA table_info(litesale_review_queue)').all();if(!(cols.results||[]).some(x=>x.name==='contact_status'))await env.DB.prepare("ALTER TABLE litesale_review_queue ADD COLUMN contact_status TEXT NOT NULL DEFAULT ''").run();await env.DB.prepare('CREATE TABLE IF NOT EXISTS litesale_approval_lock(source_id TEXT PRIMARY KEY,approved_at TEXT NOT NULL DEFAULT (datetime(\'now\')))').run()}
 export async function onRequest({request,env}){
  const origin=request.headers.get('origin');if(origin&&origin!==new URL(request.url).origin)return json({error:'invalid_origin'},403);
  const token=(request.headers.get('authorization')||'').replace(/^Bearer /,'');
@@ -10,9 +10,9 @@ export async function onRequest({request,env}){
  if(!user||user.role!=='admin')return json({error:'admin_required'},403);
  await init(env);
  if(request.method==='GET'){
-  const rows=await env.DB.prepare("SELECT source_id,payload,created_at FROM litesale_review_queue WHERE state='pending' ORDER BY COALESCE(json_extract(payload,'$.source_created_at'),created_at) DESC, created_at DESC LIMIT 500").all();
+  const rows=await env.DB.prepare("SELECT source_id,payload,created_at,contact_status FROM litesale_review_queue WHERE state='pending' ORDER BY COALESCE(json_extract(payload,'$.source_created_at'),created_at) DESC, created_at DESC LIMIT 500").all();
   const stores=await env.DB.prepare('SELECT id,name FROM stores WHERE is_active=1 ORDER BY name').all();
-  return json({orders:(rows.results||[]).map(r=>({source_id:r.source_id,...JSON.parse(r.payload),queued_at:r.created_at})),stores:stores.results||[],approval_requires_click:true});
+  return json({orders:(rows.results||[]).map(r=>({source_id:r.source_id,...JSON.parse(r.payload),queued_at:r.created_at,contact_status:r.contact_status})),stores:stores.results||[],approval_requires_click:true});
  }
  if(request.method!=='POST')return json({error:'method_not_allowed'},405);
  let b;try{b=await request.json()}catch{return json({error:'invalid_json'},400)}
@@ -28,6 +28,10 @@ export async function onRequest({request,env}){
   return json({ok:true,added,imported:0});
  }
  const id=clean(b.source_id);if(!/^[-\w]{1,100}$/.test(id))return json({error:'invalid_id'},400);
+ if(b.action==='no_answer'){
+  const r=await env.DB.prepare("UPDATE litesale_review_queue SET contact_status='لم يرد',updated_at=datetime('now') WHERE source_id=? AND state='pending'").bind(id).run();
+  return r.meta?.changes?json({ok:true,contact_status:'لم يرد'}):json({error:'not_pending'},409);
+ }
  if(b.action==='dismiss'){
   const r=await env.DB.prepare("UPDATE litesale_review_queue SET state='dismissed',reviewed_by=?,reviewed_at=datetime('now'),updated_at=datetime('now') WHERE source_id=? AND state='pending'").bind(user.id,id).run();
   return r.meta?.changes?json({ok:true}):json({error:'not_pending'},409);
@@ -35,7 +39,7 @@ export async function onRequest({request,env}){
  if(b.action!=='approve')return json({error:'invalid_action'},400);
  const storeId=Number(b.store_id);if(!Number.isSafeInteger(storeId)||storeId<=0)return json({error:'choose_store'},400);
  const store=await env.DB.prepare('SELECT id FROM stores WHERE id=? AND is_active=1').bind(storeId).first();if(!store)return json({error:'invalid_store'},400);
- const row=await env.DB.prepare("SELECT payload FROM litesale_review_queue WHERE source_id=? AND state='pending'").bind(id).first();if(!row)return json({error:'already_reviewed'},409);
+ const row=await env.DB.prepare("SELECT payload,contact_status FROM litesale_review_queue WHERE source_id=? AND state='pending'").bind(id).first();if(!row)return json({error:'already_reviewed'},409);
  const d=JSON.parse(row.payload),phone=norm(d.phone);if(!phone)return json({error:'missing_phone'},422);
  if(d.amount==null||!Number.isFinite(Number(d.amount)))return json({error:'missing_amount'},422);
  const existing=await env.DB.prepare("SELECT id,order_code FROM orders WHERE store_id=? AND phone=? AND created_at>=datetime('now','-48 hours') LIMIT 1").bind(storeId,phone).first();
@@ -44,7 +48,7 @@ export async function onRequest({request,env}){
  const courier=await env.DB.prepare("SELECT id FROM couriers WHERE name='مندوب' AND is_active=1 ORDER BY id LIMIT 1").first();
  const spec=[d.product,d.color&&'اللون: '+d.color,d.size&&'المقاس: '+d.size,(d.weight_text?'الوزن/المقاس: '+d.weight_text:(d.weight_kg!=null?'الوزن: '+d.weight_kg+' كغ':null)),'الكمية: '+d.quantity].filter(Boolean).join(' | ');
  const pieceLines=(d.pieces||[]).map(p=>'القطعة '+p.index+': '+[p.color&&'اللون '+p.color,p.weight_kg!=null&&'الوزن '+p.weight_kg+' كغ',p.weight_text&&'المقاس '+p.weight_text].filter(Boolean).join(' | '));
- const notes=['حالة التواصل: لم يرد',spec,...pieceLines,d.notes,'LiteSale: '+id].filter(Boolean).join('\n');
+ const notes=[row.contact_status==='لم يرد'?'حالة التواصل: لم يرد':null,spec,...pieceLines,d.notes,'LiteSale: '+id].filter(Boolean).join('\n');
  const insert=env.DB.prepare("INSERT INTO orders(order_code,recipient_name,phone,area,detailed_address,amount,order_notes,raw_text,cost_of_goods,created_by,store_id,courier_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(Number(codeRow.code),d.name,phone,d.city,d.address,Number(d.amount),notes,notes,0,user.id,storeId,courier?.id||null);
  const update=env.DB.prepare("UPDATE litesale_review_queue SET state='approved',corvex_order_id=(SELECT id FROM orders WHERE order_code=?),reviewed_by=?,reviewed_at=datetime('now'),updated_at=datetime('now') WHERE source_id=? AND state='pending'").bind(Number(codeRow.code),user.id,id);
  try{await env.DB.batch([env.DB.prepare('INSERT INTO litesale_approval_lock(source_id) VALUES(?)').bind(id),insert,update]);return json({ok:true,order_code:Number(codeRow.code)})}catch(e){return json({error:'approval_failed',detail:clean(e.message).slice(0,130)},409)}
