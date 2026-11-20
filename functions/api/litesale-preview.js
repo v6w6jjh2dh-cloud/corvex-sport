@@ -35,10 +35,10 @@ export async function onRequest({request,env}) {
   if(!tool)return reply({error:'list_orders_not_available'},502);
   const props=tool.inputSchema?.properties||{};
   let body={};try{body=await request.json()}catch{}const page=Math.max(1,Math.min(100,Number(body.page)||1));const batchSize=50;const args={};
-  if('page'in props)args.page=page;
+  const pageKey=['page','page_number','pageNumber'].find(k=>k in props);if(pageKey)args[pageKey]=page;
   if('limit'in props)args.limit=batchSize;
   if('page_size'in props)args.page_size=batchSize;
-  if('per_page'in props)args.per_page=batchSize;
+  if('per_page'in props)args.per_page=batchSize;if('offset'in props)args.offset=(page-1)*batchSize;if('skip'in props)args.skip=(page-1)*batchSize;
   const required=tool.inputSchema?.required||[];
   const missing=required.filter(k=>!(k in args));
   if(missing.length)return reply({error:'tool_requires_parameters',required:missing},422);
@@ -52,7 +52,7 @@ export async function onRequest({request,env}) {
   }
   const arr=Array.isArray(value)?value:[value?.orders,value?.data?.orders,value?.data,value?.results,value?.items].find(Array.isArray);
   if(!arr)return reply({error:'unrecognized_orders_shape',keys:Object.keys(value||{}).slice(0,20)},502);
-  // Only the first ten entries are sent to the authenticated administrator.
+  const meta=value?.pagination??value?.meta?.pagination??value?.meta??value?.data?.pagination??value?.data?.meta??value??{};const asNum=x=>x==null?null:Number(x);const totalPages=asNum(meta.total_pages??meta.totalPages??meta.last_page??meta.lastPage);const total=asNum(meta.total??meta.total_count??meta.totalCount);const nextPage=asNum(meta.next_page??meta.nextPage);const explicitMore=meta.has_more??meta.hasMore??meta.has_next_page??meta.hasNextPage??null;const supportsPages=!!pageKey||'offset'in props||'skip'in props;const hasMore=explicitMore!=null?Boolean(explicitMore):nextPage!=null?nextPage>page:totalPages!=null?page<totalPages:total!=null?page*batchSize<total:arr.length>=batchSize;
   const orders=arr.slice(0,batchSize).map(o=>({
    id:o.id??o.order_id??o.order_number??o.number??null,
    name:o.customer_name??o.customer?.name??o.name??o.full_name??null,
@@ -62,6 +62,6 @@ export async function onRequest({request,env}) {
    status:o.status??o.order_status??null,
    created_at:o.created_at??o.createdAt??o.date??null
   }));
-  return reply({ok:true,orders,shown:orders.length,read_only:true,imported:0,has_more:arr.length>=batchSize,page,pagination_supported:'page'in props,returned:arr.length});
+  return reply({ok:true,orders,shown:orders.length,read_only:true,imported:0,has_more:hasMore,page,pagination_supported:supportsPages,returned:arr.length,total_pages:totalPages,total,more_known:explicitMore!=null||nextPage!=null||totalPages!=null||total!=null,tool_pagination_fields:Object.keys(props).filter(k=>/page|limit|offset|skip|cursor/i.test(k))});
  }catch(e){return reply({error:String(e?.message||'connection_failed').slice(0,160)},502)}
 }
