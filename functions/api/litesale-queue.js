@@ -44,7 +44,7 @@ export async function onRequest({request,env}){
  const courier=await env.DB.prepare("SELECT id FROM couriers WHERE name='مندوب' AND is_active=1 ORDER BY id LIMIT 1").first();
  const spec=[d.product,d.color&&'اللون: '+d.color,d.size&&'المقاس: '+d.size,(d.weight_text?'الوزن/المقاس: '+d.weight_text:(d.weight_kg!=null?'الوزن: '+d.weight_kg+' كغ':null)),'الكمية: '+d.quantity].filter(Boolean).join(' | ');
  const pieceLines=(d.pieces||[]).map(p=>'القطعة '+p.index+': '+[p.color&&'اللون '+p.color,p.weight_kg!=null&&'الوزن '+p.weight_kg+' كغ',p.weight_text&&'المقاس '+p.weight_text].filter(Boolean).join(' | '));
- const notes=[spec,...pieceLines,d.notes,'LiteSale: '+id].filter(Boolean).join('\n');
+ const notes=['حالة التواصل: لم يرد',spec,...pieceLines,d.notes,'LiteSale: '+id].filter(Boolean).join('\n');
  const insert=env.DB.prepare("INSERT INTO orders(order_code,recipient_name,phone,area,detailed_address,amount,order_notes,raw_text,cost_of_goods,created_by,store_id,courier_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(Number(codeRow.code),d.name,phone,d.city,d.address,Number(d.amount),notes,notes,0,user.id,storeId,courier?.id||null);
  const update=env.DB.prepare("UPDATE litesale_review_queue SET state='approved',corvex_order_id=(SELECT id FROM orders WHERE order_code=?),reviewed_by=?,reviewed_at=datetime('now'),updated_at=datetime('now') WHERE source_id=? AND state='pending'").bind(Number(codeRow.code),user.id,id);
  try{await env.DB.batch([env.DB.prepare('INSERT INTO litesale_approval_lock(source_id) VALUES(?)').bind(id),insert,update]);return json({ok:true,order_code:Number(codeRow.code)})}catch(e){return json({error:'approval_failed',detail:clean(e.message).slice(0,130)},409)}
