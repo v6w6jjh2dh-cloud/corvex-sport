@@ -9,7 +9,7 @@ export async function onRequest({request,env}){
  const token=(request.headers.get('authorization')||'').replace(/^Bearer /,'');
  const user=token&&await env.DB.prepare("SELECT u.id,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>datetime('now') AND u.is_active=1").bind(token).first();
  if(!user||user.role!=='admin')return json({error:'admin_required'},403);
- try{await init(env)}catch(e){return json({error:'queue_initialization_failed',detail:clean(e?.message).slice(0,220)},503)}
+ // Existing production queue schema: avoid DDL and PRAGMA reads on every request.
  if(request.method==='GET'){
   let rows;try{rows=await env.DB.prepare("SELECT source_id,payload,created_at,contact_status FROM litesale_review_queue WHERE state='pending' ORDER BY created_at DESC LIMIT 500").all()}catch(e){return json({error:'queue_read_failed',detail:clean(e?.message).slice(0,220)},503)}
   let stores;try{stores=await env.DB.prepare('SELECT id,name FROM stores WHERE is_active=1 ORDER BY name').all()}catch(e){return json({error:'stores_read_failed',detail:clean(e?.message).slice(0,220)},503)}
