@@ -44,6 +44,20 @@ export async function onRequest({request,env}){
  const row=await env.DB.prepare("SELECT payload,contact_status FROM litesale_review_queue WHERE source_id=? AND state='pending'").bind(id).first();if(!row)return json({error:'already_reviewed'},409);
  const d=JSON.parse(row.payload),phone=norm(d.phone);if(!phone)return json({error:'missing_phone'},422);
  if(d.amount==null||String(d.amount).trim()===''||!Number.isFinite(Number(d.amount))||Number(d.amount)<=0)return json({error:'missing_amount'},422);
+ // Detect same customer, product, amount and quantity within 24 hours. Never auto-delete genuine orders.
+ const canonical=x=>clean(x).normalize('NFKC').replace(/[ًٌٍَُِّْـ]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/\\s+/g,' ').trim().toLowerCase();
+ const candidates=await env.DB.prepare("SELECT order_code,order_notes,raw_text,amount,created_at FROM orders WHERE store_id=? AND phone=? AND created_at>=datetime('now','-24 hours') ORDER BY id DESC LIMIT 30").bind(storeId,phone).all();
+ const product=canonical(d.product), qty=Number(d.quantity)||1;
+ const duplicate=(candidates.results||[]).find(o=>{
+  if(Math.abs(Number(o.amount)-Number(d.amount))>0.001)return false;
+  const detail=canonical([o.order_notes,o.raw_text].filter(Boolean).join(' '));
+  if(!product||!detail.includes(product))return false;
+  const match=detail.match(/الكمية\\s*[:：]\\s*(\\d+)/);
+  return !match||Number(match[1])===qty;
+ });
+ if(duplicate && !(b.confirm_duplicate===true && Number(b.confirm_existing_order_code)===Number(duplicate.order_code))){
+  return json({error:'possible_duplicate',existing_order_code:duplicate.order_code,requires_confirmation:true,detail:'نفس الهاتف والمنتج والمبلغ خلال 24 ساعة. راجع الطلب السابق قبل الموافقة.'},409);
+ }
  // Returning customers may place new orders. LiteSale source_id is the unique import key.
  const existing=await env.DB.prepare("SELECT order_code FROM orders WHERE store_id=? AND phone=? ORDER BY id DESC LIMIT 1").bind(storeId,phone).first();
  const codeRow=await env.DB.prepare('SELECT COALESCE(MAX(order_code),4400)+1 AS code FROM orders').first();
