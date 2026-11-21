@@ -14,7 +14,7 @@ export async function onRequest({request,env}){
  if(request.method==='GET'){
   let rows;try{rows=await env.DB.prepare("SELECT source_id,payload,created_at,contact_status FROM litesale_review_queue WHERE state='pending' ORDER BY created_at DESC LIMIT 500").all()}catch(e){return json({error:'queue_read_failed',detail:clean(e?.message).slice(0,220)},503)}
   let stores;try{stores=await env.DB.prepare('SELECT id,name FROM stores WHERE is_active=1 ORDER BY name').all()}catch(e){return json({error:'stores_read_failed',detail:clean(e?.message).slice(0,220)},503)}
-  return json({orders:(rows.results||[]).map(r=>({source_id:r.source_id,...JSON.parse(r.payload),queued_at:r.created_at,contact_status:r.contact_status})),stores:stores.results||[],approval_requires_click:true});
+  return json({orders:(rows.results||[]).map(r=>({source_id:r.source_id,...JSON.parse(r.payload),queued_at:r.created_at,contact_status:r.contact_status})).filter(o=>allowedDate(o.source_created_at)),stores:stores.results||[],approval_requires_click:true});
  }
  if(request.method!=='POST')return json({error:'method_not_allowed'},405);
  let b;try{b=await request.json()}catch{return json({error:'invalid_json'},400)}
