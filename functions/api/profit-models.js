@@ -4,7 +4,6 @@ const SEED_MODELS=[
  ['jakar','جاكار',4.25,['جاكار','ترينغ','تريننغ'],{1:[8],2:[15],3:[20]},0],
  ['paris','باريس',2.5,['باريس'],{3:[15]},1],
  ['reebok','ريبوك',2.5,['ريبوك','reebok','ري bok'],{3:[15]},1],
- ['m','M',3,['بلوزه m','بلوزة m','بلوزه ام','بلوزة ام','تيشيرت ام','تيشرت ام','حرف m','حرف ام','وحرف ام','m6','ام6'],{1:[7],2:[12],3:[15]},0],
  ['trico_plain','تريكو سادة',2.5,['تريكو سادة','سادة تريكو'],{1:[7],2:[12],3:[15]},0],
  ['button','زرار',2.2,['جيوب زرار','بنطلون زرار','بنطلون بزرار','بنطلون الزرار','بنطلون الازرار','بنطلون الأزرار','بزار','زرار','الزرار','الازرار','الأزرار'],{1:[7],2:[12],3:[15]},0],
  ['zip_pockets','جيوب سحاب',2.3,['جيوب سحاب','جيب سحاب','سحاب جيوب','سحاب جيب','بنطلون جيوب سحاب','بنطلون جيب سحاب'],{1:[7],2:[12],3:[15]},0],
@@ -92,14 +91,8 @@ async function ensure(env){
   const required=['بلوزة بولو','بلوزه بولو','تيشيرت بولو','تيشرت بولو','بولو'],missing=required.filter(alias=>!aliases.includes(alias));
   if(missing.length)await env.DB.prepare("UPDATE profit_models SET aliases_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify([...new Set([...aliases,...missing])]),polo.id).run();
  }
- const mModel=await env.DB.prepare("SELECT id,aliases_json FROM profit_models WHERE model_key='m'").first();
- if(mModel){
-  let aliases=[];try{aliases=JSON.parse(mModel.aliases_json||'[]')}catch{}
-  const unsafe=new Set(['ام','أم','إم','م']),cleaned=aliases.filter(alias=>!unsafe.has(String(alias||'').trim()));
-  const required=['بلوزه m','بلوزة m','بلوزه ام','بلوزة ام','تيشيرت ام','تيشرت ام','حرف m','حرف ام','وحرف ام','m6','ام6'];
-  const next=[...new Set([...cleaned,...required])];
-  if(JSON.stringify(next)!==JSON.stringify(aliases))await env.DB.prepare("UPDATE profit_models SET aliases_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify(next),mModel.id).run();
- }
+ // Retire the M model without deleting historical orders or audit records.
+ await env.DB.prepare("UPDATE profit_models SET active=0,aliases_json='[]',updated_at=datetime('now') WHERE model_key='m' AND (active<>0 OR aliases_json<>'[]')").run();
 
  // Canonical rule: "رياضة قطن" and all normal wording variants are one model,
  // with an approved cost of 3.5 JOD per piece. Reuse an existing matching row
@@ -125,9 +118,9 @@ const cleanAliases=(value,name)=>{
  const source=Array.isArray(value)?value:String(value||'').split(/[،,\n]+/);
  return [...new Set([name,...source].map(x=>String(x||'').trim()).filter(Boolean))].slice(0,80);
 };
-const safeAliases=(key,aliases)=>key==='m'?aliases.filter(alias=>!new Set(['ام','أم','إم','م']).has(String(alias||'').trim())):aliases;
+const safeAliases=(key,aliases)=>aliases;
 const rowOut=row=>{let aliases=[],offers={};try{aliases=JSON.parse(row.aliases_json||'[]')}catch{}try{offers=JSON.parse(row.offers_json||'{}')}catch{}return{id:Number(row.id),key:row.model_key,name:row.name,cost:Number(row.cost||0),aliases,offers,deliveryIncluded:Boolean(row.delivery_included),active:Boolean(row.active),updated_at:row.updated_at}};
-async function list(env){const rows=(await env.DB.prepare('SELECT * FROM profit_models ORDER BY active DESC,name ASC').all()).results||[],ignored=(await env.DB.prepare('SELECT phrase FROM profit_ignored_phrases ORDER BY phrase ASC').all()).results||[];const phrases=ignored.map(x=>String(x.phrase||'')).filter(Boolean),stamp=rows.map(x=>`${x.id}:${x.updated_at}:${x.cost}:${x.active}`).join('|')+'#'+phrases.join('|');return{models:rows.map(rowOut),ignored_phrases:phrases,version:stamp||'empty'}}
+async function list(env){const rows=(await env.DB.prepare('SELECT * FROM profit_models ORDER BY active DESC,name ASC').all()).results||[],ignored=(await env.DB.prepare('SELECT phrase FROM profit_ignored_phrases ORDER BY phrase ASC').all()).results||[];const phrases=ignored.map(x=>String(x.phrase||'')).filter(Boolean),stamp=rows.map(x=>`${x.id}:${x.updated_at}:${x.cost}:${x.active}`).join('|')+'#'+phrases.join('|');return{models:rows.filter(row=>row.model_key!=='m').map(rowOut),ignored_phrases:phrases,version:stamp||'empty'}}
 
 export async function onRequest({request,env}){
  const user=await auth(request,env);if(!await allowed(env,user))return json({error:'لا تملك صلاحية إدارة موديلات الأرباح'},403);
