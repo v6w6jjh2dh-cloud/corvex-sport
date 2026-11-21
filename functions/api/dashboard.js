@@ -14,10 +14,6 @@ const STATUS_LABELS={
 
 export async function onRequestGet({request,env}){
   const me=await auth(request,env);if(!me)return json({error:'غير مصرح'},401);
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS deleted_orders(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,original_order_id INTEGER NOT NULL,order_code INTEGER,order_json TEXT NOT NULL,
-    deleted_by INTEGER,deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )`).run();
 
   const active=`NOT EXISTS (SELECT 1 FROM deleted_orders d WHERE d.original_order_id=o.id)`;
   const stats=await env.DB.prepare(`SELECT
