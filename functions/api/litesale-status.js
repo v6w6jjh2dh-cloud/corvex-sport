@@ -7,16 +7,16 @@ export async function onRequest({request,env}){
  const admin=token&&await env.DB.prepare("SELECT u.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>datetime('now') AND u.is_active=1 AND u.role='admin'").bind(token).first();
  if(!admin)return out({error:'admin_required'},403);
  let b;try{b=await request.json()}catch{return out({error:'invalid_json'},400)}
- const id=String(b.id??'');if(!/^[-\\w]{1,100}$/.test(id)||!['processing','shipped'].includes(b.target))return out({error:'invalid_request'},400);
+ const id=String(b.id??'');if(!/^[-\w]{1,100}$/.test(id)||!['processing','shipped'].includes(b.target))return out({error:'invalid_request'},400);
  const row=await env.DB.prepare('SELECT state FROM litesale_review_queue WHERE source_id=?').bind(id).first();
  if(!row||row.state!==(b.target==='shipped'?'approved':'pending'))return out({error:'queue_state_mismatch'},409);
- const key=env.LITESALE_MCP_KEY;if(!key||!/^lsk_[\\w-]+$/.test(key))return out({error:'missing_secret'},503);
+ const key=env.LITESALE_MCP_KEY;if(!key||!/^lsk_[\w-]+$/.test(key))return out({error:'missing_secret'},503);
  const endpoint='https://api.litesale.store/mcp/k/'+encodeURIComponent(key);
  let session;
  async function rpc(method,n,params){const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),15000);try{
  const headers={'Content-Type':'application/json','Accept':'application/json, text/event-stream'};if(session)headers['Mcp-Session-Id']=session;
  const res=await fetch(endpoint,{method:'POST',headers,body:JSON.stringify({jsonrpc:'2.0',id:n,method,params}),signal:ctrl.signal});const raw=await res.text();if(!res.ok)throw Error('upstream_http_'+res.status);
- session=res.headers.get('mcp-session-id')||session;const data=(res.headers.get('content-type')||'').includes('text/event-stream')?JSON.parse(raw.split(/\\r?\\n/).filter(s=>s.startsWith('data:')&&s.includes('{')).at(-1)?.slice(5).trim()||'{}'):JSON.parse(raw);
+ session=res.headers.get('mcp-session-id')||session;const data=(res.headers.get('content-type')||'').includes('text/event-stream')?JSON.parse(raw.split(/\r?\n/).filter(s=>s.startsWith('data:')&&s.includes('{')).at(-1)?.slice(5).trim()||'{}'):JSON.parse(raw);
  if(data.error)throw Error('mcp_error');return data.result;
  }finally{clearTimeout(timer)}}
  try{
