@@ -1125,6 +1125,7 @@ async function inventoryView(){
     const data=await api('/inventory'),models=data.models||[],movements=data.movements||[];
     const total=models.reduce((sum,item)=>sum+Number(item.quantity||0),0);
     c.innerHTML=`<div class="page-title"><div><h1>المستودع والجرد</h1><div class="sub">الرصيد ينقص تلقائياً مرة واحدة عند تسليم الطلب، ويرجع عند إعادته لقيد التوصيل.</div></div><span class="pill" style="background:#e8f0f5;color:#173750">${total} قطعة</span></div>
+      <div class="card" style="margin-bottom:16px"><b>بدء جرد جديد</b><div class="sub">تصفير أرصدة جميع الموديلات فقط؛ الطلبات والمبيعات والحركات السابقة محفوظة.</div><button id="inventoryResetAll" class="btn btn-soft" style="margin-top:12px;color:#b42318">تصفير جرد جميع الموديلات</button></div>
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-bottom:20px">
         ${models.length?models.map(model=>`<div class="card inventory-model" data-model-id="${model.id}">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><b style="font-size:19px">${esc(model.name)}</b><b style="font-size:30px;color:${Number(model.quantity)<0?'#b42318':'#0d304d'}">${Number(model.quantity)}</b></div>
@@ -1142,6 +1143,12 @@ async function inventoryView(){
           ${movements.length?movements.map(m=>`<tr><td>${esc(m.model_name)}</td><td style="font-weight:900;color:${Number(m.quantity_delta)<0?'#b42318':'#067647'}">${Number(m.quantity_delta)>0?'+':''}${Number(m.quantity_delta)}</td><td>${esc(m.note||'')}</td><td>${m.order_code?'#'+esc(m.order_code):'—'}</td><td>${fmtDate(m.created_at)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">لا توجد حركات بعد</td></tr>'}
         </tbody></table></div>
       </div>`;
+    document.getElementById('inventoryResetAll')?.addEventListener('click',async()=>{
+      if(!confirm('تأكيد: تصفير رصيد جميع الموديلات إلى صفر؟ لن تُحذف الطلبات أو المبيعات القديمة.'))return;
+      const button=document.getElementById('inventoryResetAll');button.disabled=true;
+      try{const d=await api('/inventory',{method:'POST',body:JSON.stringify({action:'reset_all',confirm:'RESET_ALL_INVENTORY'})});toast('تم تصفير '+d.reset_models+' موديل');inventoryView()}
+      catch(e){button.disabled=false;toast(e.message)}
+    });
     document.querySelectorAll('.inventory-action').forEach(button=>button.onclick=async()=>{
       const card=button.closest('.inventory-model'),input=card.querySelector('.inventory-qty'),quantity=Number(input.value);
       if(!Number.isInteger(quantity)||quantity<0){toast('اكتب عدد قطع صحيح');input.focus();return}
