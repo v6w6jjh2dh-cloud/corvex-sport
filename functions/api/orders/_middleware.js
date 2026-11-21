@@ -24,6 +24,8 @@ export async function onRequest(context){
   const method=request.method.toUpperCase();
   const url=new URL(request.url);
 
+  if(method==='POST' && /^\/api\/orders\/?$/.test(url.pathname)){const b=await request.clone().json().catch(()=>({}));if(b.amount==null||String(b.amount).trim()===''||!Number.isFinite(Number(b.amount))||Number(b.amount)<=0)return json({error:'السعر مطلوب ويجب أن يكون أكبر من صفر قبل حفظ الطلب'},422)}
+
   // Explicitly approved duplicate as a normal NEW order.
   // Handle it here so the main API duplicate guard is bypassed without marking the order as an exchange.
   if(method==='POST' && /^\/api\/orders\/?$/.test(url.pathname)){
