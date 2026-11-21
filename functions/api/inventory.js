@@ -6,6 +6,16 @@ async function auth(request,env){
  return env.DB.prepare(`SELECT u.id,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>datetime('now') AND u.is_active=1`).bind(token).first();
 }
 
+const NEW_MODELS=[
+ ['jokh_casual','جاكيت جوخ كاجوال',5.2,['جاكيت جوخ كاجوال','جكيت جوخ كاجوال','جاكيت جوخ كاجول']],
+ ['jokh_scarfo','جاكيت جوخ سكايفو',7.5,['جاكيت جوخ سكايفو','جكيت جوخ سكايفو','جاكيت جوخ سكارفو']],
+ ['gap_filler','مالئ الفراغات',1,['مالئ الفراغات','مالئ فراغات','مليء الفراغات']]
+];
+async function ensureNewModels(env){
+ for(const [key,name,cost,aliases] of NEW_MODELS){
+  await env.DB.prepare("INSERT OR IGNORE INTO profit_models(model_key,name,cost,aliases_json,offers_json,delivery_included,active) VALUES(?,?,?,?, '{}',0,1)").bind(key,name,cost,JSON.stringify(aliases)).run();
+ }
+}
 async function inventoryData(env){
  const models=(await env.DB.prepare(`SELECT p.id,p.model_key,p.name,p.active,COALESCE(b.quantity,0) quantity,b.updated_at
   FROM profit_models p LEFT JOIN inventory_balances b ON b.model_id=p.id
@@ -19,10 +29,25 @@ async function inventoryData(env){
 export async function onRequest({request,env}){
  const user=await auth(request,env);if(!user)return json({error:'غير مصرح'},401);
  await ensureInventorySchema(env);
+ await ensureNewModels(env);
  if(request.method==='GET')return json(await inventoryData(env));
  if(request.method!=='POST')return json({error:'طلب غير معروف'},405);
  if(user.role!=='admin')return json({error:'تعديل رصيد المستودع يحتاج صلاحية مدير'},403);
- const body=await request.json().catch(()=>({})),modelId=Number(body.model_id||0),action=String(body.action||''),value=Number(body.quantity);
+ const body=await request.json().catch(()=>({}));
+ if(body.action==='reset_all'){
+  if(body.confirm!=='RESET_ALL_INVENTORY')return json({error:'تأكيد التصفير مطلوب'},400);
+  const rows=(await env.DB.prepare('SELECT model_id,quantity FROM inventory_balances WHERE quantity<>0').all()).results||[];
+  if(rows.length){
+   const statements=[];
+   for(const row of rows){
+    statements.push(env.DB.prepare("UPDATE inventory_balances SET quantity=0,updated_by=?,updated_at=datetime('now') WHERE model_id=?").bind(user.id,row.model_id));
+    statements.push(env.DB.prepare("INSERT INTO inventory_movements(model_id,quantity_delta,movement_type,note,created_by) VALUES(?,?,'manual',?,?)").bind(row.model_id,-Number(row.quantity),'تصفير شامل للجرد — بداية دورة مخزون جديدة',user.id));
+   }
+   await env.DB.batch(statements);
+  }
+  return json({ok:true,reset_models:rows.length,...(await inventoryData(env))});
+ }
+ const modelId=Number(body.model_id||0),action=String(body.action||''),value=Number(body.quantity);
  if(!modelId||!['set','add','subtract'].includes(action)||!Number.isInteger(value)||value<0)return json({error:'أدخل عدداً صحيحاً للقطع'},400);
  const model=await env.DB.prepare('SELECT id,name FROM profit_models WHERE id=? AND active=1').bind(modelId).first();if(!model)return json({error:'الموديل غير موجود أو موقوف'},404);
  const current=await env.DB.prepare('SELECT quantity FROM inventory_balances WHERE model_id=?').bind(modelId).first(),oldQty=Number(current?.quantity||0);
