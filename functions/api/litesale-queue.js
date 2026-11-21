@@ -44,8 +44,8 @@ export async function onRequest({request,env}){
  const row=await env.DB.prepare("SELECT payload,contact_status FROM litesale_review_queue WHERE source_id=? AND state='pending'").bind(id).first();if(!row)return json({error:'already_reviewed'},409);
  const d=JSON.parse(row.payload),phone=norm(d.phone);if(!phone)return json({error:'missing_phone'},422);
  if(d.amount==null||!Number.isFinite(Number(d.amount)))return json({error:'missing_amount'},422);
- const existing=await env.DB.prepare("SELECT id,order_code FROM orders WHERE store_id=? AND phone=? AND created_at>=datetime('now','-48 hours') LIMIT 1").bind(storeId,phone).first();
- if(existing)return json({error:'possible_duplicate_phone',existing_order_code:existing.order_code},409);
+ // Returning customers may place new orders. LiteSale source_id is the unique import key.
+ const existing=await env.DB.prepare("SELECT order_code FROM orders WHERE store_id=? AND phone=? ORDER BY id DESC LIMIT 1").bind(storeId,phone).first();
  const codeRow=await env.DB.prepare('SELECT COALESCE(MAX(order_code),4400)+1 AS code FROM orders').first();
  const courier=await env.DB.prepare("SELECT id FROM couriers WHERE name='مندوب' AND is_active=1 ORDER BY id LIMIT 1").first();
  const spec=[d.product,d.color&&'اللون: '+d.color,d.size&&'المقاس: '+d.size,(d.weight_text?'الوزن/المقاس: '+d.weight_text:(d.weight_kg!=null?'الوزن: '+d.weight_kg+' كغ':null)),'الكمية: '+d.quantity].filter(Boolean).join(' | ');
@@ -53,5 +53,5 @@ export async function onRequest({request,env}){
  const notes=[row.contact_status==='لم يرد'?'حالة التواصل: لم يرد':null,spec,...pieceLines,d.notes,'LiteSale: '+id].filter(Boolean).join('\n');
  const insert=env.DB.prepare("INSERT INTO orders(order_code,recipient_name,phone,area,detailed_address,amount,order_notes,raw_text,cost_of_goods,created_by,store_id,courier_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(Number(codeRow.code),d.name,phone,d.city,d.address,Number(d.amount),notes,notes,0,user.id,storeId,courier?.id||null);
  const update=env.DB.prepare("UPDATE litesale_review_queue SET state='approved',corvex_order_id=(SELECT id FROM orders WHERE order_code=?),reviewed_by=?,reviewed_at=datetime('now'),updated_at=datetime('now') WHERE source_id=? AND state='pending'").bind(Number(codeRow.code),user.id,id);
- try{await env.DB.batch([env.DB.prepare('INSERT INTO litesale_approval_lock(source_id) VALUES(?)').bind(id),insert,update]);return json({ok:true,order_code:Number(codeRow.code)})}catch(e){return json({error:'approval_failed',detail:clean(e.message).slice(0,130)},409)}
+ try{await env.DB.batch([env.DB.prepare('INSERT INTO litesale_approval_lock(source_id) VALUES(?)').bind(id),insert,update]);return json({ok:true,order_code:Number(codeRow.code),returning_customer:!!existing,previous_order_code:existing?.order_code??null})}catch(e){return json({error:'approval_failed',detail:clean(e.message).slice(0,130)},409)}
 }
