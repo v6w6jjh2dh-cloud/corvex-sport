@@ -24,7 +24,7 @@ export async function onRequest({request,env}){
   for(const o of b.orders){
    const id=clean(o.source_id);if(!/^[-\w]{1,100}$/.test(id)||shipped(o.status)||!allowedDate(o.source_created_at))continue;
    const data={name:clean(o.name).slice(0,180),phone:clean(o.phone).slice(0,45),product:clean(o.product).slice(0,200),color:clean(o.color).slice(0,100),size:clean(o.size).slice(0,80),weight_kg:o.weight_kg==null?null:Number(o.weight_kg),weight_text:clean(o.weight_text).slice(0,100),pieces:Array.isArray(o.pieces)?o.pieces.slice(0,4).map(p=>({index:Number(p.index),color:clean(p.color).slice(0,100),weight_kg:p.weight_kg==null?null:Number(p.weight_kg),weight_text:clean(p.weight_text).slice(0,100)})).filter(p=>p.index>=1&&p.index<=4):[],quantity:Number(o.quantity)||1,amount:o.amount==null?null:Number(o.amount),address:clean(o.address).slice(0,500),city:clean(o.city).slice(0,120),notes:clean(o.notes).slice(0,700),status:clean(o.status).slice(0,50),source_created_at:clean(o.source_created_at).slice(0,80)};
-   if(!data.name||!data.phone||!Number.isFinite(data.amount)||data.amount<0||!Number.isInteger(data.quantity)||data.quantity<1||data.quantity>500|| (data.weight_kg!=null&&(!Number.isFinite(data.weight_kg)||data.weight_kg<20||data.weight_kg>300)))continue;
+   if(!data.name||!data.phone||!Number.isFinite(data.amount)||data.amount<=0||!Number.isInteger(data.quantity)||data.quantity<1||data.quantity>500|| (data.weight_kg!=null&&(!Number.isFinite(data.weight_kg)||data.weight_kg<20||data.weight_kg>300)))continue;
    const r=await env.DB.prepare("INSERT INTO litesale_review_queue(source_id,payload) VALUES(?,?) ON CONFLICT(source_id) DO UPDATE SET payload=excluded.payload,updated_at=datetime('now') WHERE litesale_review_queue.state='pending'").bind(id,JSON.stringify(data)).run();added+=r.meta?.changes||0;
   }
   return json({ok:true,added,imported:0});
@@ -43,7 +43,7 @@ export async function onRequest({request,env}){
  const store=await env.DB.prepare('SELECT id FROM stores WHERE id=? AND is_active=1').bind(storeId).first();if(!store)return json({error:'invalid_store'},400);
  const row=await env.DB.prepare("SELECT payload,contact_status FROM litesale_review_queue WHERE source_id=? AND state='pending'").bind(id).first();if(!row)return json({error:'already_reviewed'},409);
  const d=JSON.parse(row.payload),phone=norm(d.phone);if(!phone)return json({error:'missing_phone'},422);
- if(d.amount==null||!Number.isFinite(Number(d.amount)))return json({error:'missing_amount'},422);
+ if(d.amount==null||String(d.amount).trim()===''||!Number.isFinite(Number(d.amount))||Number(d.amount)<=0)return json({error:'missing_amount'},422);
  // Returning customers may place new orders. LiteSale source_id is the unique import key.
  const existing=await env.DB.prepare("SELECT order_code FROM orders WHERE store_id=? AND phone=? ORDER BY id DESC LIMIT 1").bind(storeId,phone).first();
  const codeRow=await env.DB.prepare('SELECT COALESCE(MAX(order_code),4400)+1 AS code FROM orders').first();
