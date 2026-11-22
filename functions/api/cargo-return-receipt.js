@@ -24,13 +24,21 @@ export async function onRequest({request,env}){
  if(!parsed.length)return json({error:'لم يتم التعرف على موديل الطلب؛ يلزم مراجعة يدوية'},422);
  const allocated=(await env.DB.prepare('SELECT model_id,quantity FROM inventory_order_items WHERE order_id=?').bind(orderId).all()).results||[];
  if(!allocated.length)return json({error:'لا يوجد خصم مسجل لهذا الطلب في الجرد؛ لا يمكن إرجاعه تلقائيًا'},422);
+ let partialExpected=null;
+ if(order.delivery_status==='partial'){
+  let delivered=[];
+  try{delivered=JSON.parse(order.partial_received_items||'[]')}catch{}
+  if(!Array.isArray(delivered)||!delivered.length)return json({error:'التسليم الجزئي غير مفصل؛ لا يمكن استلام المرتجع تلقائيًا'},422);
+  const deliveredMap=new Map(delivered.map(x=>[Number(x.model_id),Number(x.quantity||0)]));
+  partialExpected=new Map(parsed.map(x=>[x.model_id,Math.max(0,x.quantity-(deliveredMap.get(x.model_id)||0))]));
+ }
  const returned=(await env.DB.prepare('SELECT items_json FROM cargo_return_receipts WHERE order_id=?').bind(orderId).all()).results||[];
  const already=new Map();
  for(const row of returned){let items=[];try{items=JSON.parse(row.items_json)}catch{}for(const i of items)already.set(Number(i.model_id),(already.get(Number(i.model_id))||0)+Number(i.quantity||0))}
  const allocation=new Map(allocated.map(x=>[Number(x.model_id),Number(x.quantity)]));
  const items=Array.isArray(b.items)?b.items.map(x=>({model_id:Number(x.model_id),quantity:Number(x.quantity)})):[];
  if(!items.length||items.some(x=>!Number.isInteger(x.model_id)||!Number.isInteger(x.quantity)||x.quantity<1)||new Set(items.map(x=>x.model_id)).size!==items.length)return json({error:'حدد كميات مرتجع صحيحة'},422);
- for(const item of items)if(!allocation.has(item.model_id)||item.quantity+(already.get(item.model_id)||0)>allocation.get(item.model_id))return json({error:'كمية المرتجع تتجاوز الكمية المخصومة لهذا الطلب'},422);
+ for(const item of items)if(!allocation.has(item.model_id)||item.quantity+(already.get(item.model_id)||0)>Math.min(allocation.get(item.model_id),partialExpected?partialExpected.get(item.model_id)||0:allocation.get(item.model_id)))return json({error:'كمية المرتجع تتجاوز الكمية المخصومة لهذا الطلب'},422);
  const statements=[env.DB.prepare('INSERT INTO cargo_return_receipts(shipment_code,order_id,received_by,items_json) VALUES(?,?,?,?)').bind(code,orderId,user.id,JSON.stringify(items))];
  for(const item of items){
   statements.push(env.DB.prepare('INSERT OR IGNORE INTO inventory_balances(model_id,quantity,updated_by) VALUES(?,0,?)').bind(item.model_id,user.id));
