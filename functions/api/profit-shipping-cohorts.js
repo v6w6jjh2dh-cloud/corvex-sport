@@ -10,7 +10,7 @@ const FALLBACK_MODELS=[
  {id:-4,name:'مالئ الفراغات',aliases:['مالئ الفراغات','مالى الفراغات','ملي الفراغات','مالئ فراغات']}
 ].map(m=>({...m,aliases:m.aliases.map(normalizedName)}));
 async function calculateFromText(env,order){
- const raw=[order.raw_text,order.order_notes].filter(Boolean).join('\n').trim();
+ const raw=String(order.order_notes||order.raw_text||'').trim();
  if(!raw)return null;
  const matches=await classifyInventoryItems(env,raw,FALLBACK_MODELS);
  if(!matches.length||matches.some(x=>!Number.isSafeInteger(x.quantity)||x.quantity<1||x.quantity>50))return null;
@@ -64,7 +64,7 @@ export async function onRequest({request,env}){
  // original order text without changing inventory or historical allocations.
  for(const o of orders){
   if((itemMap.get(Number(o.id))||[]).length&&itemMap.get(Number(o.id)).every(i=>i.unit_cost!==null&&i.quantity>0))continue;
-  const raw=[o.raw_text,o.order_notes].filter(Boolean).join('\n');
+  const raw=String(o.order_notes||o.raw_text||'');
   if(!raw.trim())continue;
   const matches=await classifyInventoryItems(env,raw,FALLBACK_MODELS);
   const items=matches.map(x=>{const model=FALLBACK_MODELS.find(m=>m.id===x.model_id);const unit_cost=modelCost(model?.name);return{model_id:x.model_id,name:model?.name||'غير معروف',quantity:x.quantity,unit_cost,total_cost:unit_cost===null?null:Math.round(x.quantity*unit_cost*100)/100,source:'order_text'}});
