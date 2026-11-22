@@ -62,7 +62,11 @@ export async function ensureInventorySchema(env){
 
 function parseAliases(row){
  let aliases=[];try{aliases=JSON.parse(row.aliases_json||'[]')}catch{}
- return [...new Set([row.name,...aliases].map(normalize).filter(x=>x.length>1))].sort((a,b)=>b.length-a.length);
+ const names=[row.name,...aliases];
+ // "ايبوكسي" and "سي ايبوكسي" are the same merchandise model.
+ // Resolve both spellings to the existing model id and stored unit cost.
+ if(names.some(name=>/^(?:سي\\s+)?ايبوكسي$/.test(normalize(name))))names.push('ايبوكسي','سي ايبوكسي');
+ return [...new Set(names.map(normalize).filter(x=>x.length>1))].sort((a,b)=>b.length-a.length);
 }
 
 function boundaryMatch(text,needle,from=0){
