@@ -1122,9 +1122,24 @@ export async function onRequest(context) {
             ?Math.max(0,grossCollected-deliveryFee)
             :(noFee?-deliveryFee:0);
 
+        let partialItems=null;
+        if(partial){
+          const models=await loadInventoryModels(env);
+          const {classifyInventoryItems}=await import('./_inventory.js');
+          const shipped=await classifyInventoryItems(env,order.raw_text||order.order_notes||'',models);
+          const chosen=Array.isArray(row.delivered_items)?row.delivered_items:[];
+          const available=new Map(shipped.map(x=>[x.model_id,x.quantity]));
+          const totalShipped=shipped.reduce((n,x)=>n+x.quantity,0);
+          const totalChosen=chosen.reduce((n,x)=>n+Number(x.quantity||0),0);
+          if(!shipped.length||!chosen.length||chosen.some(x=>!Number.isInteger(Number(x.quantity))||Number(x.quantity)<0||!available.has(Number(x.model_id))||Number(x.quantity)>available.get(Number(x.model_id)))||new Set(chosen.map(x=>Number(x.model_id))).size!==chosen.length||totalChosen<1||totalChosen>=totalShipped){
+            return json({error:'التسليم الجزئي للطلب #'+order.order_code+' يحتاج تحديد القطع المسلّمة حسب الموديل والعدد قبل تسكير الكشف'},422);
+          }
+          partialItems=JSON.stringify(chosen.map(x=>({model_id:Number(x.model_id),quantity:Number(x.quantity)})).filter(x=>x.quantity>0));
+        }
         accepted.push({
           order,
           status,
+          partialItems,
           importedAmount,
           grossCollected,
           cashCollected,
@@ -1167,14 +1182,14 @@ export async function onRequest(context) {
             cash_collected=?,
             delivery_fee=?,
             partial_cost_reviewed=CASE WHEN ?='partial' THEN 0 ELSE partial_cost_reviewed END,
-            partial_received_items=CASE WHEN ?='partial' THEN '' ELSE partial_received_items END,
+            partial_received_items=CASE WHEN ?='partial' THEN ? ELSE partial_received_items END,
             settlement_note=CASE WHEN ?='' THEN settlement_note ELSE ? END,
             settled_at=CASE WHEN ?='pending' THEN NULL ELSE datetime('now') END,
             delivery_company_settled=?,
             delivery_company_settlement_id=?,
             updated_at=datetime('now')
             WHERE id=?`)
-            .bind(x.status,x.importedAmount,x.cashCollected,x.deliveryFee,x.status,x.status,x.note,x.note,x.status,finalSettled,settlementId,x.order.id)
+            .bind(x.status,x.importedAmount,x.cashCollected,x.deliveryFee,x.status,x.status,x.partialItems||'',x.note,x.note,x.status,finalSettled,settlementId,x.order.id)
         );
         statements.push(
           env.DB.prepare(`INSERT INTO delivery_company_settlement_orders(
