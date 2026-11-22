@@ -1,7 +1,14 @@
+import {classifyInventoryItems} from './_inventory.js';
 const json=(x,status=200)=>new Response(JSON.stringify(x),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 const MODEL_COSTS=[{name:'جاكيت فرو',cost:4},{name:'جاكيت جوخ كاجوال',cost:5.2},{name:'جاكيت جوخ سكايفو',cost:7.55},{name:'مالئ الفراغات',cost:1}];
 const normalizedName=x=>String(x||'').replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/\s+/g,' ').trim();
 const modelCost=name=>{const key=normalizedName(name);return MODEL_COSTS.find(m=>normalizedName(m.name)===key)?.cost??null};
+const FALLBACK_MODELS=[
+ {id:-1,name:'جاكيت فرو',aliases:['جاكيت فرو','جاكيت الفرو','جاكيت فروه']},
+ {id:-2,name:'جاكيت جوخ كاجوال',aliases:['جاكيت جوخ كاجوال','جوخ كاجوال','جاكيت الجوخ الكاجوال']},
+ {id:-3,name:'جاكيت جوخ سكايفو',aliases:['جاكيت جوخ سكايفو','جاكيت جوخ سكارفو','جاكيت الجوخ سكارفو','جوخ سكايفو','جوخ سكارفو']},
+ {id:-4,name:'مالئ الفراغات',aliases:['مالئ الفراغات','مالى الفراغات','ملي الفراغات','مالئ فراغات']}
+].map(m=>({...m,aliases:m.aliases.map(normalizedName)}));
 const validDate=x=>/^\d{4}-\d{2}-\d{2}$/.test(String(x||''))&&!Number.isNaN(Date.parse(x+'T00:00:00Z'));
 async function auth(request,env){const token=(request.headers.get('authorization')||'').replace(/^Bearer /,'');if(!token)return null;return env.DB.prepare("SELECT u.id,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>datetime('now') AND u.is_active=1").bind(token).first()}
 export async function onRequest({request,env}){
@@ -21,13 +28,23 @@ export async function onRequest({request,env}){
  await env.DB.prepare("CREATE TABLE IF NOT EXISTS shipping_cohort_ad_spend (date TEXT NOT NULL,store_id INTEGER NOT NULL,amount REAL NOT NULL DEFAULT 0,updated_at TEXT NOT NULL DEFAULT (datetime('now')),PRIMARY KEY(date,store_id))").run();
  const where="date(o.first_printed_at,'+3 hours')=?"+(store?" AND o.store_id=?":"");
  const args=store?[date,store]:[date];
- const data=await env.DB.prepare(`SELECT o.id,o.order_code,o.delivery_status,o.delivery_company_settled,o.delivery_company_settlement_id,o.delivered_amount,o.cash_collected,o.amount,o.cost_of_goods,o.delivery_fee,o.profit_reviewed_settlement_id,o.first_printed_at,o.store_id,so.imported_amount AS statement_amount,so.imported_status AS statement_status,so.match_type AS statement_match_type,ds.settlement_code AS statement_code,ds.source_name AS statement_source FROM orders o LEFT JOIN delivery_company_settlement_orders so ON so.rowid=(SELECT MAX(so2.rowid) FROM delivery_company_settlement_orders so2 WHERE so2.order_id=o.id AND so2.settlement_id=o.delivery_company_settlement_id) LEFT JOIN delivery_company_settlements ds ON ds.id=o.delivery_company_settlement_id WHERE o.first_printed_at IS NOT NULL AND ${where} ORDER BY o.id DESC`).bind(...args).all();
+ const data=await env.DB.prepare(`SELECT o.id,o.order_code,o.delivery_status,o.delivery_company_settled,o.delivery_company_settlement_id,o.delivered_amount,o.cash_collected,o.amount,o.cost_of_goods,o.delivery_fee,o.raw_text,o.order_notes,o.partial_received_items,o.profit_reviewed_settlement_id,o.first_printed_at,o.store_id,so.imported_amount AS statement_amount,so.imported_status AS statement_status,so.match_type AS statement_match_type,ds.settlement_code AS statement_code,ds.source_name AS statement_source FROM orders o LEFT JOIN delivery_company_settlement_orders so ON so.rowid=(SELECT MAX(so2.rowid) FROM delivery_company_settlement_orders so2 WHERE so2.order_id=o.id AND so2.settlement_id=o.delivery_company_settlement_id) LEFT JOIN delivery_company_settlements ds ON ds.id=o.delivery_company_settlement_id WHERE o.first_printed_at IS NOT NULL AND ${where} ORDER BY o.id DESC`).bind(...args).all();
  const orders=data.results||[];
  const itemMap=new Map();
  try{
   const itemRows=(await env.DB.prepare(`SELECT i.order_id,i.model_id,i.quantity,m.name AS model_name FROM inventory_order_items i LEFT JOIN profit_models m ON m.id=i.model_id JOIN orders o ON o.id=i.order_id WHERE o.first_printed_at IS NOT NULL AND ${where}`).bind(...args).all()).results||[];
   for(const item of itemRows){const id=Number(item.order_id);if(!itemMap.has(id))itemMap.set(id,[]);itemMap.get(id).push({model_id:Number(item.model_id),name:item.model_name||'موديل غير معروف',quantity:Number(item.quantity||0),unit_cost:modelCost(item.model_name),total_cost:modelCost(item.model_name)===null?null:Math.round(Number(item.quantity||0)*modelCost(item.model_name)*100)/100})}
  }catch(error){return json({error:'تعذر تحميل تفاصيل أصناف الطلبات، لم يتم اعتماد الكوست',detail:String(error?.message||error)},500)}
+ // Historical orders may have no inventory_order_items: derive merchandise from the
+ // original order text without changing inventory or historical allocations.
+ for(const o of orders){
+  if(itemMap.has(Number(o.id)))continue;
+  const raw=[o.raw_text,o.order_notes].filter(Boolean).join('\n');
+  if(!raw.trim())continue;
+  const matches=await classifyInventoryItems(env,raw,FALLBACK_MODELS);
+  const items=matches.map(x=>{const model=FALLBACK_MODELS.find(m=>m.id===x.model_id);const unit_cost=modelCost(model?.name);return{model_id:x.model_id,name:model?.name||'غير معروف',quantity:x.quantity,unit_cost,total_cost:unit_cost===null?null:Math.round(x.quantity*unit_cost*100)/100,source:'order_text'}});
+  if(items.length)itemMap.set(Number(o.id),items);
+ }
  const deliveredStatuses=new Set(['delivered','delivered_adjusted','partial']);
  let costReviewCount=0,totalDeliveredPieces=0,verifiedCosts=0;let cashDiscrepancy=0,cashMismatchOrders=0;let delivered=0,partial=0,returned=0,refusedWithFee=0,noReplyAfterArrival=0,otherReturns=0,pending=0,other=0,unreviewed=0,sales=0,cash=0,costs=0,fees=0;
  const details=orders.map(o=>{
