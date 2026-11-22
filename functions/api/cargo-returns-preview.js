@@ -30,7 +30,7 @@ export async function onRequest({request,env}){
    expectedItems=delivered.size?full.map(item=>({...item,quantity:Math.max(0,item.quantity-(delivered.get(item.model_id)||0))})).filter(item=>item.quantity>0):[];
   }
 
-  output.push({shipment_code:code,phone:p,area:clean(row.area),status:expectedItems.length?'matched':'review_model',order_code:o.order_code,order_id:o.id,order_status:o.delivery_status,return_status:clean(row.return_status),return_sent:returnStatus.includes('تم ارسال المرتجع')&&!returnStatus.includes('لم يتم'),items:expectedItems.map(i=>({...i,model_name:models.find(m=>m.id===i.model_id)?.name||''})),reason:expectedItems.length?'المرتجع المتوقع حسب التسليم — لم يتغير الجرد':o.delivery_status==='partial'?'التسليم الجزئي غير مفصل؛ يلزم مراجعة':'تم العثور على الطلب لكن لم يُتعرف على الموديل'});
+  output.push({shipment_code:code,phone:p,area:clean(row.area),status:o.delivery_status==='partial'&&!expectedItems.length?'review_model':'matched',order_code:o.order_code,order_id:o.id,order_status:o.delivery_status,return_status:clean(row.return_status),return_sent:returnStatus.includes('تم ارسال المرتجع')&&!returnStatus.includes('لم يتم'),items:expectedItems.map(i=>({...i,model_name:models.find(m=>m.id===i.model_id)?.name||''})),reason:o.delivery_status==='partial'?(expectedItems.length?'تسليم جزئي — المرتجع المتوقع حسب التسليم؛ لم يتغير الجرد':'تسليم جزئي يحتاج مراجعة القطع المرتجعة'):expectedItems.length?'تمت مطابقة الطلب — لم يتغير الجرد':'تمت مطابقة الطلب برقم الهاتف — الموديل غير مطلوب للمطابقة'});
  }
  return json({ok:true,preview_only:true,rows:output,summary:{total:output.length,matched:output.filter(x=>x.status==='matched').length,review:output.filter(x=>!['matched','ignored'].includes(x.status)).length}});
 }
