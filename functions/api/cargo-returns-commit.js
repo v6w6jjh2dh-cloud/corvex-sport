@@ -29,6 +29,8 @@ export async function onRequest({request,env}){
  if(!accepted.length)return json({ok:true,updated:0,skipped,report_id:null});
  // Only update status: never alter settlement, inventory, or collected cash.
  const sourceName=String(body.source_name||'').slice(0,180);
+ const pendingRows=Array.isArray(body.pending_rows)?body.pending_rows.slice(0,500):[];
+ for(const row of pendingRows){skipped.push({order_id:Number(row.order_id)||null,order_code:String(row.order_code||''),shipment_code:String(row.shipment_code||''),current_status:String(row.order_status||''),reason:String(row.reason||'شحنة معلّقة تحتاج مراجعة')})}
  const closed=accepted.map(x=>({order_id:x.id,order_code:x.order_code,shipment_code:x.code,phone:x.phone,previous_status:x.previous_status,new_status:'returned'}));
  const details=JSON.stringify({closed,skipped});
  // Record the report in the same D1 batch as status updates.
