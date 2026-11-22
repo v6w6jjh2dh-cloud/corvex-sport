@@ -17,8 +17,10 @@ export async function onRequest({request,env}){
   if(!status.includes('ملغي')){output.push({shipment_code:code,status:'ignored',reason:'الشحنة ليست ملغية'});continue}
   const found=(await env.DB.prepare("SELECT id,order_code,recipient_name,phone,area,detailed_address,order_notes,raw_text,delivery_status,partial_received_items,created_at FROM orders WHERE phone=? OR phone=? OR phone=? ORDER BY id DESC LIMIT 80").bind(p,p.replace(/^0/,''),'962'+p.replace(/^0/,'')).all()).results||[];
   const candidates=found.filter(o=>{const location=normalize([o.area,o.detailed_address].join(' '));return (!area||location.includes(area)||area.includes(location)&&location.length>2)&&(!city||location.includes(city)||normalize(o.area).includes(city)||city==='عمان')});
-  const matches=candidates.length?candidates:found.length===1&&!area?[found[0]]:[];
-  if(matches.length!==1){output.push({shipment_code:code,phone:p,area:clean(row.area),status:matches.length?'ambiguous':'unmatched',candidate_codes:matches.map(x=>x.order_code),reason:matches.length?'أكثر من طلب مطابق':'لا يوجد تطابق مؤكد للهاتف والمنطقة'});continue}
+  let matches=candidates.length?candidates:found.length===1&&!area?[found[0]]:[];
+  const selectedId=Number(row.selected_order_id||0);
+  if(selectedId&&matches.length>1){const chosen=matches.find(x=>Number(x.id)===selectedId);if(chosen)matches=[chosen];}
+  if(matches.length!==1){output.push({shipment_code:code,phone:p,area:clean(row.area),status:matches.length?'ambiguous':'unmatched',candidate_codes:matches.map(x=>x.order_code),candidates:matches.map(x=>({id:x.id,order_code:x.order_code,recipient_name:x.recipient_name,area:x.area,created_at:x.created_at,delivery_status:x.delivery_status})),reason:matches.length?'أكثر من طلب مطابق':'لا يوجد تطابق مؤكد للهاتف والمنطقة'});continue}
   const o=matches[0],items=await classifyInventoryItems(env,o.raw_text||o.order_notes||'',models);
   let expectedItems=items;
   if(o.delivery_status==='partial'){
