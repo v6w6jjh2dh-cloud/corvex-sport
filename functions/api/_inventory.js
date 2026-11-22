@@ -140,43 +140,31 @@ export async function classifyInventoryItems(env,text='',loadedModels=null){
  return [...totals].map(([model_id,quantity])=>({model_id,quantity}));
 }
 
-async function desiredItems(env,order,models){
- const status=String(order?.delivery_status||'pending');
- if(status==='delivered')return classifyInventoryItems(env,order.raw_text||order.order_notes||'',models);
- if(status!=='partial'&&status!=='delivered_adjusted')return[];
- let items=await classifyInventoryItems(env,order.partial_received_items||'',models);
- if(items.length)return items;
- const deliveredPieces=Math.max(0,Number(order.delivered_pieces||0));if(!deliveredPieces)return[];
- const full=await classifyInventoryItems(env,order.raw_text||order.order_notes||'',models);let left=deliveredPieces;items=[];
- for(const item of full){const quantity=Math.min(left,item.quantity);if(quantity>0)items.push({...item,quantity});left-=quantity;if(left<=0)break}
- return items;
+// Inventory policy V2: only the first shipping-label print reserves physical stock.
+// Existing historical allocations are never migrated or deducted again automatically.
+export async function deductOnFirstPrint(env,order,userId=null,loadedModels=null){
+ await ensureInventorySchema(env);
+ const orderId=Number(order?.id||0);
+ if(!orderId||order.first_printed_at)return{changed:false,reason:'already_printed'};
+ const existing=(await env.DB.prepare('SELECT model_id,quantity FROM inventory_order_items WHERE order_id=?').bind(orderId).all()).results||[];
+ const tracked=await env.DB.prepare('SELECT order_id FROM inventory_order_tracking WHERE order_id=?').bind(orderId).first();
+ if(existing.length||tracked)return{changed:false,reason:'historically_allocated'};
+ const items=await classifyInventoryItems(env,order.raw_text||order.order_notes||'',loadedModels);
+ if(!items.length)return{changed:false,reason:'unrecognized_model'};
+ const statements=[env.DB.prepare('INSERT OR IGNORE INTO inventory_order_tracking(order_id) VALUES(?)').bind(orderId)];
+ for(const item of items){
+  statements.push(env.DB.prepare('INSERT OR IGNORE INTO inventory_balances(model_id,quantity,updated_by) VALUES(?,0,?)').bind(item.model_id,userId));
+  statements.push(env.DB.prepare("UPDATE inventory_balances SET quantity=quantity-?,updated_by=?,updated_at=datetime('now') WHERE model_id=?").bind(item.quantity,userId,item.model_id));
+  statements.push(env.DB.prepare("INSERT INTO inventory_movements(model_id,order_id,quantity_delta,movement_type,note,created_by) VALUES(?,?,?,'order',?,?)").bind(item.model_id,orderId,-item.quantity,'خصم أول طباعة بوليصة',userId));
+  statements.push(env.DB.prepare('INSERT INTO inventory_order_items(order_id,model_id,quantity) VALUES(?,?,?)').bind(orderId,item.model_id,item.quantity));
+ }
+ await env.DB.batch(statements);
+ return{changed:true,items};
 }
 
+// Status updates must never restock a cancelled shipment automatically:
+// it may still be physically held by the courier. Restocking requires
+// a separate confirmed warehouse receipt operation.
 export async function syncOrderInventory(env,beforeOrder,afterOrder,userId=null,loadedModels=null){
- await ensureInventorySchema(env);
- const orderId=Number(afterOrder?.id||beforeOrder?.id||0);if(!orderId)return{changed:false,items:[]};
-  const existingRows=(await env.DB.prepare('SELECT model_id,quantity FROM inventory_order_items WHERE order_id=?').bind(orderId).all()).results||[];
-  const existing=new Map(existingRows.map(row=>[Number(row.model_id),Number(row.quantity||0)]));
-  const beforeStock=STOCK_STATUSES.has(String(beforeOrder?.delivery_status||'pending')),afterStock=STOCK_STATUSES.has(String(afterOrder?.delivery_status||'pending'));
- const tracked=await env.DB.prepare('SELECT order_id FROM inventory_order_tracking WHERE order_id=?').bind(orderId).first();
-  // A delivered order that predates inventory has no allocation. Editing it must never create a surprise deduction.
- if(beforeStock&&afterStock&&!existing.size&&!tracked)return{changed:false,legacy:true,items:[]};
- if(!beforeStock&&afterStock&&!tracked)await env.DB.prepare('INSERT OR IGNORE INTO inventory_order_tracking(order_id) VALUES(?)').bind(orderId).run();
- let wanted=[];
- if(afterStock)wanted=await desiredItems(env,afterOrder,loadedModels);
- const desired=new Map(wanted.map(item=>[Number(item.model_id),Number(item.quantity||0)]));
- const modelIds=[...new Set([...existing.keys(),...desired.keys()])],statements=[],changes=[];
- for(const modelId of modelIds){
-  const oldQty=existing.get(modelId)||0,newQty=desired.get(modelId)||0,allocationDelta=newQty-oldQty;
-  if(!allocationDelta)continue;
-  const stockDelta=-allocationDelta;
-  statements.push(env.DB.prepare('INSERT OR IGNORE INTO inventory_balances(model_id,quantity,updated_by) VALUES(?,0,?)').bind(modelId,userId));
-  statements.push(env.DB.prepare("UPDATE inventory_balances SET quantity=quantity+?,updated_by=?,updated_at=datetime('now') WHERE model_id=?").bind(stockDelta,userId,modelId));
-  statements.push(env.DB.prepare("INSERT INTO inventory_movements(model_id,order_id,quantity_delta,movement_type,note,created_by) VALUES(?,?,?,'order',?,?)").bind(modelId,orderId,stockDelta,stockDelta<0?'خصم تسليم طلب':'إرجاع كمية طلب',userId));
-  if(newQty>0)statements.push(env.DB.prepare("INSERT INTO inventory_order_items(order_id,model_id,quantity) VALUES(?,?,?) ON CONFLICT(order_id,model_id) DO UPDATE SET quantity=excluded.quantity,updated_at=datetime('now')").bind(orderId,modelId,newQty));
-  else statements.push(env.DB.prepare('DELETE FROM inventory_order_items WHERE order_id=? AND model_id=?').bind(orderId,modelId));
-  changes.push({model_id:modelId,quantity_delta:stockDelta});
- }
- if(statements.length)for(let i=0;i<statements.length;i+=40)await env.DB.batch(statements.slice(i,i+40));
- return{changed:changes.length>0,items:changes};
+ return{changed:false,reason:'print_based_inventory'};
 }
