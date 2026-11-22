@@ -101,14 +101,14 @@ document.getElementById('result').addEventListener('click',async event=>{
   if(!confirm('تأكيد تحويل '+rows.length+' طلب مطابق إلى حالة مرتجع؟ لن يتغير الجرد أو حسابات التسليم.'))return;
   button.disabled=true;button.textContent='جارٍ تسكير المرتجعات...';
   try{
-   const response=await fetch('/api/cargo-returns-commit',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+localStorage.getItem('corvex_token')},body:JSON.stringify({source_name:$('file')?.files?.[0]?.name||'',rows:rows.map(r=>({order_id:r.order_id,phone:r.phone,shipment_code:r.shipment_code}))})});
+   const response=await fetch('/api/cargo-returns-commit',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+localStorage.getItem('corvex_token')},body:JSON.stringify({source_name:$('file')?.files?.[0]?.name||'',pending_rows:unresolved.map(r=>({order_id:r.order_id,order_code:r.order_code,shipment_code:r.shipment_code,order_status:r.order_status,reason:r.reason||'بحاجة مراجعة'})),rows:rows.map(r=>({order_id:r.order_id,phone:r.phone,shipment_code:r.shipment_code}))})});
    const result=await response.json();if(!response.ok)throw Error(result.error||'تعذر تسكير الكشف');
    $('msg').textContent='تم تحويل '+result.updated+' طلب إلى مرتجع. طلبات لم تتغير: '+(result.skipped||[]).length+'. لم يتغير الجرد.';
    document.getElementById('closeSkipped')?.remove();
    if((result.skipped||[]).length){const box=document.createElement('div');box.id='closeSkipped';box.className='return-skipped';box.innerHTML='<h3>طلبات لم يتم تسكيرها — تحتاج مراجعة</h3>'+result.skipped.map(x=>'<div class="return-skipped-row"><b>طلب #'+esc(x.order_code||x.order_id||'—')+'</b><span>الشحنة: '+esc(x.shipment_code||'—')+'</span><span>الحالة: '+esc(statusText[x.current_status]||x.current_status||'غير محددة')+'</span><span>'+esc(x.reason||'')+'</span></div>').join('');document.getElementById('result').prepend(box)}
    button.textContent='✓ تم تسكير '+result.updated+' طلب';
    await loadReturnHistory();
-   const pending=unresolved.length+(result.skipped||[]).length;
+   const pending=(result.skipped||[]).length;
    if(pending){const box=document.createElement('div');box.className='return-skipped';box.innerHTML='<h3>⚠ مرتجعات معلّقة — الكشف غير مكتمل ('+pending+')</h3>'+unresolved.map(x=>'<div class="return-skipped-row">شحنة '+esc(x.shipment_code)+' — طلب #'+esc(x.order_code||'غير محدد')+' — '+esc(statusText[x.order_status]||x.status)+'</div>').join('');document.getElementById('result').prepend(box);}
    if((result.skipped||[]).length)button.disabled=false;
   }catch(e){button.disabled=false;button.textContent='✓ مطابقة الجميع';alert(e.message)}
