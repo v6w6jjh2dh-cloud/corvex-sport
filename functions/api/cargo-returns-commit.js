@@ -13,11 +13,11 @@ export async function onRequest({request,env}){
   const id=Number(row.order_id),code=String(row.shipment_code||'').trim(),p=phone(row.phone);
   if(!Number.isSafeInteger(id)||id<=0||!code||!p||unique.has(id)){skipped.push({order_id:id,reason:'بيانات ناقصة أو طلب مكرر'});continue}
   unique.add(id);
-  const o=await env.DB.prepare("SELECT id,phone,delivery_status FROM orders WHERE id=?").bind(id).first();
-  if(!o||phone(o.phone)!==p){skipped.push({order_id:id,reason:'رقم الهاتف لا يطابق الطلب'});continue}
-  if(o.delivery_status==='partial'||o.delivery_status==='delivered_adjusted'){skipped.push({order_id:id,reason:'تسليم جزئي يحتاج مراجعة منفصلة'});continue}
-  if(o.delivery_status==='returned'){skipped.push({order_id:id,reason:'مرتجع مسبقًا'});continue}
-  if(o.delivery_status!=='pending'){skipped.push({order_id:id,reason:'حالة الطلب تغيرت؛ لا يمكن تسكيره جماعيًا'});continue}
+  const o=await env.DB.prepare("SELECT id,order_code,phone,delivery_status FROM orders WHERE id=?").bind(id).first();
+  if(!o||phone(o.phone)!==p){skipped.push({order_id:id,shipment_code:code,reason:'رقم الهاتف لا يطابق الطلب'});continue}
+  if(o.delivery_status==='partial'||o.delivery_status==='delivered_adjusted'){skipped.push({order_id:id,order_code:o.order_code,shipment_code:code,current_status:o.delivery_status,reason:'تسليم جزئي يحتاج مراجعة منفصلة'});continue}
+  if(o.delivery_status==='returned'){skipped.push({order_id:id,order_code:o.order_code,shipment_code:code,current_status:o.delivery_status,reason:'مرتجع مسبقًا'});continue}
+  if(o.delivery_status!=='pending'){skipped.push({order_id:id,order_code:o.order_code,shipment_code:code,current_status:o.delivery_status,reason:'الطلب ليس قيد التوصيل؛ يحتاج مراجعة ولا يتم تغييره تلقائيًا'});continue}
   accepted.push({id,code});
  }
  if(!accepted.length)return json({ok:true,updated:0,skipped});
