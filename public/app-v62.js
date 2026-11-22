@@ -2575,6 +2575,7 @@ async function dailyProfitsView(){
         <h3>الأرباح المتراكمة حسب يوم خروج الشحنة</h3>
         <div class="sub">يُحسب الطلب مرة واحدة بتاريخ أول طباعة للشحنة، حتى لو ظهر في كشف شركة التوصيل بعد أيام. الأرقام تتحدث مع تغيّر حالة الطلب.</div>
         <div class="toolbar" style="margin:12px 0;flex-wrap:wrap">
+          <label>تاريخ خروج الشحنات <input id="cohortDate" type="date" class="input" value="${today}" style="min-width:160px;max-width:220px"></label>
           <label>إعلانات هذا اليوم (د.أ) <input id="cohortAdSpend" type="number" min="0" step="0.01" class="input" inputmode="decimal" style="max-width:150px"></label>
           <button id="saveCohortAds" type="button" class="btn btn-soft">حفظ الإعلانات</button>
           <button id="reloadCohort" type="button" class="btn btn-primary">تحديث التقرير</button>
@@ -2587,7 +2588,7 @@ async function dailyProfitsView(){
 
   const loadShippingCohort=async()=>{
     const target=$('#shippingCohortResult');if(!target)return;
-    const date=$('#profitDate').value,store=$('#profitStore').value||'0';
+    const date=$('#cohortDate').value,store=$('#profitStore').value||'0';
     target.textContent='جاري حساب نتائج الشحنات...';
     try{
       const d=await api('/profit-shipping-cohorts?date='+encodeURIComponent(date)+'&store_id='+encodeURIComponent(store));
@@ -2600,14 +2601,15 @@ async function dailyProfitsView(){
     }catch(e){target.textContent='تعذر حساب التقرير: '+e.message}
   };
   $('#reloadCohort').onclick=loadShippingCohort;
+  $('#cohortDate').addEventListener('change',loadShippingCohort);
   $('#saveCohortAds').onclick=async()=>{
     const button=$('#saveCohortAds'),amount=Number($('#cohortAdSpend').value);
     if(!Number.isFinite(amount)||amount<0)return toast('أدخل مبلغ إعلانات صحيح');
     button.disabled=true;
-    try{await api('/profit-shipping-cohorts',{method:'POST',body:JSON.stringify({date:$('#profitDate').value,store_id:Number($('#profitStore').value||0),ad_spend:amount})});await loadShippingCohort();toast('تم حفظ إعلانات اليوم')}
+    try{await api('/profit-shipping-cohorts',{method:'POST',body:JSON.stringify({date:$('#cohortDate').value,store_id:Number($('#profitStore').value||0),ad_spend:amount})});await loadShippingCohort();toast('تم حفظ إعلانات اليوم')}
     catch(e){toast(e.message)}finally{button.disabled=false}
   };
-  $('#profitDate').addEventListener('change',loadShippingCohort);
+  $('#profitDate').addEventListener('change',()=>{$('#cohortDate').value=$('#profitDate').value;loadShippingCohort()});
   $('#profitStore').addEventListener('change',loadShippingCohort);
   loadShippingCohort();
 
