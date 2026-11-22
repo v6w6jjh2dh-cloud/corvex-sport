@@ -2573,7 +2573,7 @@ async function dailyProfitsView(){
       </div>
       <div id="shippingCohort" class="card" style="margin:14px 0;padding:16px;border:1px solid #dbe4ed">
         <h3>الأرباح المتراكمة حسب يوم خروج الشحنة</h3>
-        <div class="sub">يُحسب الطلب حسب تاريخ خروجه من المستودع (أول طباعة)، مهما كان تاريخ كشف شركة التوصيل. الكاش هنا من طلبات هذا اليوم فقط، وليس كاش الكشف كاملًا.</div>
+        <div class="sub">يُحسب الطلب حسب تاريخ خروجه من المستودع (أول طباعة)، مهما كان تاريخ كشف شركة التوصيل. الرفض هنا يشمل فقط «رفض مع دفع أجور» و«لا رد بعد الوصول» من الكشوف المسكّرة، أما المرتجعات والإلغاءات الأخرى فتظهر منفصلة.</div>
         <div class="toolbar" style="margin:12px 0;flex-wrap:wrap">
           <label>تاريخ خروج الشحنات <input id="cohortDate" type="date" class="input" value="${today}" style="min-width:160px;max-width:220px"></label>
           <label>إعلانات هذا اليوم (د.أ) <input id="cohortAdSpend" type="number" min="0" step="0.01" class="input" inputmode="decimal" style="max-width:150px"></label>
@@ -2593,7 +2593,7 @@ async function dailyProfitsView(){
     try{
       const d=await api('/profit-shipping-cohorts?date='+encodeURIComponent(date)+'&store_id='+encodeURIComponent(store));
       $('#cohortAdSpend').value=Number(d.ad_spend||0);
-      const summary=[['إجمالي الشحنات',d.total],['تم التسليم',d.delivered],['منها تسليم جزئي',d.partial],['مرتجع / مرفوض',d.returned],['قيد التوصيل',d.pending],['بحاجة مراجعة',d.unreviewed+d.other]];
+      const summary=[['إجمالي الشحنات',d.total],['تم التسليم',d.delivered],['منها تسليم جزئي',d.partial],['رفض مع دفع أجور (من الكشوف)',d.refused_with_fee],['لا رد بعد الوصول (من الكشوف)',d.no_reply_after_arrival],['إجمالي الحالتين',d.returned],['مرتجع أو إلغاء آخر (منفصل)',d.other_returns],['قيد التوصيل',d.pending],['بحاجة مراجعة',d.unreviewed+d.other]];
       target.innerHTML='<div class="accounting-stats" style="margin:12px 0">'+summary.map(([label,value])=>'<div><span>'+label+'</span><b>'+Number(value||0)+'</b></div>').join('')+'</div>'+
       '<div class="accounting-stats" style="margin:12px 0">'+[['الكاش المحصّل من شحنات هذا التاريخ',d.cash],['قيمة الطلبات المسلّمة',d.sales],['كوست المستلم',d.costs],['أجور التوصيل',d.fees],['الربح قبل الإعلانات',d.gross_profit],['الإعلانات',d.ad_spend],['الربح بعد الإعلانات',d.net_after_ads]].map(([label,value])=>'<div><span>'+label+'</span><b>'+money(value)+' د.أ</b></div>').join('')+'</div>'+
       (d.complete?'<div class="badge badge-ok">لا توجد طلبات معلقة أو كوست جزئي غير مراجع</div>':'<div class="partial-summary-warning">⚠ التقرير غير نهائي: يوجد طلبات قيد التوصيل أو بحاجة مراجعة. الربح الحالي لا يشمل كوست الطلبات الجزئية غير المعتمدة.</div>')+
