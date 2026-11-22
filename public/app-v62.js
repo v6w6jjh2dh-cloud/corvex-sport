@@ -13,7 +13,7 @@ function homeView(){
   if(can('dashboard'))return 'dashboard';
   if(can('orders_view'))return 'orders';
   if(can('reports'))return 'reports';
-  if(can('returns'))return 'returns-center';
+  if(can('returns'))return 'orders';
   return 'orders';
 }
 async function openInitialView(){
@@ -1093,7 +1093,6 @@ function renderShell(){
   };
 }
 async function show(v){
-  if(v!=='returns-center'&&window.__corvexStopReturnCamera){window.__corvexStopReturnCamera();window.__corvexStopReturnCamera=null}
   if(isTrackingOnly()&&!['orders','reports'].includes(v))v=homeView();
   state.view=v;
   document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
@@ -1116,7 +1115,6 @@ async function show(v){
   if(v==='regions')return regionsView();
   if(v==='permissions')return permissionsView();
   if(v==='users')return usersView();
-  if(v==='returns-center')return returnsCenterView();
 }
 async function cargoReturnsView(){
   const c=$('#content');
@@ -2973,147 +2971,6 @@ async function openCourierSettlement(cid,courier){
  box.innerHTML=`<div class="card courier-settlement"><h2>تسكير حساب ${esc(courier.name)}</h2>${os.length?`<div class="table-wrap"><table class="table"><thead><tr><th>✓</th><th>الكود</th><th>المتجر</th><th>العميل</th><th>الحالة</th><th>العمولة</th></tr></thead><tbody>${os.map(o=>{const ret=!['delivered','delivered_adjusted'].includes(o.delivery_status),v=ret?Number(courier.returned_commission||0):Number(courier.delivered_commission||0);return `<tr><td><input type="checkbox" class="co" data-id="${o.id}" data-v="${v}" checked></td><td>${o.order_code}</td><td>${esc(o.store_name||'—')}</td><td>${esc(o.recipient_name)}</td><td>${deliveryBadge(o)}</td><td>${money(v)}</td></tr>`}).join('')}</tbody></table></div><div class="courier-total">حق المندوب: <b id="due">0.00</b> د.أ</div><button id="doneSettle" class="btn btn-accent">✓ تم</button>`:'<div class="empty">لا توجد طلبات غير محاسبة</div>'}</div>`;
  if(!os.length)return;const calc=()=>$('#due').textContent=money([...document.querySelectorAll('.co:checked')].reduce((s,x)=>s+Number(x.dataset.v||0),0));document.querySelectorAll('.co').forEach(x=>x.onchange=calc);calc();
  $('#doneSettle').onclick=async()=>{const ids=[...document.querySelectorAll('.co:checked')].map(x=>Number(x.dataset.id));if(!ids.length)return toast('حدد طلبات');try{const r=await api('/courier-settlements',{method:'POST',body:JSON.stringify({courier_id:cid,order_ids:ids})});toast('حق المندوب '+money(r.settlement.total_due)+' د.أ');couriersView()}catch(e){toast(e.message)}};
-}
-
-async function returnsCenterView(){
-  const c=$('#content');
-  const stores=await getActiveStores();
-  const now=new Date(),dateValue=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  const today=dateValue(now),monthStart=`${today.slice(0,8)}01`;
-  let currentOrder=null,cameraStream=null,scanTimer=null;
-  c.innerHTML=`
-    <div class="page-title">
-      <div><h1>مركز المرتجعات</h1><div class="sub">استلام المرتجع بالباركود • كامل أو جزئي • معرفة أكثر الأصناف رجوعًا</div></div>
-      <span class="pill return-live-pill">جاهز للمسح</span>
-    </div>
-    <div class="return-scan-card">
-      <div class="return-scan-title"><span class="return-scan-icon">▥</span><div><h2>امسح باركود البوليصة</h2><div class="sub">جهاز الباركود يعمل مباشرة، ويمكنك استخدام الكاميرا أو كتابة كود الطلب القديم.</div></div></div>
-      <div class="return-scan-actions">
-        <input id="returnCodeInput" class="input return-code-input" autocomplete="off" inputmode="numeric" placeholder="CV-4401 أو 4401">
-        <button id="findReturnOrder" class="btn btn-primary">عرض الطلب</button>
-        <button id="startReturnCamera" class="btn btn-outline">فتح الكاميرا</button>
-      </div>
-      <div id="returnCameraBox" class="return-camera-box" hidden><video id="returnCamera" playsinline muted></video><button id="stopReturnCamera" class="btn btn-danger">إغلاق الكاميرا</button></div>
-      <div id="returnOrderPanel"></div>
-    </div>
-    <div class="card return-report-card">
-      <div class="section-head"><div><h2>لوحة المرتجعات</h2><div class="sub">الإحصائية تعتمد على القطع التي تم استلامها وتأكيدها فعليًا.</div></div></div>
-      <div class="toolbar return-filter-bar">
-        <input id="returnFrom" type="date" class="input" value="${monthStart}">
-        <input id="returnTo" type="date" class="input" value="${today}">
-        <select id="returnStore" class="select"><option value="">كل المتاجر</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
-        <button id="loadReturns" class="btn btn-soft">تحديث التقرير</button>
-      </div>
-      <div id="returnSummary"></div>
-      <div class="return-report-grid"><div><h3>الأكثر رجوعًا</h3><div id="returnTopItems"></div></div><div><h3>سجل الاستلام</h3><div id="returnHistory"></div></div></div>
-    </div>`;
-
-  const stopCamera=()=>{
-    if(scanTimer){clearTimeout(scanTimer);scanTimer=null}
-    if(cameraStream){cameraStream.getTracks().forEach(track=>track.stop());cameraStream=null}
-    const box=$('#returnCameraBox');if(box)box.hidden=true;
-  };
-  window.__corvexStopReturnCamera=stopCamera;
-
-  const addItemRow=(name='',quantity=1)=>{
-    const list=$('#returnItemsList');
-    const row=document.createElement('div');
-    row.className='return-item-row';
-    row.innerHTML=`<input class="input return-item-name" placeholder="اسم الصنف، مثال: بنطلون تركي" value="${esc(name)}"><input class="input return-item-qty" type="number" min="1" step="1" value="${Math.max(1,Number(quantity||1))}"><button type="button" class="btn btn-danger return-remove-item" aria-label="حذف الصنف">×</button>`;
-    row.querySelector('.return-remove-item').onclick=()=>row.remove();
-    list.appendChild(row);
-  };
-
-  const renderOrder=d=>{
-    currentOrder=d.order;
-    const panel=$('#returnOrderPanel'),existing=d.return_event;
-    if(existing){
-      panel.innerHTML=`<div class="return-existing"><div><b>الطلب #${esc(currentOrder.order_code)} مسجل مسبقًا</b><div class="sub">${existing.return_type==='full'?'مرتجع كامل':'مرتجع جزئي'} • ${(existing.items||[]).map(i=>`${esc(i.item_name)} × ${i.quantity}`).join('، ')}</div></div><span class="badge badge-ok">تم الاستلام</span></div>`;
-      return;
-    }
-    const source=currentOrder.raw_text||currentOrder.order_notes||'—';
-    panel.innerHTML=`<div class="return-order-card">
-      <div class="return-order-head"><div><b>طلب #${esc(currentOrder.order_code)} — ${esc(currentOrder.store_name||'')}</b><div class="sub">${esc(currentOrder.recipient_name||'لا يوجد')} • ${esc(currentOrder.phone||'')}</div></div>${deliveryBadge(currentOrder)}</div>
-      <div class="return-original-order"><b>محتويات الطلب الأصلية:</b><div>${esc(source)}</div></div>
-      <div class="grid form-grid return-details-grid">
-        <div class="field"><label>نوع المرتجع</label><select id="returnType" class="select"><option value="full">مرتجع كامل</option><option value="partial">مرتجع جزئي</option></select></div>
-        <div class="field"><label>سبب المرتجع</label><select id="returnReason" class="select"><option value="رفض العميل">رفض العميل</option><option value="المقاس">المقاس</option><option value="اللون">اللون</option><option value="الجودة">الجودة</option><option value="خطأ في الطلب">خطأ في الطلب</option><option value="لم يتم الرد">لم يتم الرد</option><option value="أخرى">أخرى</option></select></div>
-      </div>
-      <div class="return-items-head"><div><b>القطع التي رجعت فعليًا</b><div class="sub">اكتب اسم كل صنف وكمية القطع الراجعة.</div></div><div class="actions"><button id="returnAiItems" type="button" class="btn btn-soft">✨ استخراج الأصناف بالذكاء</button><button id="addReturnItem" type="button" class="btn btn-outline">＋ إضافة صنف</button></div></div>
-      <div id="returnItemsList" class="return-items-list"></div>
-      <div class="field"><label>ملاحظة إضافية</label><textarea id="returnNotes" class="textarea" placeholder="أي ملاحظة عن حالة المرتجع"></textarea></div>
-      <button id="saveReturn" class="btn btn-accent return-save-btn">✓ تأكيد استلام المرتجع</button>
-    </div>`;
-    addItemRow();
-    $('#addReturnItem').onclick=()=>addItemRow();
-    $('#returnAiItems').onclick=async()=>{
-      const btn=$('#returnAiItems');btn.disabled=true;btn.textContent='جاري استخراج الأصناف...';
-      try{
-        const parsed=await api('/ai-parse-order',{method:'POST',body:JSON.stringify({text:source})});
-        const items=(parsed.parsed?.items||[]).filter(i=>i.name&&Number(i.quantity)>0);
-        if(!items.length)return toast('لم يتم العثور على أصناف — أضفها يدويًا');
-        $('#returnItemsList').innerHTML='';items.forEach(item=>addItemRow(item.name,item.quantity));
-        toast('تم استخراج الأصناف — راجع الكميات قبل الحفظ');
-      }catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent='✨ استخراج الأصناف بالذكاء'}
-    };
-    $('#saveReturn').onclick=async()=>{
-      const items=[...document.querySelectorAll('.return-item-row')].map(row=>({name:row.querySelector('.return-item-name').value.trim(),quantity:Number(row.querySelector('.return-item-qty').value||0)})).filter(i=>i.name&&i.quantity>0);
-      if(!items.length)return toast('أضف صنفًا مرتجعًا واحدًا على الأقل');
-      const type=$('#returnType').value,label=type==='full'?'مرتجع كامل':'مرتجع جزئي';
-      if(!confirm(`تأكيد استلام ${label} للطلب #${currentOrder.order_code} بعدد ${items.reduce((sum,i)=>sum+i.quantity,0)} قطعة؟`))return;
-      const btn=$('#saveReturn');btn.disabled=true;
-      try{
-        await api('/returns',{method:'POST',body:JSON.stringify({order_code:currentOrder.order_code,return_type:type,reason:$('#returnReason').value,notes:$('#returnNotes').value,items})});
-        panel.innerHTML=`<div class="return-success"><b>✓ تم استلام مرتجع الطلب #${esc(currentOrder.order_code)}</b><span>${items.reduce((sum,i)=>sum+i.quantity,0)} قطعة أضيفت إلى مركز المرتجعات</span></div>`;
-        $('#returnCodeInput').value='';$('#returnCodeInput').focus();
-        toast('تم تسجيل المرتجع بنجاح');await loadReturns();
-      }catch(e){toast(e.message);btn.disabled=false}
-    };
-  };
-
-  const lookup=async raw=>{
-    const code=String(raw||$('#returnCodeInput').value||'').trim();
-    if(!code)return toast('امسح الباركود أو اكتب كود الطلب');
-    $('#returnOrderPanel').innerHTML='<div class="empty">جاري تحميل الطلب...</div>';
-    try{renderOrder(await api('/returns/order?code='+encodeURIComponent(code)))}catch(e){currentOrder=null;$('#returnOrderPanel').innerHTML=`<div class="return-error">${esc(e.message)}</div>`}
-  };
-
-  const loadReturns=async()=>{
-    const p=new URLSearchParams();
-    if($('#returnFrom').value)p.set('from_date',$('#returnFrom').value);
-    if($('#returnTo').value)p.set('to_date',$('#returnTo').value);
-    if($('#returnStore').value)p.set('store_id',$('#returnStore').value);
-    const d=await api('/returns?'+p.toString()),s=d.summary||{};
-    $('#returnSummary').innerHTML=`<div class="return-summary"><div><span>إجمالي المرتجعات</span><b>${Number(s.total_returns||0)}</b></div><div><span>مرتجع كامل</span><b>${Number(s.full_returns||0)}</b></div><div><span>مرتجع جزئي</span><b>${Number(s.partial_returns||0)}</b></div><div class="pieces"><span>إجمالي القطع الراجعة</span><b>${Number(s.returned_pieces||0)}</b></div></div>`;
-    const top=d.top_items||[];
-    $('#returnTopItems').innerHTML=top.length?`<div class="return-ranking">${top.map((item,index)=>`<div class="return-rank-row"><span class="return-rank-number">${index+1}</span><div><b>${esc(item.item_name)}</b><small>${Number(item.return_orders||0)} طلب مرتجع</small></div><strong>${Number(item.returned_quantity||0)} قطعة</strong></div>`).join('')}</div>`:'<div class="empty">لا توجد أصناف مرتجعة ضمن الفترة</div>';
-    const history=d.returns||[];
-    $('#returnHistory').innerHTML=history.length?`<div class="return-history-list">${history.map(row=>`<div class="return-history-row"><div><b>#${esc(row.order_code)} — ${esc(row.store_name||'')}</b><div class="sub">${row.return_type==='full'?'مرتجع كامل':'مرتجع جزئي'} • ${(row.items||[]).map(i=>`${esc(i.item_name)} × ${i.quantity}`).join('، ')}</div><div class="return-history-meta">${esc(row.reason||'بدون سبب')} • ${esc(row.created_by_name||'')} • ${fmtDate(row.created_at)}</div></div>${state.user?.role==='admin'?`<button class="btn btn-danger delete-return" data-id="${row.id}" data-code="${row.order_code}">حذف</button>`:''}</div>`).join('')}</div>`:'<div class="empty">لا توجد مرتجعات ضمن الفترة</div>';
-    document.querySelectorAll('.delete-return').forEach(btn=>btn.onclick=async()=>{if(!confirm(`حذف تسجيل مرتجع الطلب #${btn.dataset.code}؟`))return;btn.disabled=true;try{await api('/returns/'+btn.dataset.id,{method:'DELETE'});toast('تم حذف تسجيل المرتجع');loadReturns()}catch(e){btn.disabled=false;toast(e.message)}});
-  };
-
-  const startCamera=async()=>{
-    if(!navigator.mediaDevices?.getUserMedia)return toast('الكاميرا غير متاحة على هذا الجهاز');
-    if(!('BarcodeDetector' in window))return toast('المتصفح لا يدعم المسح بالكاميرا — استخدم جهاز الباركود أو اكتب الكود');
-    stopCamera();
-    try{
-      cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
-      const video=$('#returnCamera'),box=$('#returnCameraBox');video.srcObject=cameraStream;box.hidden=false;await video.play();
-      const detector=new BarcodeDetector({formats:['code_128','qr_code']});
-      const scan=async()=>{
-        if(!cameraStream||state.view!=='returns-center')return stopCamera();
-        try{const codes=await detector.detect(video);if(codes.length){const raw=codes[0].rawValue;$('#returnCodeInput').value=raw;stopCamera();return lookup(raw)}}catch{}
-        scanTimer=setTimeout(scan,220);
-      };
-      scan();
-    }catch(e){stopCamera();toast(e.name==='NotAllowedError'?'اسمح باستخدام الكاميرا لمسح الباركود':'تعذر تشغيل الكاميرا')}
-  };
-
-  $('#findReturnOrder').onclick=()=>lookup();
-  $('#returnCodeInput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();lookup()}};
-  $('#startReturnCamera').onclick=startCamera;$('#stopReturnCamera').onclick=stopCamera;
-  $('#loadReturns').onclick=loadReturns;$('#returnFrom').onchange=loadReturns;$('#returnTo').onchange=loadReturns;$('#returnStore').onchange=loadReturns;
-  await loadReturns();$('#returnCodeInput').focus();
 }
 
 
