@@ -1,6 +1,6 @@
 import {dominantSettlementDate,ensureSettlementDateColumn} from './_settlement-date.js';
 import {runSchemaMigrationOnce} from './_schema-migrations.js';
-import {loadInventoryModels,syncOrderInventory} from './_inventory.js';
+import {loadInventoryModels,syncOrderInventory,deductOnFirstPrint} from './_inventory.js';
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -1892,10 +1892,15 @@ export async function onRequest(context) {
         .bind(batchCode,me.id,orders.length,storeId).run();
       const batchId = batchRes.meta.last_row_id;
 
+      const printInventoryModels=await loadInventoryModels(env);
+      const inventoryWarnings=[];
       for (let i=0;i<orders.length;i++) {
         await env.DB.prepare('INSERT INTO print_batch_orders(batch_id,order_id,position) VALUES(?,?,?)').bind(batchId,orders[i].id,i+1).run();
         await env.DB.prepare(`INSERT OR IGNORE INTO order_departures(order_id,store_id,first_batch_id,departed_at)
           VALUES(?,?,?,datetime('now'))`).bind(orders[i].id,storeId,batchId).run();
+        // Reserve stock before marking the first print; reprints and historical allocations are skipped.
+        const allocation=await deductOnFirstPrint(env,orders[i],me.id,printInventoryModels);
+        if(allocation.reason==='unrecognized_model')inventoryWarnings.push({order_code:orders[i].order_code,reason:'الموديل غير معروف؛ لم يُخصم من الجرد'});
         await env.DB.prepare(`UPDATE orders SET printed=1, print_count=print_count+1,
           first_printed_at=COALESCE(first_printed_at,datetime('now')), last_printed_at=datetime('now') WHERE id=?`).bind(orders[i].id).run();
       }
@@ -1906,7 +1911,7 @@ export async function onRequest(context) {
         LEFT JOIN stores s ON s.id=b.store_id
         WHERE b.id=?`).bind(batchId).first();
 
-      return json({batch,orders},201);
+      return json({batch,orders,inventory_warnings:inventoryWarnings},201);
     }
 
         if (path === '/print-batches' && method === 'GET') {
