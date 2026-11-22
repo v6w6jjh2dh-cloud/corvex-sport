@@ -5,14 +5,23 @@ export function normalizedSettlementDate(value=''){
   return Number.isNaN(parsed.getTime())||parsed.toISOString().slice(0,10)!==date?'':date;
 }
 
+export function previousAccountingDate(value=''){
+  const date=normalizedSettlementDate(value);
+  if(!date)return '';
+  const d=new Date(date+'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate()-1);
+  return d.toISOString().slice(0,10);
+}
+
 export function dominantSettlementDate(rows=[]){
   const counts=new Map();
   for(const row of rows){
     const date=normalizedSettlementDate(row?.shipment_date||row?.raw_date||'');
     if(date)counts.set(date,(counts.get(date)||0)+1);
   }
-  return [...counts.entries()]
+  const mostCommon=[...counts.entries()]
     .sort((a,b)=>b[1]-a[1]||b[0].localeCompare(a[0]))[0]?.[0]||'';
+  return previousAccountingDate(mostCommon);
 }
 
 let settlementDateReadyPromise=null;
