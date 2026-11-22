@@ -9,6 +9,15 @@ const FALLBACK_MODELS=[
  {id:-3,name:'جاكيت جوخ سكايفو',aliases:['جاكيت جوخ سكايفو','جاكيت جوخ سكارفو','جاكيت الجوخ سكارفو','جوخ سكايفو','جوخ سكارفو']},
  {id:-4,name:'مالئ الفراغات',aliases:['مالئ الفراغات','مالى الفراغات','ملي الفراغات','مالئ فراغات']}
 ].map(m=>({...m,aliases:m.aliases.map(normalizedName)}));
+async function calculateFromText(env,order){
+ const raw=String(order.raw_text||order.order_notes||'').trim();
+ if(!raw)return null;
+ const matches=await classifyInventoryItems(env,raw,FALLBACK_MODELS);
+ if(!matches.length||matches.some(x=>!Number.isSafeInteger(x.quantity)||x.quantity<1||x.quantity>50))return null;
+ const items=matches.map(x=>{const model=FALLBACK_MODELS.find(m=>m.id===x.model_id);return{model:model?.name,quantity:x.quantity,cost:modelCost(model?.name)}});
+ if(items.some(x=>x.cost===null))return null;
+ return{items,cost:Math.round(items.reduce((n,x)=>n+x.quantity*x.cost,0)*100)/100};
+}
 const validDate=x=>/^\d{4}-\d{2}-\d{2}$/.test(String(x||''))&&!Number.isNaN(Date.parse(x+'T00:00:00Z'));
 async function auth(request,env){const token=(request.headers.get('authorization')||'').replace(/^Bearer /,'');if(!token)return null;return env.DB.prepare("SELECT u.id,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>datetime('now') AND u.is_active=1").bind(token).first()}
 export async function onRequest({request,env}){
@@ -17,6 +26,22 @@ export async function onRequest({request,env}){
  if(request.method==='POST'){
   if(me.role!=='admin')return json({error:'المدير فقط يستطيع حفظ الإعلان'},403);
   let b;try{b=await request.json()}catch{return json({error:'طلب غير صالح'},400)}
+  if(b.action==='recalculate_delivered_costs'){
+   const target=String(b.date||'');const targetStore=Number(b.store_id||0);
+   if(!validDate(target)||target<'2026-11-17'||!Number.isSafeInteger(targetStore)||targetStore<0)return json({error:'تاريخ أو متجر غير صالح'},400);
+   const condition="date(first_printed_at,'+3 hours')=?"+(targetStore?" AND store_id=?":"");
+   const params=targetStore?[target,targetStore]:[target];
+   const rows=(await env.DB.prepare(`SELECT id,order_code,delivery_status,raw_text,order_notes,cost_of_goods,settlement_note FROM orders WHERE ${condition} AND delivery_status IN ('delivered','delivered_adjusted','partial')`).bind(...params).all()).results||[];
+   let updated=0,skipped=0;const skipped_orders=[];
+   for(const order of rows){
+    if(order.delivery_status!=='delivered'||/\[MANUAL_COST:/i.test(String(order.settlement_note||''))){skipped++;skipped_orders.push(order.order_code);continue}
+    const result=await calculateFromText(env,order);
+    if(!result){skipped++;skipped_orders.push(order.order_code);continue}
+    const change=await env.DB.prepare("UPDATE orders SET cost_of_goods=?,updated_at=datetime('now') WHERE id=? AND delivery_status='delivered' AND COALESCE(settlement_note,'') NOT LIKE '%[MANUAL_COST:%'").bind(result.cost,order.id).run();
+    updated+=Number(change?.meta?.changes||0);
+   }
+   return json({ok:true,updated,skipped,skipped_orders});
+  }
   date=b.date;store=Number(b.store_id||0);const amount=Number(b.ad_spend);
   if(!validDate(date)||date<'2026-11-17'||!Number.isSafeInteger(store)||store<0||!Number.isFinite(amount)||amount<0||amount>10000000)return json({error:'تاريخ أو مبلغ غير صالح'},400);
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS shipping_cohort_ad_spend (date TEXT NOT NULL,store_id INTEGER NOT NULL,amount REAL NOT NULL DEFAULT 0,updated_at TEXT NOT NULL DEFAULT (datetime('now')),PRIMARY KEY(date,store_id))").run();
