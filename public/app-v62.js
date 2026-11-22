@@ -1692,6 +1692,7 @@ async function loadOrders(){
 }
 const DELIVERY_STATUS_LABELS={
   pending:'قيد التوصيل',
+  returned:'مرتجع',
   delivered:'تم التسليم',
   delivered_adjusted:'استلام جزئي',
   refused_fee_paid:'رفض ودفع أجور',
