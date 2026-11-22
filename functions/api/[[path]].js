@@ -1022,7 +1022,7 @@ export async function onRequest(context) {
       if(!storeId)return json({error:'اختر المتجر أولاً'},400);
       if(!rows.length)return json({error:'الكشف فارغ'},400);
 
-      const ordersRes=await env.DB.prepare(`${orderSelectSql('WHERE o.store_id=? AND o.delivery_company_settled=0')} ORDER BY o.id DESC`)
+      const ordersRes=await env.DB.prepare(`${orderSelectSql("WHERE o.store_id=? AND o.delivery_company_settled=0 AND date(COALESCE(o.first_printed_at,o.created_at),'+3 hours')>='2026-11-17'")} ORDER BY o.id DESC`)
         .bind(storeId).all();
       const orders=ordersRes.results||[];
       const byPhone=new Map();
