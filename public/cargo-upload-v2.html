@@ -18,9 +18,51 @@ small{color:#687b8e}
 a{color:#173750}
 .embedded .card:first-child{border:0;box-shadow:none;padding:12px 16px 20px}
 .embedded .card.scroll{border-top:1px solid #e4e9f0;border-radius:0;box-shadow:none}
+</style><style>
+/* Mobile shipment cards: keep the full table on desktop. */
+#result{min-width:0}
+#result table{width:100%}
+#result .mobile-return-list{display:none}
+#result .return-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:18px}
+#result .return-summary>div{padding:14px;border:1px solid #e1e8ef;border-radius:12px;background:#f6f9fc}
+#result .return-summary span{display:block;color:#61758a;font-size:12px}
+#result .return-summary b{font-size:23px;color:#173750}
+@media(max-width:760px){
+ body{padding:0!important;overflow-x:hidden}
+ main{width:100%;min-width:0}
+ .card{padding:14px!important;margin:0 0 12px!important;border-radius:12px}
+ .card h2{font-size:18px}
+ #result table{display:none}
+ #result .mobile-return-list{display:grid;gap:12px}
+ #result .return-summary{gap:7px}
+ #result .return-summary>div{padding:10px 7px}
+ #result .return-summary span{font-size:11px}
+ #result .return-summary b{font-size:20px}
+ .return-shipment{border:1px solid #dfe7ef;border-radius:14px;padding:14px;background:#fff;min-width:0}
+ .return-shipment-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px}
+ .return-shipment-head strong{font-size:15px;overflow-wrap:anywhere}
+ .return-status{border-radius:30px;padding:5px 9px;background:#edf2f7;color:#26435d;font-size:12px;font-weight:700;white-space:nowrap}
+ .return-status.matched{background:#e4f6eb;color:#116538}
+ .return-detail{display:grid;grid-template-columns:95px minmax(0,1fr);gap:8px;padding:8px 0;border-bottom:1px solid #edf0f4;line-height:1.5}
+ .return-detail span{font-size:12px;color:#718096}
+ .return-detail b{font-size:13px;overflow-wrap:anywhere;font-weight:600}
+ .return-shipment .receive{display:block;width:100%;margin-top:14px;white-space:normal}
+ #result .scroll{overflow:visible}
+}
 </style></head><body><main><div class="card"><h2>رفع كشف المرتجعات ومطابقتها</h2><p>ارفع ملف Excel الأصلي. تتم مطابقة الشحنات الملغية باستخدام الهاتف والمنطقة مع طلبات كورفكس، ثم استخراج الموديل والكمية. الفحص لا يعدّل الجرد. بعد وصول المرتجع فعليًا للمستودع، يمكنك تأكيد استلامه لإعادة الكمية المخصومة فقط.</p><input id="file" type="file"><button id="run">فحص الكشف</button><p><small>ارفع كشف Excel، ثم راجع نتيجة المطابقة قبل تأكيد استلام أي شحنة.</small></p><p id="msg"></p><a href="/">العودة إلى كورفكس</a></div><div class="card scroll" id="result"></div></main><script>if(new URLSearchParams(location.search).has('embedded')){document.documentElement.classList.add('embedded');document.querySelector('h2').textContent='رفع كشف Cargo Box';document.querySelectorAll('a[href="/"]').forEach(a=>a.style.display='none')}</script><script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script><script>
 const $=id=>document.getElementById(id);const norm=s=>String(s??'').trim();const esc=s=>norm(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-$('run').onclick=async()=>{const file=$('file').files[0];if(!file)return $('msg').textContent='اختر الملف أولًا';if(!window.XLSX){$('msg').textContent='تعذر تحميل قارئ Excel، جارٍ تجربة مصدر بديل...';try{await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';s.onload=resolve;s.onerror=reject;document.head.appendChild(s)})}catch{}if(!window.XLSX)return $('msg').textContent='تعذر تحميل مكتبة Excel من المصدرين؛ تحقق من الاتصال ثم أعد المحاولة';}$('run').disabled=true;$('msg').textContent='جارٍ قراءة الكشف ومطابقة الطلبات...';try{const book=XLSX.read(await file.arrayBuffer(),{type:'array',raw:false});const sheet=book.Sheets[book.SheetNames[0]],data=XLSX.utils.sheet_to_json(sheet,{header:1,defval:''});const headerIndex=data.findIndex(row=>row.some(v=>norm(v)==='كود الشحنة')&&row.some(v=>norm(v)==='رقم الهاتف'));if(headerIndex<0)throw Error('لم أجد أعمدة Cargo Box المطلوبة');const headers=data[headerIndex].map(norm);const get=(r,k)=>r[headers.indexOf(k)];const rows=data.slice(headerIndex+1).filter(r=>norm(get(r,'كود الشحنة'))).map(r=>({shipment_code:get(r,'كود الشحنة'),phone:get(r,'رقم الهاتف'),area:get(r,'المنطقة'),city:get(r,'المدينة'),status:get(r,'حالة الشحنة'),return_status:get(r,'حالة الإرجاع')}));const response=await fetch('/api/cargo-returns-preview',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+localStorage.getItem('corvex_token')},body:JSON.stringify({rows})});const d=await response.json();if(!response.ok)throw Error((d.error||'فشل الفحص')+(d.detail?' — '+d.detail:''));$('msg').textContent='تم فحص '+d.summary.total+' شحنة — مطابق: '+d.summary.matched+' — بحاجة مراجعة: '+d.summary.review+'. لم يتم تعديل الجرد.';window.cargoRows=d.rows;$('result').innerHTML='<table><thead><tr><th>كود الشحنة</th><th>الهاتف</th><th>المنطقة</th><th>نتيجة المطابقة</th><th>طلب كورفكس</th><th>الموديل والكمية</th><th>إرسال المرتجع</th><th>ملاحظة</th><th>استلام المستودع</th></tr></thead><tbody>'+d.rows.map(r=>'<tr><td>'+esc(r.shipment_code)+'</td><td>'+esc(r.phone)+'</td><td>'+esc(r.area)+'</td><td>'+esc(({matched:'مطابق',unmatched:'غير مطابق',ambiguous:'عدة طلبات',review_model:'راجع الموديل',ignored:'غير ملغي',invalid:'بيانات ناقصة'})[r.status]||r.status)+'</td><td>'+esc(r.order_code||((r.candidate_codes||[]).join(', ')))+'</td><td>'+esc((r.items||[]).map(i=>i.model_name+' × '+i.quantity).join('، '))+'</td><td>'+esc(r.return_status)+'</td><td>'+esc(r.reason)+'</td><td>'+(r.status==='matched'?'<button class="receive" data-code="'+esc(r.shipment_code)+'" data-id="'+Number(r.order_id)+'">تأكيد استلام المرتجع</button>':'—')+'</td></tr>').join('')+'</tbody></table>'}catch(e){$('msg').textContent='تعذر الفحص: '+e.message}finally{$('run').disabled=false}};
+$('run').onclick=async()=>{const file=$('file').files[0];if(!file)return $('msg').textContent='اختر الملف أولًا';if(!window.XLSX){$('msg').textContent='تعذر تحميل قارئ Excel، جارٍ تجربة مصدر بديل...';try{await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';s.onload=resolve;s.onerror=reject;document.head.appendChild(s)})}catch{}if(!window.XLSX)return $('msg').textContent='تعذر تحميل مكتبة Excel من المصدرين؛ تحقق من الاتصال ثم أعد المحاولة';}$('run').disabled=true;$('msg').textContent='جارٍ قراءة الكشف ومطابقة الطلبات...';try{const book=XLSX.read(await file.arrayBuffer(),{type:'array',raw:false});const sheet=book.Sheets[book.SheetNames[0]],data=XLSX.utils.sheet_to_json(sheet,{header:1,defval:''});const headerIndex=data.findIndex(row=>row.some(v=>norm(v)==='كود الشحنة')&&row.some(v=>norm(v)==='رقم الهاتف'));if(headerIndex<0)throw Error('لم أجد أعمدة Cargo Box المطلوبة');const headers=data[headerIndex].map(norm);const get=(r,k)=>r[headers.indexOf(k)];const rows=data.slice(headerIndex+1).filter(r=>norm(get(r,'كود الشحنة'))).map(r=>({shipment_code:get(r,'كود الشحنة'),phone:get(r,'رقم الهاتف'),area:get(r,'المنطقة'),city:get(r,'المدينة'),status:get(r,'حالة الشحنة'),return_status:get(r,'حالة الإرجاع')}));const response=await fetch('/api/cargo-returns-preview',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+localStorage.getItem('corvex_token')},body:JSON.stringify({rows})});const d=await response.json();if(!response.ok)throw Error((d.error||'فشل الفحص')+(d.detail?' — '+d.detail:''));$('msg').textContent='تم فحص '+d.summary.total+' شحنة — مطابق: '+d.summary.matched+' — بحاجة مراجعة: '+d.summary.review+'. لم يتم تعديل الجرد.';window.cargoRows=d.rows;
+const statusLabel={matched:'مطابق',unmatched:'غير مطابق',ambiguous:'عدة طلبات',review_model:'راجع الموديل',ignored:'غير ملغي',invalid:'بيانات ناقصة'};
+const summaryHtml='<div class="return-summary"><div><span>إجمالي الشحنات</span><b>'+Number(d.summary.total||0)+'</b></div><div><span>مطابق</span><b>'+Number(d.summary.matched||0)+'</b></div><div><span>بحاجة مراجعة</span><b>'+Number(d.summary.review||0)+'</b></div></div>';
+const mobileHtml='<div class="mobile-return-list">'+d.rows.map(r=>'<article class="return-shipment"><div class="return-shipment-head"><strong>شحنة '+esc(r.shipment_code)+'</strong><span class="return-status '+(r.status==='matched'?'matched':'')+'">'+esc(statusLabel[r.status]||r.status)+'</span></div>'+
+'<div class="return-detail"><span>رقم الهاتف</span><b>'+esc(r.phone||'—')+'</b></div>'+
+'<div class="return-detail"><span>المنطقة</span><b>'+esc(r.area||'—')+'</b></div>'+
+'<div class="return-detail"><span>رقم الطلب</span><b>'+esc(r.order_code||(r.candidate_codes||[]).join('، ')||'—')+'</b></div>'+
+'<div class="return-detail"><span>الموديل والكمية</span><b>'+esc((r.items||[]).map(i=>i.model_name+' × '+i.quantity).join('، ')||'—')+'</b></div>'+
+'<div class="return-detail"><span>حالة الإرجاع</span><b>'+esc(r.return_status||'—')+'</b></div>'+
+(r.reason?'<div class="return-detail"><span>الملاحظة</span><b>'+esc(r.reason)+'</b></div>':'')+
+(r.status==='matched'?'<button class="receive" data-code="'+esc(r.shipment_code)+'" data-id="'+Number(r.order_id)+'">تأكيد استلام المرتجع</button>':'')+'</article>').join('')+'</div>';
+$('result').innerHTML=summaryHtml+mobileHtml+'<table><thead><tr><th>كود الشحنة</th><th>الهاتف</th><th>المنطقة</th><th>نتيجة المطابقة</th><th>طلب كورفكس</th><th>الموديل والكمية</th><th>إرسال المرتجع</th><th>ملاحظة</th><th>استلام المستودع</th></tr></thead><tbody>'+d.rows.map(r=>'<tr><td>'+esc(r.shipment_code)+'</td><td>'+esc(r.phone)+'</td><td>'+esc(r.area)+'</td><td>'+esc(({matched:'مطابق',unmatched:'غير مطابق',ambiguous:'عدة طلبات',review_model:'راجع الموديل',ignored:'غير ملغي',invalid:'بيانات ناقصة'})[r.status]||r.status)+'</td><td>'+esc(r.order_code||((r.candidate_codes||[]).join(', ')))+'</td><td>'+esc((r.items||[]).map(i=>i.model_name+' × '+i.quantity).join('، '))+'</td><td>'+esc(r.return_status)+'</td><td>'+esc(r.reason)+'</td><td>'+(r.status==='matched'?'<button class="receive" data-code="'+esc(r.shipment_code)+'" data-id="'+Number(r.order_id)+'">تأكيد استلام المرتجع</button>':'—')+'</td></tr>').join('')+'</tbody></table>'}catch(e){$('msg').textContent='تعذر الفحص: '+e.message}finally{$('run').disabled=false}};
 document.getElementById('result').addEventListener('click',async event=>{
  const button=event.target.closest('button.receive');if(!button)return;
  const code=button.dataset.code,id=Number(button.dataset.id);
@@ -35,7 +77,7 @@ document.getElementById('result').addEventListener('click',async event=>{
   const response=await fetch('/api/cargo-return-receipt',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+localStorage.getItem('corvex_token')},body:JSON.stringify({shipment_code:code,order_id:id,items:items.map(x=>({model_id:x.model_id,quantity:x.quantity}))})});
   const data=await response.json();
   if(!response.ok)throw Error(data.error||'فشل تأكيد الاستلام');
-  button.textContent='تم الاستلام ✓';row.received=true;alert('تم استلام المرتجع وإضافة القطع للجرد');
+  document.querySelectorAll('button.receive').forEach(b=>{if(b.dataset.code===code&&Number(b.dataset.id)===id){b.disabled=true;b.textContent='تم الاستلام ✓'}});row.received=true;alert('تم استلام المرتجع وإضافة القطع للجرد');
  }catch(error){alert(error.message);button.disabled=false}
 });
 </script></body></html>
