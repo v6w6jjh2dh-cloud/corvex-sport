@@ -34,7 +34,7 @@ export async function onRequest({request,env}){
    const rows=(await env.DB.prepare(`SELECT id,order_code,delivery_status,raw_text,order_notes,cost_of_goods,settlement_note FROM orders WHERE ${condition} AND delivery_status IN ('delivered','delivered_adjusted','partial')`).bind(...params).all()).results||[];
    let updated=0,skipped=0;const skipped_orders=[];
    for(const order of rows){
-    if(order.delivery_status!=='delivered'||/\[MANUAL_COST:/i.test(String(order.settlement_note||''))){skipped++;skipped_orders.push(order.order_code);continue}
+    if(order.delivery_status!=='delivered'||Number(order.cost_of_goods)>0||/\[MANUAL_COST:/i.test(String(order.settlement_note||''))){skipped++;skipped_orders.push(order.order_code);continue}
     const result=await calculateFromText(env,order);
     if(!result){skipped++;skipped_orders.push(order.order_code);continue}
     const change=await env.DB.prepare("UPDATE orders SET cost_of_goods=?,settlement_note=COALESCE(settlement_note,'') || ?,updated_at=datetime('now') WHERE id=? AND delivery_status='delivered' AND COALESCE(settlement_note,'') NOT LIKE '%[MANUAL_COST:%'").bind(result.cost,' [AUTO_COST:V1]',order.id).run();
@@ -77,17 +77,34 @@ export async function onRequest({request,env}){
   const isPartial=status==='partial'||status==='delivered_adjusted';
   const isDelivered=deliveredStatuses.has(status);
   const reviewed=!isPartial||(Number(o.delivery_company_settlement_id||0)>0&&Number(o.profit_reviewed_settlement_id||0)===Number(o.delivery_company_settlement_id));
+  const items=itemMap.get(Number(o.id))||[];
+  const itemQuantity=items.reduce((n,x)=>n+Number(x.quantity||0),0);
+  const storedCost=Number(o.cost_of_goods);
+  const hasStoredCost=Number.isFinite(storedCost)&&storedCost>0;
+  const itemCostValid=items.length>0&&items.every(i=>i.unit_cost!==null&&Number(i.quantity)>0&&Number.isFinite(Number(i.total_cost)));
+  const derivedCost=itemCostValid?Math.round(items.reduce((n,i)=>n+Number(i.total_cost),0)*100)/100:null;
+  // Preserve the original per-piece cost already saved on orders. Historical
+  // inventory rows were never backfilled and must not suppress valid saved costs.
+  const resolvedCost=!isPartial?(hasStoredCost?storedCost:derivedCost):(reviewed&&hasStoredCost?storedCost:null);
+  const costKnown=resolvedCost!==null&&Number.isFinite(resolvedCost);
   let profit=null;
-  if(isDelivered){delivered++;if(isPartial)partial++;if(reviewed){const amount=Number(o.delivered_amount||0);const mappedItems=itemMap.get(Number(o.id))||[];const costComplete=mappedItems.length>0&&mappedItems.every(i=>i.unit_cost!==null)&&mappedItems.every(i=>i.quantity>0)&&!isPartial;const cost=costComplete?Math.round(mappedItems.reduce((n,i)=>n+i.total_cost,0)*100)/100 :(/\[AUTO_COST:V1\]/.test(String(o.settlement_note||''))?Number(o.cost_of_goods):null);const fee=Number(o.delivery_fee||0);const actualCash=Number(o.cash_collected||0);const difference=Math.round((actualCash-(amount-fee))*100)/100;if(Math.abs(difference)>=.01){cashMismatchOrders++;cashDiscrepancy+=difference}sales+=amount;cash+=actualCash;if(cost!==null)costs+=cost;fees+=fee;profit=cost!==null?actualCash-cost:null}else unreviewed++}
-  else if(status==='refused_fee_paid'&&Number(o.delivery_company_settled||0)){refusedWithFee++;returned++}
+  if(isDelivered){
+   delivered++;if(isPartial)partial++;
+   if(reviewed){
+    const amount=Number(o.delivered_amount||0),fee=Number(o.delivery_fee||0),actualCash=Number(o.cash_collected||0);
+    const difference=Math.round((actualCash-(amount-fee))*100)/100;
+    if(Math.abs(difference)>=.01){cashMismatchOrders++;cashDiscrepancy+=difference}
+    sales+=amount;cash+=actualCash;fees+=fee;
+    if(costKnown){costs+=resolvedCost;profit=Math.round((actualCash-resolvedCost)*100)/100}
+   }else unreviewed++;
+   if(!costKnown||!reviewed)costReviewCount++;
+   totalDeliveredPieces+=itemQuantity;
+  }else if(status==='refused_fee_paid'&&Number(o.delivery_company_settled||0)){refusedWithFee++;returned++}
   else if(status==='refused_no_fee'&&Number(o.delivery_company_settled||0)){noReplyAfterArrival++;returned++}
   else if(status==='returned'||status==='canceled_before_arrival'||status.startsWith('refused'))otherReturns++;
   else if(status==='pending')pending++;
   else other++;
-  const items=itemMap.get(Number(o.id))||[];
-  const itemQuantity=items.reduce((n,x)=>n+x.quantity,0);
-  if(isDelivered){totalDeliveredPieces+=itemQuantity;if((items.length===0||items.some(i=>i.unit_cost===null||i.quantity<=0))&&!/\[AUTO_COST:V1\]/.test(String(o.settlement_note||''))||isPartial)costReviewCount++}
-  return {id:o.id,order_code:o.order_code,items,item_quantity:itemQuantity,cost_of_goods:Number(o.cost_of_goods||0),calculated_cost:items.length&&items.every(i=>i.unit_cost!==null)&&!isPartial?Math.round(items.reduce((n,i)=>n+i.total_cost,0)*100)/100:null,cost_needs_review:isDelivered&&(items.length===0||items.some(i=>i.unit_cost===null||i.quantity<=0)||(isPartial&&(!reviewed||Number(o.cost_of_goods||0)<=0))),statement_code:o.statement_code||null,statement_source:o.statement_source||null,statement_amount:o.statement_amount==null?null:Number(o.statement_amount),statement_status:o.statement_status||null,statement_match_type:o.statement_match_type||null,status,settled:Boolean(Number(o.delivery_company_settled||0)),reviewed,profit,cash:isDelivered&&reviewed?Number(o.cash_collected||0):null,amount:isDelivered&&reviewed?Number(o.delivered_amount||0):null,fee:isDelivered&&reviewed?Number(o.delivery_fee||0):null,cash_difference:isDelivered&&reviewed?Math.round((Number(o.cash_collected||0)-(Number(o.delivered_amount||0)-Number(o.delivery_fee||0)))*100)/100:null};
+  return {id:o.id,order_code:o.order_code,items,item_quantity:itemQuantity,cost_of_goods:Number(o.cost_of_goods||0),calculated_cost:resolvedCost,cost_needs_review:isDelivered&&(!costKnown||!reviewed),statement_code:o.statement_code||null,statement_source:o.statement_source||null,statement_amount:o.statement_amount==null?null:Number(o.statement_amount),statement_status:o.statement_status||null,statement_match_type:o.statement_match_type||null,status,settled:Boolean(Number(o.delivery_company_settled||0)),reviewed,profit,cash:isDelivered&&reviewed?Number(o.cash_collected||0):null,amount:isDelivered&&reviewed?Number(o.delivered_amount||0):null,fee:isDelivered&&reviewed?Number(o.delivery_fee||0):null,cash_difference:isDelivered&&reviewed?Math.round((Number(o.cash_collected||0)-(Number(o.delivered_amount||0)-Number(o.delivery_fee||0)))*100)/100:null};
  });
  const spend=(await env.DB.prepare("SELECT amount FROM shipping_cohort_ad_spend WHERE date=? AND store_id=?").bind(date,store).first())?.amount||0;
  return json({model_costs:MODEL_COSTS,costs_verified:costReviewCount===0,date,store_id:store,total:orders.length,delivered,partial,returned,refused_with_fee:refusedWithFee,no_reply_after_arrival:noReplyAfterArrival,other_returns:otherReturns,pending,other,unreviewed,cost_review_count:costReviewCount,delivered_pieces_mapped:totalDeliveredPieces,sales,cash,costs,fees,cash_difference:Math.round(cashDiscrepancy*100)/100,cash_mismatch_orders:cashMismatchOrders,gross_profit:costReviewCount?null:Math.round((cash-costs)*100)/100,ad_spend:Number(spend),net_after_ads:costReviewCount?null:Math.round((cash-costs-Number(spend))*100)/100,complete:pending===0&&other===0&&unreviewed===0&&otherReturns===0,orders:details});
