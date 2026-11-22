@@ -1,0 +1,45 @@
+import {ensureInventorySchema,classifyInventoryItems,loadInventoryModels} from './_inventory.js';
+const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
+export async function onRequest({request,env}){
+ const token=(request.headers.get('authorization')||'').replace(/^Bearer /,'');
+ const user=token&&await env.DB.prepare("SELECT u.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>datetime('now') AND u.is_active=1 AND u.role='admin'").bind(token).first();
+ if(!user)return json({error:'صلاحية المدير مطلوبة'},403);
+ await ensureInventorySchema(env);
+ await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cargo_return_receipts(
+ shipment_code TEXT PRIMARY KEY,order_id INTEGER NOT NULL,received_by INTEGER NOT NULL,
+ received_at TEXT NOT NULL DEFAULT(datetime('now')),items_json TEXT NOT NULL)`).run();
+ if(request.method==='GET'){
+  const rows=(await env.DB.prepare('SELECT shipment_code,order_id,received_at,items_json FROM cargo_return_receipts ORDER BY received_at DESC LIMIT 500').all()).results||[];
+  return json({receipts:rows});
+ }
+ if(request.method!=='POST')return json({error:'طريقة غير مدعومة'},405);
+ const b=await request.json().catch(()=>({})),code=String(b.shipment_code||'').trim().slice(0,80),orderId=Number(b.order_id||0);
+ if(!code||!Number.isInteger(orderId)||orderId<1)return json({error:'بيانات الشحنة أو الطلب غير صحيحة'},400);
+ const existing=await env.DB.prepare('SELECT shipment_code FROM cargo_return_receipts WHERE shipment_code=?').bind(code).first();
+ if(existing)return json({error:'تم استلام هذه الشحنة سابقًا، لا يمكن إضافتها مرتين'},409);
+ const order=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(orderId).first();
+ if(!order||!order.first_printed_at)return json({error:'الطلب غير موجود أو لم تُطبع بوليصته'},422);
+ const models=await loadInventoryModels(env);
+ const parsed=await classifyInventoryItems(env,order.raw_text||order.order_notes||'',models);
+ if(!parsed.length)return json({error:'لم يتم التعرف على موديل الطلب؛ يلزم مراجعة يدوية'},422);
+ const allocated=(await env.DB.prepare('SELECT model_id,quantity FROM inventory_order_items WHERE order_id=?').bind(orderId).all()).results||[];
+ if(!allocated.length)return json({error:'لا يوجد خصم مسجل لهذا الطلب في الجرد؛ لا يمكن إرجاعه تلقائيًا'},422);
+ const returned=(await env.DB.prepare('SELECT items_json FROM cargo_return_receipts WHERE order_id=?').bind(orderId).all()).results||[];
+ const already=new Map();
+ for(const row of returned){let items=[];try{items=JSON.parse(row.items_json)}catch{}for(const i of items)already.set(Number(i.model_id),(already.get(Number(i.model_id))||0)+Number(i.quantity||0))}
+ const allocation=new Map(allocated.map(x=>[Number(x.model_id),Number(x.quantity)]));
+ const items=Array.isArray(b.items)?b.items.map(x=>({model_id:Number(x.model_id),quantity:Number(x.quantity)})):[];
+ if(!items.length||items.some(x=>!Number.isInteger(x.model_id)||!Number.isInteger(x.quantity)||x.quantity<1)||new Set(items.map(x=>x.model_id)).size!==items.length)return json({error:'حدد كميات مرتجع صحيحة'},422);
+ for(const item of items)if(!allocation.has(item.model_id)||item.quantity+(already.get(item.model_id)||0)>allocation.get(item.model_id))return json({error:'كمية المرتجع تتجاوز الكمية المخصومة لهذا الطلب'},422);
+ const statements=[env.DB.prepare('INSERT INTO cargo_return_receipts(shipment_code,order_id,received_by,items_json) VALUES(?,?,?,?)').bind(code,orderId,user.id,JSON.stringify(items))];
+ for(const item of items){
+  statements.push(env.DB.prepare('INSERT OR IGNORE INTO inventory_balances(model_id,quantity,updated_by) VALUES(?,0,?)').bind(item.model_id,user.id));
+  statements.push(env.DB.prepare("UPDATE inventory_balances SET quantity=quantity+?,updated_by=?,updated_at=datetime('now') WHERE model_id=?").bind(item.quantity,user.id,item.model_id));
+  statements.push(env.DB.prepare("INSERT INTO inventory_movements(model_id,order_id,quantity_delta,movement_type,note,created_by) VALUES(?,?,?,'cargo_return',?,?)").bind(item.model_id,orderId,item.quantity,'استلام مرتجع Cargo Box '+code,user.id));
+ }
+ try{await env.DB.batch(statements)}catch(error){
+  if(/UNIQUE|constraint/i.test(String(error)))return json({error:'المرتجع مسجل سابقًا'},409);
+  throw error;
+ }
+ return json({ok:true,shipment_code:code,items});
+}
