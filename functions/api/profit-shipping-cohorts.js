@@ -10,7 +10,7 @@ const FALLBACK_MODELS=[
  {id:-4,name:'مالئ الفراغات',aliases:['مالئ الفراغات','مالى الفراغات','ملي الفراغات','مالئ فراغات']}
 ].map(m=>({...m,aliases:m.aliases.map(normalizedName)}));
 async function calculateFromText(env,order){
- const raw=String(order.raw_text||order.order_notes||'').trim();
+ const raw=[order.raw_text,order.order_notes].filter(Boolean).join('\n').trim();
  if(!raw)return null;
  const matches=await classifyInventoryItems(env,raw,FALLBACK_MODELS);
  if(!matches.length||matches.some(x=>!Number.isSafeInteger(x.quantity)||x.quantity<1||x.quantity>50))return null;
@@ -64,7 +64,7 @@ export async function onRequest({request,env}){
  // original order text without changing inventory or historical allocations.
  for(const o of orders){
   if((itemMap.get(Number(o.id))||[]).length&&itemMap.get(Number(o.id)).every(i=>i.unit_cost!==null&&i.quantity>0))continue;
-  const raw=String(o.raw_text||o.order_notes||'');
+  const raw=[o.raw_text,o.order_notes].filter(Boolean).join('\n');
   if(!raw.trim())continue;
   const matches=await classifyInventoryItems(env,raw,FALLBACK_MODELS);
   const items=matches.map(x=>{const model=FALLBACK_MODELS.find(m=>m.id===x.model_id);const unit_cost=modelCost(model?.name);return{model_id:x.model_id,name:model?.name||'غير معروف',quantity:x.quantity,unit_cost,total_cost:unit_cost===null?null:Math.round(x.quantity*unit_cost*100)/100,source:'order_text'}});
@@ -78,7 +78,7 @@ export async function onRequest({request,env}){
   const isDelivered=deliveredStatuses.has(status);
   const reviewed=!isPartial||(Number(o.delivery_company_settlement_id||0)>0&&Number(o.profit_reviewed_settlement_id||0)===Number(o.delivery_company_settlement_id));
   let profit=null;
-  if(isDelivered){delivered++;if(isPartial)partial++;if(reviewed){const amount=Number(o.delivered_amount||0);const mappedItems=itemMap.get(Number(o.id))||[];const costComplete=mappedItems.length>0&&mappedItems.every(i=>i.unit_cost!==null)&&mappedItems.every(i=>i.quantity>0)&&!isPartial;const cost=costComplete?Math.round(mappedItems.reduce((n,i)=>n+i.total_cost,0)*100)/100 :(/\\[AUTO_COST:V1\\]/.test(String(o.settlement_note||''))?Number(o.cost_of_goods):null);const fee=Number(o.delivery_fee||0);const actualCash=Number(o.cash_collected||0);const difference=Math.round((actualCash-(amount-fee))*100)/100;if(Math.abs(difference)>=.01){cashMismatchOrders++;cashDiscrepancy+=difference}sales+=amount;cash+=actualCash;if(cost!==null)costs+=cost;fees+=fee;profit=cost!==null?actualCash-cost:null}else unreviewed++}
+  if(isDelivered){delivered++;if(isPartial)partial++;if(reviewed){const amount=Number(o.delivered_amount||0);const mappedItems=itemMap.get(Number(o.id))||[];const costComplete=mappedItems.length>0&&mappedItems.every(i=>i.unit_cost!==null)&&mappedItems.every(i=>i.quantity>0)&&!isPartial;const cost=costComplete?Math.round(mappedItems.reduce((n,i)=>n+i.total_cost,0)*100)/100 :(/\[AUTO_COST:V1\]/.test(String(o.settlement_note||''))?Number(o.cost_of_goods):null);const fee=Number(o.delivery_fee||0);const actualCash=Number(o.cash_collected||0);const difference=Math.round((actualCash-(amount-fee))*100)/100;if(Math.abs(difference)>=.01){cashMismatchOrders++;cashDiscrepancy+=difference}sales+=amount;cash+=actualCash;if(cost!==null)costs+=cost;fees+=fee;profit=cost!==null?actualCash-cost:null}else unreviewed++}
   else if(status==='refused_fee_paid'&&Number(o.delivery_company_settled||0)){refusedWithFee++;returned++}
   else if(status==='refused_no_fee'&&Number(o.delivery_company_settled||0)){noReplyAfterArrival++;returned++}
   else if(status==='returned'||status==='canceled_before_arrival'||status.startsWith('refused'))otherReturns++;
@@ -86,7 +86,7 @@ export async function onRequest({request,env}){
   else other++;
   const items=itemMap.get(Number(o.id))||[];
   const itemQuantity=items.reduce((n,x)=>n+x.quantity,0);
-  if(isDelivered){totalDeliveredPieces+=itemQuantity;if((items.length===0||items.some(i=>i.unit_cost===null||i.quantity<=0))&&!/\\[AUTO_COST:V1\\]/.test(String(o.settlement_note||''))||isPartial)costReviewCount++}
+  if(isDelivered){totalDeliveredPieces+=itemQuantity;if((items.length===0||items.some(i=>i.unit_cost===null||i.quantity<=0))&&!/\[AUTO_COST:V1\]/.test(String(o.settlement_note||''))||isPartial)costReviewCount++}
   return {id:o.id,order_code:o.order_code,items,item_quantity:itemQuantity,cost_of_goods:Number(o.cost_of_goods||0),calculated_cost:items.length&&items.every(i=>i.unit_cost!==null)&&!isPartial?Math.round(items.reduce((n,i)=>n+i.total_cost,0)*100)/100:null,cost_needs_review:isDelivered&&(items.length===0||items.some(i=>i.unit_cost===null||i.quantity<=0)||(isPartial&&(!reviewed||Number(o.cost_of_goods||0)<=0))),statement_code:o.statement_code||null,statement_source:o.statement_source||null,statement_amount:o.statement_amount==null?null:Number(o.statement_amount),statement_status:o.statement_status||null,statement_match_type:o.statement_match_type||null,status,settled:Boolean(Number(o.delivery_company_settled||0)),reviewed,profit,cash:isDelivered&&reviewed?Number(o.cash_collected||0):null,amount:isDelivered&&reviewed?Number(o.delivered_amount||0):null,fee:isDelivered&&reviewed?Number(o.delivery_fee||0):null,cash_difference:isDelivered&&reviewed?Math.round((Number(o.cash_collected||0)-(Number(o.delivered_amount||0)-Number(o.delivery_fee||0)))*100)/100:null};
  });
  const spend=(await env.DB.prepare("SELECT amount FROM shipping_cohort_ad_spend WHERE date=? AND store_id=?").bind(date,store).first())?.amount||0;
