@@ -1043,7 +1043,7 @@ function renderShell(){
           ${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}
           ${can('users')?'<button data-view="users">♟ المستخدمون</button>':''}
           ${can('permissions')?'<button data-view="permissions">⚙ الصلاحيات</button>':''}
-          ${can('returns')?'<button data-view="returns-center">↩ مركز المرتجعات</button>':''}
+          
         </nav>
       </aside>
       <main id="content" class="content"></main>
