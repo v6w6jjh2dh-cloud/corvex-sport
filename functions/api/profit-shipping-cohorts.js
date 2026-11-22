@@ -28,7 +28,7 @@ export async function onRequest({request,env}){
   const isDelivered=deliveredStatuses.has(status);
   const reviewed=!isPartial||(Number(o.delivery_company_settlement_id||0)>0&&Number(o.profit_reviewed_settlement_id||0)===Number(o.delivery_company_settlement_id));
   let profit=null;
-  if(isDelivered){delivered++;if(isPartial)partial++;if(reviewed){const amount=Number(o.delivered_amount||0);const cost=Number(o.cost_of_goods||0);const fee=Number(o.delivery_fee||0);sales+=amount;cash+=Number(o.cash_collected||0);costs+=cost;fees+=fee;profit=amount-cost-fee}else unreviewed++}
+  if(isDelivered){delivered++;if(isPartial)partial++;if(reviewed){const amount=Number(o.delivered_amount||0);const cost=Number(o.cost_of_goods||0);const fee=Number(o.delivery_fee||0);sales+=amount;cash+=Number(o.cash_collected||0);costs+=cost;fees+=fee;profit=Number(o.cash_collected||0)-cost}else unreviewed++}
   else if(status==='refused_fee_paid'&&Number(o.delivery_company_settled||0)){refusedWithFee++;returned++}
   else if(status==='refused_no_fee'&&Number(o.delivery_company_settled||0)){noReplyAfterArrival++;returned++}
   else if(status==='returned'||status==='canceled_before_arrival'||status.startsWith('refused'))otherReturns++;
@@ -37,5 +37,5 @@ export async function onRequest({request,env}){
   return {id:o.id,order_code:o.order_code,status,reviewed,profit};
  });
  const spend=(await env.DB.prepare("SELECT amount FROM shipping_cohort_ad_spend WHERE date=? AND store_id=?").bind(date,store).first())?.amount||0;
- return json({date,store_id:store,total:orders.length,delivered,partial,returned,refused_with_fee:refusedWithFee,no_reply_after_arrival:noReplyAfterArrival,other_returns:otherReturns,pending,other,unreviewed,sales,cash,costs,fees,gross_profit:sales-costs-fees,ad_spend:Number(spend),net_after_ads:sales-costs-fees-Number(spend),complete:pending===0&&other===0&&unreviewed===0&&otherReturns===0,orders:details});
+ return json({date,store_id:store,total:orders.length,delivered,partial,returned,refused_with_fee:refusedWithFee,no_reply_after_arrival:noReplyAfterArrival,other_returns:otherReturns,pending,other,unreviewed,sales,cash,costs,fees,gross_profit:cash-costs,ad_spend:Number(spend),net_after_ads:cash-costs-Number(spend),complete:pending===0&&other===0&&unreviewed===0&&otherReturns===0,orders:details});
 }
