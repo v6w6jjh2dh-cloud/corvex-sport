@@ -8,7 +8,7 @@ export async function onRequest({request,env}){
   if(me.role!=='admin')return json({error:'المدير فقط يستطيع حفظ الإعلان'},403);
   let b;try{b=await request.json()}catch{return json({error:'طلب غير صالح'},400)}
   date=b.date;store=Number(b.store_id||0);const amount=Number(b.ad_spend);
-  if(!validDate(date)||!Number.isSafeInteger(store)||store<0||!Number.isFinite(amount)||amount<0||amount>10000000)return json({error:'تاريخ أو مبلغ غير صالح'},400);
+  if(!validDate(date)||date<'2026-11-17'||!Number.isSafeInteger(store)||store<0||!Number.isFinite(amount)||amount<0||amount>10000000)return json({error:'تاريخ أو مبلغ غير صالح'},400);
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS shipping_cohort_ad_spend (date TEXT NOT NULL,store_id INTEGER NOT NULL,amount REAL NOT NULL DEFAULT 0,updated_at TEXT NOT NULL DEFAULT (datetime('now')),PRIMARY KEY(date,store_id))").run();
   await env.DB.prepare("INSERT INTO shipping_cohort_ad_spend(date,store_id,amount) VALUES(?,?,?) ON CONFLICT(date,store_id) DO UPDATE SET amount=excluded.amount,updated_at=datetime('now')").bind(date,store,amount).run();
   return json({ok:true});
