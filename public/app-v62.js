@@ -2491,6 +2491,25 @@ async function deliveryReconcileView(){
     if(new Set(selectedIds).size!==selectedIds.length)return toast('تم اختيار نفس الطلب لأكثر من سطر؛ راجع الأرقام المكررة');
     if(missingStatus.length)return toast('يوجد طلب مطابق بدون حالة معتمدة');
 
+    // Partial delivery requires exact delivered model quantities, not a guessed piece count.
+    for(const row of resolvable.filter(x=>x.status==='partial'||x.status==='delivered_adjusted')){
+      let info;
+      try{info=await api('/partial-delivery-items?order_id='+row.order_id)}catch(e){return toast('تعذر تحميل أصناف الطلب: '+e.message)}
+      const items=info.items||[];
+      if(!items.length)return toast('لم أتعرف على أصناف الطلب #'+info.order_code+'؛ راجع نص الطلب قبل تسكير الكشف');
+      const chosen=[];
+      for(const item of items){
+        const answer=prompt('تسليم جزئي للطلب #'+info.order_code+'\\n'+item.model_name+' — المشحون '+item.quantity+'\\nكم قطعة من هذا الموديل استلم الزبون؟',String(item.quantity));
+        if(answer===null)return toast('تم إلغاء تسكير الكشف لحين تحديد القطع المسلّمة');
+        const qty=Number(answer);
+        if(!Number.isInteger(qty)||qty<0||qty>item.quantity)return toast('الكمية غير صحيحة للطلب #'+info.order_code);
+        chosen.push({model_id:item.model_id,quantity:qty});
+      }
+      const shipped=items.reduce((n,x)=>n+x.quantity,0),delivered=chosen.reduce((n,x)=>n+x.quantity,0);
+      if(delivered<=0||delivered>=shipped)return toast('التسليم الجزئي يتطلب كمية مسلّمة أكبر من صفر وأقل من المشحون');
+      row.delivered_items=chosen;
+    }
+
     if(!confirm(`سيتم تحديث ${resolvable.length} طلب. هل تريد اعتماد وتسكير الكشف؟`))return;
 
     try{
