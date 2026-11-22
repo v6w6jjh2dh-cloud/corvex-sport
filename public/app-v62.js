@@ -1037,7 +1037,7 @@ function renderShell(){
 
           ${can('print')?'<button data-view="print">▣ جاهز للطباعة</button>':''}
           ${can('batches')?'<button data-view="batches">↻ دفعات الطباعة</button>':''}
-          ${state.user?.role==='admin'?'<button data-view="inventory">📦 المستودع والجرد</button>':''}${state.user?.role==='admin'?'<button data-view="cargo-returns">↩ المرتجعات</button>':''}
+          ${state.user?.role==='admin'?'<button data-view="inventory">📦 المستودع والجرد</button>':''}${state.user?.role==='admin'?'<button data-view="cargo-returns">↩ مطابقة المرتجعات</button>':''}
           ${can('profits')?'<button data-view="daily-profits">💰 الأرباح اليومية</button>':''}
           ${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}${can('delivery_reconcile')?'<button data-view="delivery-reconcile">⇄ تسوية شركة التوصيل</button>':''}
           ${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}
