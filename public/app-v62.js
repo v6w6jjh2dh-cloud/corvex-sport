@@ -1037,7 +1037,7 @@ function renderShell(){
 
           ${can('print')?'<button data-view="print">▣ جاهز للطباعة</button>':''}
           ${can('batches')?'<button data-view="batches">↻ دفعات الطباعة</button>':''}
-          ${state.user?.role==='admin'?'<button data-view="inventory">📦 المستودع والجرد</button>':''}${state.user?.role==='admin'?'<a href="/cargo-upload-v2.html" style="display:inline-block;padding:10px;color:inherit">📋 مطابقة مرتجعات Cargo Box</a>':''}
+          ${state.user?.role==='admin'?'<button data-view="inventory">📦 المستودع والجرد</button>':''}${state.user?.role==='admin'?'<button data-view="cargo-returns">↩ المرتجعات</button>':''}
           ${can('profits')?'<button data-view="daily-profits">💰 الأرباح اليومية</button>':''}
           ${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}${can('delivery_reconcile')?'<button data-view="delivery-reconcile">⇄ تسوية شركة التوصيل</button>':''}
           ${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}
@@ -1105,6 +1105,7 @@ async function show(v){
   if(v==='print')return printView();
   if(v==='batches')return batchesView();
   if(v==='inventory')return inventoryView();
+  if(v==='cargo-returns')return cargoReturnsView();
   if(v==='daily-profits')return dailyProfitsView();
   if(v==='reports')return reportsView();
   if(v==='delivery-reconcile')return deliveryReconcileView();
@@ -1116,6 +1117,12 @@ async function show(v){
   if(v==='permissions')return permissionsView();
   if(v==='users')return usersView();
   if(v==='returns-center')return returnsCenterView();
+}
+async function cargoReturnsView(){
+  const c=$('#content');
+  if(state.user?.role!=='admin'){c.innerHTML='<div class="empty">صلاحية مدير مطلوبة</div>';return}
+  c.innerHTML=`<div class="page-title"><div><h1>المرتجعات</h1><div class="sub">مطابقة كشف Cargo Box واستلام المرتجعات وربطها بالجرد</div></div></div>
+    <div class="card" style="padding:0;overflow:hidden"><iframe title="كشف مرتجعات Cargo Box" src="/cargo-upload-v2.html?embedded=1" style="width:100%;height:78vh;min-height:650px;border:0;display:block" loading="lazy"></iframe></div>`;
 }
 async function inventoryView(){
   const c=$('#content');
