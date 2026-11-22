@@ -1,6 +1,10 @@
 import {classifyInventoryItems} from './_inventory.js';
 const json=(x,status=200)=>new Response(JSON.stringify(x),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
-const MODEL_COSTS=[{name:'جاكيت فرو',cost:4},{name:'جاكيت جوخ كاجوال',cost:5.2},{name:'جاكيت جوخ سكايفو',cost:7.55},{name:'مالئ الفراغات',cost:1}];
+const MODEL_COSTS=[
+ {name:'جاكيت فرو',cost:4},{name:'جاكيت جوخ كاجوال',cost:5.2},{name:'جاكيت جوخ سكايفو',cost:7.55},{name:'مالئ الفراغات',cost:1},
+ {name:'بنطلون جيوب سحاب',cost:2.3},{name:'بنطلون رياضة سحاب',cost:2.7},{name:'بنطلون تركي',cost:2.7},{name:'بنطلون زرار',cost:2.2},{name:'بنطلون جيوب',cost:2.2},
+ {name:'تيشيرت سادة تريكو',cost:2.5},{name:'بجامة جاكار',cost:4.25},{name:'تيشيرت بولو',cost:3.5}
+];
 const normalizedName=x=>String(x||'').replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/\s+/g,' ').trim();
 const modelCost=name=>{const key=normalizedName(name);return MODEL_COSTS.find(m=>normalizedName(m.name)===key)?.cost??null};
 const FALLBACK_MODELS=[
@@ -8,6 +12,14 @@ const FALLBACK_MODELS=[
  {id:-2,name:'جاكيت جوخ كاجوال',aliases:['جاكيت جوخ كاجوال','جوخ كاجوال','جاكيت الجوخ الكاجوال']},
  {id:-3,name:'جاكيت جوخ سكايفو',aliases:['جاكيت جوخ سكايفو','جاكيت جوخ سكارفو','جاكيت الجوخ سكارفو','جوخ سكايفو','جوخ سكارفو']},
  {id:-4,name:'مالئ الفراغات',aliases:['مالئ الفراغات','مالى الفراغات','ملي الفراغات','مالئ فراغات']}
+ ,{id:-5,name:'بنطلون جيوب سحاب',aliases:['بنطلون جيوب سحاب','جيوب سحاب']},
+ {id:-6,name:'بنطلون رياضة سحاب',aliases:['بنطلون رياضة سحاب','بنطلون رياضه سحاب','رياضة سحاب']},
+ {id:-7,name:'بنطلون تركي',aliases:['بنطلون تركي']},
+ {id:-8,name:'بنطلون زرار',aliases:['بنطلون زرار']},
+ {id:-9,name:'بنطلون جيوب',aliases:['بنطلون جيوب']},
+ {id:-10,name:'تيشيرت سادة تريكو',aliases:['تيشيرت سادة تريكو','تيشيرت ساده تريكو']},
+ {id:-11,name:'بجامة جاكار',aliases:['بجامة جاكار','بجامه جاكار','ترينغ','تريننغ']},
+ {id:-12,name:'تيشيرت بولو',aliases:['تيشيرت بولو تريكو','بولو ترند','تيشيرت بولو','بولو']}
 ].map(m=>({...m,aliases:m.aliases.map(normalizedName)}));
 async function calculateFromText(env,order){
  const raw=String(order.order_notes||order.raw_text||'').trim();
