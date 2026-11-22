@@ -28,7 +28,7 @@ function orderSql(where){
   FROM orders o
   LEFT JOIN stores s ON s.id=o.store_id
   LEFT JOIN delivery_company_settlements ds ON ds.id=o.delivery_company_settlement_id
-  ${where} ORDER BY o.id DESC`;
+  ${where} AND date(COALESCE(o.first_printed_at,o.created_at),'+3 hours')>='2026-11-17' ORDER BY o.id DESC`;
 }
 
 function addByPhone(map,orders){
