@@ -2571,9 +2571,45 @@ async function dailyProfitsView(){
         <select id="profitStore" class="select"><option value="">كل المتاجر</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
         <button id="loadProfits" class="btn btn-primary">عرض</button>
       </div>
+      <div id="shippingCohort" class="card" style="margin:14px 0;padding:16px;border:1px solid #dbe4ed">
+        <h3>الأرباح المتراكمة حسب يوم خروج الشحنة</h3>
+        <div class="sub">يُحسب الطلب مرة واحدة بتاريخ أول طباعة للشحنة، حتى لو ظهر في كشف شركة التوصيل بعد أيام. الأرقام تتحدث مع تغيّر حالة الطلب.</div>
+        <div class="toolbar" style="margin:12px 0;flex-wrap:wrap">
+          <label>إعلانات هذا اليوم (د.أ) <input id="cohortAdSpend" type="number" min="0" step="0.01" class="input" inputmode="decimal" style="max-width:150px"></label>
+          <button id="saveCohortAds" type="button" class="btn btn-soft">حفظ الإعلانات</button>
+          <button id="reloadCohort" type="button" class="btn btn-primary">تحديث التقرير</button>
+        </div>
+        <div id="shippingCohortResult">اختر التاريخ واضغط عرض.</div>
+      </div>
       <div id="profitSummary"></div>
       <div id="profitOrders"></div>
     </div>`;
+
+  const loadShippingCohort=async()=>{
+    const target=$('#shippingCohortResult');if(!target)return;
+    const date=$('#profitDate').value,store=$('#profitStore').value||'0';
+    target.textContent='جاري حساب نتائج الشحنات...';
+    try{
+      const d=await api('/profit-shipping-cohorts?date='+encodeURIComponent(date)+'&store_id='+encodeURIComponent(store));
+      $('#cohortAdSpend').value=Number(d.ad_spend||0);
+      const summary=[['إجمالي الشحنات',d.total],['تم التسليم',d.delivered],['منها تسليم جزئي',d.partial],['مرتجع / مرفوض',d.returned],['قيد التوصيل',d.pending],['بحاجة مراجعة',d.unreviewed+d.other]];
+      target.innerHTML='<div class="accounting-stats" style="margin:12px 0">'+summary.map(([label,value])=>'<div><span>'+label+'</span><b>'+Number(value||0)+'</b></div>').join('')+'</div>'+
+      '<div class="accounting-stats" style="margin:12px 0">'+[['المبيعات المحصلة',d.sales],['كوست المستلم',d.costs],['أجور التوصيل',d.fees],['الربح قبل الإعلانات',d.gross_profit],['الإعلانات',d.ad_spend],['الربح بعد الإعلانات',d.net_after_ads]].map(([label,value])=>'<div><span>'+label+'</span><b>'+money(value)+' د.أ</b></div>').join('')+'</div>'+
+      (d.complete?'<div class="badge badge-ok">لا توجد طلبات معلقة أو كوست جزئي غير مراجع</div>':'<div class="partial-summary-warning">⚠ التقرير غير نهائي: يوجد طلبات قيد التوصيل أو بحاجة مراجعة. الربح الحالي لا يشمل كوست الطلبات الجزئية غير المعتمدة.</div>')+
+      '<details style="margin-top:12px"><summary>عرض الطلبات ('+d.orders.length+')</summary><div style="max-height:320px;overflow:auto">'+d.orders.map(o=>'<div style="padding:8px;border-bottom:1px solid #e5e9ee">#'+esc(o.order_code)+' — '+esc(({pending:'قيد التوصيل',delivered:'تم التسليم',partial:'تسليم جزئي',delivered_adjusted:'تسليم جزئي',returned:'مرتجع',refused_fee_paid:'مرفوض ودفع أجور',refused_no_fee:'مرفوض دون أجور',canceled_before_arrival:'ملغي قبل الوصول'})[o.status]||o.status)+(o.profit===null?'':' — '+money(o.profit)+' د.أ')+(o.reviewed?'':' — بحاجة مراجعة كوست')+'</div>').join('')+'</div></details>';
+    }catch(e){target.textContent='تعذر حساب التقرير: '+e.message}
+  };
+  $('#reloadCohort').onclick=loadShippingCohort;
+  $('#saveCohortAds').onclick=async()=>{
+    const button=$('#saveCohortAds'),amount=Number($('#cohortAdSpend').value);
+    if(!Number.isFinite(amount)||amount<0)return toast('أدخل مبلغ إعلانات صحيح');
+    button.disabled=true;
+    try{await api('/profit-shipping-cohorts',{method:'POST',body:JSON.stringify({date:$('#profitDate').value,store_id:Number($('#profitStore').value||0),ad_spend:amount})});await loadShippingCohort();toast('تم حفظ إعلانات اليوم')}
+    catch(e){toast(e.message)}finally{button.disabled=false}
+  };
+  $('#profitDate').addEventListener('change',loadShippingCohort);
+  $('#profitStore').addEventListener('change',loadShippingCohort);
+  loadShippingCohort();
 
   const recalc=()=>{
     const activeSettlementId=$('#profitOrders')?.dataset.activeSettlementId||window.CORVEX_ACTIVE_PROFIT_SETTLEMENT||'';
