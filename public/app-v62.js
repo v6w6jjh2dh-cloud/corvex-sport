@@ -2578,7 +2578,7 @@ async function dailyProfitsView(){
           <label>تاريخ خروج الشحنات <input id="cohortDate" type="date" class="input" value="${today}" style="min-width:160px;max-width:220px"></label>
           <label>إعلانات هذا اليوم (د.أ) <input id="cohortAdSpend" type="number" min="0" step="0.01" class="input" inputmode="decimal" style="max-width:150px"></label>
           <button id="saveCohortAds" type="button" class="btn btn-soft">حفظ الإعلانات</button>
-          <button id="reloadCohort" type="button" class="btn btn-primary">تحديث التقرير</button>
+          <button id="reloadCohort" type="button" class="btn btn-primary">تحديث التقرير</button>\n          <button id="recalcCohortCosts" type="button" class="btn btn-soft">إعادة حساب كوست الطلبات القديمة</button>
         </div>
         <div id="shippingCohortResult">اختر التاريخ واضغط عرض.</div>
       </div>
@@ -2604,6 +2604,15 @@ async function dailyProfitsView(){
     }catch(e){target.textContent='تعذر حساب التقرير: '+e.message}
   };
   $('#reloadCohort').onclick=loadShippingCohort;
+  $('#recalcCohortCosts').onclick=async()=>{
+    if(!confirm('إعادة حساب كوست الطلبات المسلّمة بالكامل من نصوصها؟ الطلبات الجزئية والكوست اليدوي لن تتغير.'))return;
+    const btn=$('#recalcCohortCosts');btn.disabled=true;
+    try{
+      const result=await api('/profit-shipping-cohorts',{method:'POST',body:JSON.stringify({action:'recalculate_delivered_costs',date:$('#cohortDate').value,store_id:Number($('#profitStore').value||0)})});
+      await loadShippingCohort();
+      toast('تم تحديث كوست '+result.updated+' طلب، وتعذّر تحديد أصناف '+result.skipped+' طلب');
+    }catch(e){toast(e.message)}finally{btn.disabled=false}
+  };
   $('#cohortDate').addEventListener('change',loadShippingCohort);
   $('#saveCohortAds').onclick=async()=>{
     const button=$('#saveCohortAds'),amount=Number($('#cohortAdSpend').value);
