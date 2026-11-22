@@ -1037,9 +1037,11 @@ function renderShell(){
 
           ${can('print')?'<button data-view="print">▣ جاهز للطباعة</button>':''}
           ${can('batches')?'<button data-view="batches">↻ دفعات الطباعة</button>':''}
-          ${state.user?.role==='admin'?'<button data-view="inventory">📦 المستودع والجرد</button>':''}${state.user?.role==='admin'?'<button data-view="cargo-returns">↩ مطابقة المرتجعات</button>':''}
+          ${state.user?.role==='admin'?'<button data-view="inventory">📦 المستودع والجرد</button>':''}
           ${can('profits')?'<button data-view="daily-profits">💰 الأرباح اليومية</button>':''}
-          ${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}${can('delivery_reconcile')?'<button data-view="delivery-reconcile">⇄ تسوية شركة التوصيل</button>':''}
+          ${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}
+          ${can('delivery_reconcile')?'<button data-view="delivery-reconcile">⇄ تسكير كشف شركة التوصيل</button>':''}
+          ${state.user?.role==='admin'?'<button data-view="cargo-returns">↩ تسكير المرتجع</button>':''}
           ${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}
           ${can('users')?'<button data-view="users">♟ المستخدمون</button>':''}
           ${can('permissions')?'<button data-view="permissions">⚙ الصلاحيات</button>':''}
