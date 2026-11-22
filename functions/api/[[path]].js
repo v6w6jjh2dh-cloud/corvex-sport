@@ -511,7 +511,10 @@ async function listOrders(url, env) {
   const params = [];
   const where = [];
 
-  if(dateBasis==='settled')await ensureSettlementDateColumn(env);
+  if(dateBasis==='settled'){
+    await ensureSettlementDateColumn(env);
+    where.push("date(COALESCE(o.first_printed_at,o.created_at),'+3 hours')>='2026-11-17'");
+  }
 
   if (q) {
     where.push('(CAST(o.order_code AS TEXT) LIKE ? OR o.phone LIKE ? OR o.recipient_name LIKE ? OR o.detailed_address LIKE ?)');
