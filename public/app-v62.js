@@ -1041,7 +1041,7 @@ function renderShell(){
           ${can('profits')?'<button data-view="daily-profits">💰 الأرباح اليومية</button>':''}
           ${can('reports')?'<button data-view="reports">▦ الكشوفات وExcel</button>':''}
           ${can('delivery_reconcile')?'<button data-view="delivery-reconcile">⇄ تسكير كشف شركة التوصيل</button>':''}
-          ${state.user?.role==='admin'?'<button data-view="cargo-returns">↩ تسكير المرتجع</button>':''}
+          ${state.user?.role==='admin'?'<button data-view="cargo-returns">↩ تسكير كشف المرتجع</button>':''}
           ${can('regions')?'<button data-view="regions">⌖ المناطق</button>':''}
           ${can('users')?'<button data-view="users">♟ المستخدمون</button>':''}
           ${can('permissions')?'<button data-view="permissions">⚙ الصلاحيات</button>':''}
@@ -1121,7 +1121,7 @@ async function show(v){
 async function cargoReturnsView(){
   const c=$('#content');
   if(state.user?.role!=='admin'){c.innerHTML='<div class="empty">صلاحية مدير مطلوبة</div>';return}
-  c.innerHTML=`<div class="page-title"><div><h1>المرتجعات</h1><div class="sub">مطابقة كشف Cargo Box واستلام المرتجعات وربطها بالجرد</div></div></div>
+  c.innerHTML=`<div class="page-title"><div><h1>تسكير كشف المرتجع</h1><div class="sub">مطابقة كشف Cargo Box واستلام المرتجعات وربطها بالجرد</div></div></div>
     <div class="card" style="padding:0;overflow:hidden"><iframe title="كشف مرتجعات Cargo Box" src="/cargo-upload-v2.html?embedded=1" style="width:100%;height:78vh;min-height:650px;border:0;display:block" loading="lazy"></iframe></div>`;
 }
 async function inventoryView(){
