@@ -15,6 +15,12 @@ async function auth(request,env){
  return env.DB.prepare(`SELECT u.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>datetime('now') AND u.is_active=1`).bind(token).first();
 }
 
+function noteOrderCodes(note=''){
+ const text=String(note||'').replace(/\s+/g,' ');
+ const codes=[...text.matchAll(/(?:ORD\s*[-:]\s*|(?:رقم\s*)?الطلب\s*[:：]\s*)([a-z0-9-]{7,50})/gi)].map(m=>m[1].replace(/^-+/,'').toLowerCase());
+ return [...new Set(codes)];
+}
+function normalizeCode(code=''){return String(code||'').trim().toLowerCase().replace(/^ord[-:\s]*/,'').replace(/[^a-z0-9]/g,'')}
 function dayDiff(a,b){
  if(!a||!b)return 999;
  return Math.abs((new Date(a+'T00:00:00Z')-new Date(b+'T00:00:00Z'))/86400000);
@@ -71,7 +77,7 @@ export async function onRequestPost({request,env}){
   const row=rows[index]||{},phone=normalizePhone(row.phone),amount=Math.max(0,Number(row.amount||0));
   const deliveryFee=Math.max(0,Number(row.delivery_fee||0)),hasNet=Boolean(row.has_net),netAmount=hasNet?Number(row.net_amount||0):amount-deliveryFee,shipmentDate=String(row.shipment_date||'').trim(),status=String(row.status||'');
   const all=phone?(activeByPhone.get(phone)||[]):[],available=all.filter(order=>!used.has(Number(order.id)));
-  const common={row_index:index+1,phone,shipment_date:shipmentDate,status,amount,delivery_fee:deliveryFee,net_amount:netAmount,has_net:hasNet,note:String(row.note||'')};
+  const common={row_index:index+1,phone,shipment_date:shipmentDate,status,amount,delivery_fee:deliveryFee,net_amount:netAmount,has_net:hasNet,note:String(row.note||''),shipment_code:String(row.shipment_code||'')};
 
   if(!phone){unmatched++;result.push({...common,match_type:'unmatched',candidates:[]});continue}
   if(all.length&&!available.length){duplicate++;result.push({...common,match_type:'duplicate',candidates:all});continue}
@@ -83,6 +89,24 @@ export async function onRequestPost({request,env}){
    unmatched++;result.push({...common,match_type:'unmatched',candidates:[]});continue
   }
 
+  // Strong identifier in Cargo Box's detailed notes takes precedence over phone/amount.
+  // Conflicting identifiers never trigger an automatic settlement.
+  const codes=noteOrderCodes(row.note);
+  if(codes.length){
+   const byCode=available.filter(o=>codes.some(code=>normalizeCode(code)===normalizeCode(o.order_code)));
+   if(byCode.length===1){
+    const candidate=byCode[0];
+    if(amount>Math.abs(Number(candidate.amount||0))+.001 && !['refused_fee_paid','refused_no_fee','canceled_before_arrival'].includes(status)){
+     review++;result.push({...common,match_type:'review_amount_higher',candidates:[candidate],reason:'رقم الطلب مطابق لكن المبلغ أعلى من الطلب'});continue;
+    }
+    used.add(Number(candidate.id));matched++;
+    result.push({...common,match_type:amount>0&&amount<Math.abs(Number(candidate.amount||0))-.001?'matched_partial':'matched',order:candidate,order_id:candidate.id,candidates:[candidate],match_evidence:'رقم الطلب في تفاصيل شركة التوصيل'});
+    continue;
+   }
+   if(byCode.length>1||!byCode.length){
+    review++;result.push({...common,match_type:'review_amount',candidates:available,reason:'رقم الطلب في ملاحظة شركة التوصيل لا يطابق طلبًا واحدًا لهذا الهاتف — مراجعة مطلوبة'});continue;
+   }
+  }
   const nearDate=orders=>orders.filter(order=>dayDiff(shipmentDate,order.first_print_date)<=3||dayDiff(shipmentDate,order.delivery_date)<=3);
   const exact=amount>0?available.filter(order=>Math.abs(Math.abs(Number(order.amount||0))-amount)<.01):[];
   const returnStatus=['refused_fee_paid','refused_no_fee','canceled_before_arrival'].includes(status);
