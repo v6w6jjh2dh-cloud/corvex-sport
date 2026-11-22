@@ -54,7 +54,7 @@ const selectedOrders={};const $=id=>document.getElementById(id);const norm=s=>St
 $('run').onclick=async()=>{const file=$('file').files[0];if(!file)return $('msg').textContent='اختر الملف أولًا';if(!window.XLSX){$('msg').textContent='تعذر تحميل قارئ Excel، جارٍ تجربة مصدر بديل...';try{await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';s.onload=resolve;s.onerror=reject;document.head.appendChild(s)})}catch{}if(!window.XLSX)return $('msg').textContent='تعذر تحميل مكتبة Excel من المصدرين؛ تحقق من الاتصال ثم أعد المحاولة';}$('run').disabled=true;$('msg').textContent='جارٍ قراءة الكشف ومطابقة الطلبات...';try{const book=XLSX.read(await file.arrayBuffer(),{type:'array',raw:false});const sheet=book.Sheets[book.SheetNames[0]],data=XLSX.utils.sheet_to_json(sheet,{header:1,defval:''});const headerIndex=data.findIndex(row=>row.some(v=>norm(v)==='كود الشحنة')&&row.some(v=>norm(v)==='رقم الهاتف'));if(headerIndex<0)throw Error('لم أجد أعمدة Cargo Box المطلوبة');const headers=data[headerIndex].map(norm);const get=(r,k)=>r[headers.indexOf(k)];const rows=data.slice(headerIndex+1).filter(r=>norm(get(r,'كود الشحنة'))).map(r=>({shipment_code:get(r,'كود الشحنة'),phone:get(r,'رقم الهاتف'),area:get(r,'المنطقة'),city:get(r,'المدينة'),status:get(r,'حالة الشحنة'),return_status:get(r,'حالة الإرجاع'),selected_order_id:selectedOrders[String(get(r,'كود الشحنة'))]||null}));const response=await fetch('/api/cargo-returns-preview',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+localStorage.getItem('corvex_token')},body:JSON.stringify({rows})});const d=await response.json();if(!response.ok)throw Error((d.error||'فشل الفحص')+(d.detail?' — '+d.detail:''));$('msg').textContent='تم فحص '+d.summary.total+' شحنة — مطابق: '+d.summary.matched+' — بحاجة مراجعة: '+d.summary.review+'. لم يتم تعديل الجرد.';window.cargoRows=d.rows;
 const statusLabel={matched:'مطابق',unmatched:'غير مطابق',ambiguous:'عدة طلبات',review_model:'راجع الموديل',ignored:'غير ملغي',invalid:'بيانات ناقصة'};
 const summaryHtml='<div class="return-summary"><div><span>إجمالي الشحنات</span><b>'+Number(d.summary.total||0)+'</b></div><div><span>مطابق</span><b>'+Number(d.summary.matched||0)+'</b></div><div><span>بحاجة مراجعة</span><b>'+Number(d.summary.review||0)+'</b></div></div>';
-const bulkHtml='<div class="return-bulk"><button type="button" id="matchAll">✓ مطابقة الجميع</button><small>الطلبات العادية دفعة واحدة، والتسليم الجزئي له تأكيد منفصل. لا يتغير الجرد.</small></div>';
+const bulkHtml='<div class="return-bulk"><button type="button" id="matchAll">✓ مطابقة الجميع وتسكير المرتجع</button><small>تحويل الطلبات العادية المطابقة إلى مرتجع بعد التأكيد؛ التسليم الجزئي منفصل. لا يتغير الجرد.</small></div>';
 const chooseButton=r=>r.status==='ambiguous'&&Array.isArray(r.candidates)&&r.candidates.length?'<div class="order-choice"><select class="order-choice-select" aria-label="اختيار الطلب الصحيح"><option value="">اختر الطلب الصحيح...</option>'+r.candidates.map(o=>'<option value="'+Number(o.id)+'">#'+esc(o.order_code)+' — '+esc(o.recipient_name||'')+' — '+esc(o.area||'')+' — '+esc(o.created_at||'')+(o.delivery_status==='partial'?' — تسليم جزئي':'')+'</option>').join('')+'</select><button type="button" class="choose-order" data-code="'+esc(r.shipment_code)+'">تأكيد اختيار الطلب</button></div>':'';
 const mobileHtml='<div class="mobile-return-list">'+d.rows.map(r=>'<article class="return-shipment"><div class="return-shipment-head"><strong>شحنة '+esc(r.shipment_code)+'</strong><span class="return-status '+(r.status==='matched'?'matched':'')+'">'+esc(r.order_status==='partial'?'تسليم جزئي':statusLabel[r.status]||r.status)+'</span></div>'+
 '<div class="return-detail"><span>رقم الهاتف</span><b>'+esc(r.phone||'—')+'</b></div>'+
@@ -68,7 +68,22 @@ $('result').innerHTML=summaryHtml+bulkHtml+mobileHtml+'<table><thead><tr><th>ك�
 document.getElementById('result').addEventListener('click',async event=>{
  const choose=event.target.closest('button.choose-order');if(choose){const row=(window.cargoRows||[]).find(r=>r.shipment_code===choose.dataset.code&&r.status==='ambiguous');if(!row)return;const select=choose.closest('.order-choice')?.querySelector('.order-choice-select');const id=Number(select?.value||0);if(!id)return alert('اختر الطلب الصحيح أولًا');const chosen=(row.candidates||[]).find(o=>Number(o.id)===id);if(!chosen)return alert('الطلب غير موجود ضمن الخيارات');selectedOrders[row.shipment_code]=id;document.getElementById('run').click();return;}
 
- if(event.target.closest('#matchAll')){const rows=window.cargoRows||[];const normal=rows.filter(r=>r.status==='matched'&&r.order_status!=='partial');const partial=rows.filter(r=>r.order_status==='partial');document.getElementById('msg').textContent='تمت مراجعة مطابقة '+normal.length+' طلب عادي. '+partial.length+' طلب تسليم جزئي يحتاج تأكيدًا منفصلًا. لم يتم تغيير الجرد.';event.target.closest('#matchAll').textContent='✓ تمت مطابقة الطلبات العادية';event.target.closest('#matchAll').disabled=true;return;}
+ if(event.target.closest('#matchAll')){
+  const button=event.target.closest('#matchAll');
+  const rows=(window.cargoRows||[]).filter(r=>r.status==='matched'&&r.order_status!=='partial'&&r.order_status!=='delivered_adjusted');
+  if(!rows.length)return alert('لا توجد طلبات عادية مطابقة لتسكيرها');
+  if(!confirm('تأكيد تحويل '+rows.length+' طلب مطابق إلى حالة مرتجع؟ لن يتغير الجرد أو حسابات التسليم.'))return;
+  button.disabled=true;button.textContent='جارٍ تسكير المرتجعات...';
+  try{
+   const response=await fetch('/api/cargo-returns-commit',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+localStorage.getItem('corvex_token')},body:JSON.stringify({rows:rows.map(r=>({order_id:r.order_id,phone:r.phone,shipment_code:r.shipment_code}))})});
+   const result=await response.json();if(!response.ok)throw Error(result.error||'تعذر تسكير الكشف');
+   $('msg').textContent='تم تحويل '+result.updated+' طلب إلى مرتجع. طلبات لم تتغير: '+(result.skipped||[]).length+'. لم يتغير الجرد.';
+   button.textContent='✓ تم تسكير '+result.updated+' طلب';
+   if((result.skipped||[]).length)button.disabled=false;
+  }catch(e){button.disabled=false;button.textContent='✓ مطابقة الجميع';alert(e.message)}
+  return;
+ }
+
  const button=event.target.closest('button.receive');if(!button)return;
  const code=button.dataset.code,id=Number(button.dataset.id);
  const row=(window.cargoRows||[]).find(x=>x.shipment_code===code&&Number(x.order_id)===id);
