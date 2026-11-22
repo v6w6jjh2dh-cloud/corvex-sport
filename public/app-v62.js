@@ -2259,7 +2259,7 @@ async function deliveryReconcileView(){
             <div class="settlement-row">
               <div>
                 <b>${esc(x.settlement_code)}</b>
-                <div class="sub">${fmtDate(x.created_at)} • مطابق ${x.matched_count} • غير مطابق ${x.unmatched_count} • مكرر ${x.duplicate_count}</div>
+                <div class="sub">تاريخ الكشف: ${x.statement_date||fmtDate(x.created_at)} • تاريخ الحفظ: ${fmtDate(x.created_at)} • مطابق ${x.matched_count} • غير مطابق ${x.unmatched_count} • مكرر ${x.duplicate_count}</div>
               </div>
               <div class="delivery-history-money">
                 <strong>${money(x.net_due)} د.أ</strong>
