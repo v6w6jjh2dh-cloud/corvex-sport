@@ -15,7 +15,7 @@ export async function onRequest({request,env}){
   const code=clean(row.shipment_code).slice(0,80),p=phone(row.phone),area=normalize(row.area),city=normalize(row.city),status=normalize(row.status),returnStatus=normalize(row.return_status);
   if(!code||!p){output.push({shipment_code:code,status:'invalid',reason:'كود الشحنة أو الهاتف غير موجود'});continue}
   if(!status.includes('ملغي')){output.push({shipment_code:code,status:'ignored',reason:'الشحنة ليست ملغية'});continue}
-  const found=(await env.DB.prepare("SELECT id,order_code,recipient_name,phone,area,detailed_address,order_notes,raw_text,delivery_status,partial_received_items,created_at FROM orders WHERE phone=? OR phone=? OR phone=? ORDER BY id DESC LIMIT 80").bind(p,p.replace(/^0/,''),'962'+p.replace(/^0/,'')).all()).results||[];
+  const found=(await env.DB.prepare("SELECT id,order_code,recipient_name,phone,area,detailed_address,order_notes,raw_text,delivery_status,partial_received_items,created_at FROM orders WHERE (phone=? OR phone=? OR phone=?) AND date(COALESCE(first_printed_at,created_at),'+3 hours')>='2026-11-17' ORDER BY id DESC LIMIT 80").bind(p,p.replace(/^0/,''),'962'+p.replace(/^0/,'')).all()).results||[];
   // Phone is the primary match key. Area/city are hints, never exclusion criteria.
   // A single phone match is safe to resolve; multiple orders require explicit selection.
   let matches=found;
