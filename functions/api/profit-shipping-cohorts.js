@@ -1,4 +1,7 @@
 const json=(x,status=200)=>new Response(JSON.stringify(x),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
+const MODEL_COSTS=[{name:'جاكيت فرو',cost:4},{name:'جاكيت جوخ كاجوال',cost:5.2},{name:'جاكيت جوخ سكايفو',cost:7.55},{name:'مالئ الفراغات',cost:1}];
+const normalizedName=x=>String(x||'').replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/\s+/g,' ').trim();
+const modelCost=name=>{const key=normalizedName(name);return MODEL_COSTS.find(m=>normalizedName(m.name)===key)?.cost??null};
 const validDate=x=>/^\d{4}-\d{2}-\d{2}$/.test(String(x||''))&&!Number.isNaN(Date.parse(x+'T00:00:00Z'));
 async function auth(request,env){const token=(request.headers.get('authorization')||'').replace(/^Bearer /,'');if(!token)return null;return env.DB.prepare("SELECT u.id,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>datetime('now') AND u.is_active=1").bind(token).first()}
 export async function onRequest({request,env}){
@@ -23,17 +26,17 @@ export async function onRequest({request,env}){
  const itemMap=new Map();
  try{
   const itemRows=(await env.DB.prepare(`SELECT i.order_id,i.model_id,i.quantity,m.name AS model_name FROM inventory_order_items i LEFT JOIN profit_models m ON m.id=i.model_id JOIN orders o ON o.id=i.order_id WHERE o.first_printed_at IS NOT NULL AND ${where}`).bind(...args).all()).results||[];
-  for(const item of itemRows){const id=Number(item.order_id);if(!itemMap.has(id))itemMap.set(id,[]);itemMap.get(id).push({model_id:Number(item.model_id),name:item.model_name||'موديل غير معروف',quantity:Number(item.quantity||0)})}
+  for(const item of itemRows){const id=Number(item.order_id);if(!itemMap.has(id))itemMap.set(id,[]);itemMap.get(id).push({model_id:Number(item.model_id),name:item.model_name||'موديل غير معروف',quantity:Number(item.quantity||0),unit_cost:modelCost(item.model_name),total_cost:modelCost(item.model_name)===null?null:Math.round(Number(item.quantity||0)*modelCost(item.model_name)*100)/100})}
  }catch(error){return json({error:'تعذر تحميل تفاصيل أصناف الطلبات، لم يتم اعتماد الكوست',detail:String(error?.message||error)},500)}
  const deliveredStatuses=new Set(['delivered','delivered_adjusted','partial']);
- let costReviewCount=0,totalDeliveredPieces=0;let cashDiscrepancy=0,cashMismatchOrders=0;let delivered=0,partial=0,returned=0,refusedWithFee=0,noReplyAfterArrival=0,otherReturns=0,pending=0,other=0,unreviewed=0,sales=0,cash=0,costs=0,fees=0;
+ let costReviewCount=0,totalDeliveredPieces=0,verifiedCosts=0;let cashDiscrepancy=0,cashMismatchOrders=0;let delivered=0,partial=0,returned=0,refusedWithFee=0,noReplyAfterArrival=0,otherReturns=0,pending=0,other=0,unreviewed=0,sales=0,cash=0,costs=0,fees=0;
  const details=orders.map(o=>{
   const status=o.delivery_status||'pending';
   const isPartial=status==='partial'||status==='delivered_adjusted';
   const isDelivered=deliveredStatuses.has(status);
   const reviewed=!isPartial||(Number(o.delivery_company_settlement_id||0)>0&&Number(o.profit_reviewed_settlement_id||0)===Number(o.delivery_company_settlement_id));
   let profit=null;
-  if(isDelivered){delivered++;if(isPartial)partial++;if(reviewed){const amount=Number(o.delivered_amount||0);const cost=Number(o.cost_of_goods||0);const fee=Number(o.delivery_fee||0);const actualCash=Number(o.cash_collected||0);const difference=Math.round((actualCash-(amount-fee))*100)/100;if(Math.abs(difference)>=.01){cashMismatchOrders++;cashDiscrepancy+=difference}sales+=amount;cash+=actualCash;costs+=cost;fees+=fee;profit=actualCash-cost}else unreviewed++}
+  if(isDelivered){delivered++;if(isPartial)partial++;if(reviewed){const amount=Number(o.delivered_amount||0);const mappedItems=itemMap.get(Number(o.id))||[];const costComplete=mappedItems.length>0&&mappedItems.every(i=>i.unit_cost!==null)&&!isPartial;const cost=costComplete?Math.round(mappedItems.reduce((n,i)=>n+i.total_cost,0)*100)/100:0;const fee=Number(o.delivery_fee||0);const actualCash=Number(o.cash_collected||0);const difference=Math.round((actualCash-(amount-fee))*100)/100;if(Math.abs(difference)>=.01){cashMismatchOrders++;cashDiscrepancy+=difference}sales+=amount;cash+=actualCash;if(costComplete)costs+=cost;fees+=fee;profit=costComplete?actualCash-cost:null}else unreviewed++}
   else if(status==='refused_fee_paid'&&Number(o.delivery_company_settled||0)){refusedWithFee++;returned++}
   else if(status==='refused_no_fee'&&Number(o.delivery_company_settled||0)){noReplyAfterArrival++;returned++}
   else if(status==='returned'||status==='canceled_before_arrival'||status.startsWith('refused'))otherReturns++;
@@ -41,9 +44,9 @@ export async function onRequest({request,env}){
   else other++;
   const items=itemMap.get(Number(o.id))||[];
   const itemQuantity=items.reduce((n,x)=>n+x.quantity,0);
-  if(isDelivered){totalDeliveredPieces+=itemQuantity;if(items.length===0||Number(o.cost_of_goods||0)<=0)costReviewCount++}
-  return {id:o.id,order_code:o.order_code,items,item_quantity:itemQuantity,cost_of_goods:Number(o.cost_of_goods||0),cost_needs_review:isDelivered&&(items.length===0||Number(o.cost_of_goods||0)<=0),statement_code:o.statement_code||null,statement_source:o.statement_source||null,statement_amount:o.statement_amount==null?null:Number(o.statement_amount),statement_status:o.statement_status||null,statement_match_type:o.statement_match_type||null,status,settled:Boolean(Number(o.delivery_company_settled||0)),reviewed,profit,cash:isDelivered&&reviewed?Number(o.cash_collected||0):null,amount:isDelivered&&reviewed?Number(o.delivered_amount||0):null,fee:isDelivered&&reviewed?Number(o.delivery_fee||0):null,cash_difference:isDelivered&&reviewed?Math.round((Number(o.cash_collected||0)-(Number(o.delivered_amount||0)-Number(o.delivery_fee||0)))*100)/100:null};
+  if(isDelivered){totalDeliveredPieces+=itemQuantity;if(items.length===0||items.some(i=>i.unit_cost===null)||isPartial)costReviewCount++}
+  return {id:o.id,order_code:o.order_code,items,item_quantity:itemQuantity,cost_of_goods:Number(o.cost_of_goods||0),calculated_cost:items.length&&items.every(i=>i.unit_cost!==null)&&!isPartial?Math.round(items.reduce((n,i)=>n+i.total_cost,0)*100)/100:null,cost_needs_review:isDelivered&&(items.length===0||items.some(i=>i.unit_cost===null)||isPartial),statement_code:o.statement_code||null,statement_source:o.statement_source||null,statement_amount:o.statement_amount==null?null:Number(o.statement_amount),statement_status:o.statement_status||null,statement_match_type:o.statement_match_type||null,status,settled:Boolean(Number(o.delivery_company_settled||0)),reviewed,profit,cash:isDelivered&&reviewed?Number(o.cash_collected||0):null,amount:isDelivered&&reviewed?Number(o.delivered_amount||0):null,fee:isDelivered&&reviewed?Number(o.delivery_fee||0):null,cash_difference:isDelivered&&reviewed?Math.round((Number(o.cash_collected||0)-(Number(o.delivered_amount||0)-Number(o.delivery_fee||0)))*100)/100:null};
  });
  const spend=(await env.DB.prepare("SELECT amount FROM shipping_cohort_ad_spend WHERE date=? AND store_id=?").bind(date,store).first())?.amount||0;
- return json({date,store_id:store,total:orders.length,delivered,partial,returned,refused_with_fee:refusedWithFee,no_reply_after_arrival:noReplyAfterArrival,other_returns:otherReturns,pending,other,unreviewed,cost_review_count:costReviewCount,delivered_pieces_mapped:totalDeliveredPieces,sales,cash,costs,fees,cash_difference:Math.round(cashDiscrepancy*100)/100,cash_mismatch_orders:cashMismatchOrders,gross_profit:cash-costs,ad_spend:Number(spend),net_after_ads:cash-costs-Number(spend),complete:pending===0&&other===0&&unreviewed===0&&otherReturns===0,orders:details});
+ return json({model_costs:MODEL_COSTS,costs_verified:costReviewCount===0,date,store_id:store,total:orders.length,delivered,partial,returned,refused_with_fee:refusedWithFee,no_reply_after_arrival:noReplyAfterArrival,other_returns:otherReturns,pending,other,unreviewed,cost_review_count:costReviewCount,delivered_pieces_mapped:totalDeliveredPieces,sales,cash,costs,fees,cash_difference:Math.round(cashDiscrepancy*100)/100,cash_mismatch_orders:cashMismatchOrders,gross_profit:costReviewCount?null:cash-costs,ad_spend:Number(spend),net_after_ads:costReviewCount?null:cash-costs-Number(spend),complete:pending===0&&other===0&&unreviewed===0&&otherReturns===0,orders:details});
 }
