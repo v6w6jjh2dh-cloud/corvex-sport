@@ -1122,7 +1122,7 @@ async function cargoReturnsView(){
   const c=$('#content');
   if(state.user?.role!=='admin'){c.innerHTML='<div class="empty">صلاحية مدير مطلوبة</div>';return}
   c.innerHTML=`<div class="page-title"><div><h1>تسكير كشف المرتجع</h1><div class="sub">مطابقة كشف Cargo Box واستلام المرتجعات وربطها بالجرد</div></div></div>
-    <div class="card" style="padding:0;overflow:hidden"><iframe title="كشف مرتجعات Cargo Box" src="/cargo-upload-v2.html?embedded=1&amp;v=20261122-guard-232" style="width:100%;height:80vh;min-height:650px;border:0;display:block" loading="lazy"></iframe></div>`;
+    <div class="card" style="padding:0;overflow:hidden"><iframe title="كشف مرتجعات Cargo Box" src="/cargo-upload-v2.html?embedded=1&amp;v=20261122-androidexcel-233" style="width:100%;height:80vh;min-height:650px;border:0;display:block" loading="lazy"></iframe></div>`;
 }
 async function inventoryView(){
   const c=$('#content');
