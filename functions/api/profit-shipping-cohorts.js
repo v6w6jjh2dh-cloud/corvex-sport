@@ -143,6 +143,14 @@ export async function onRequest({request,env}){
    received=await receivedItems(env,o,models);
    const recPieces=received?received.reduce((n,i)=>n+i.received,0):null;
    if(received&&recPieces>0&&received.every(i=>i.unit_cost!==null)){cost=round2(received.reduce((n,i)=>n+i.received_cost,0));source='received_items';pieces=recPieces}
+   // A two-piece, single-model partial delivery has exactly one received and
+   // one returned piece. Never infer this for mixed models or larger orders.
+   else if(!received&&itemsValid&&items.length===1&&shippedPieces===2&&
+           (!Number(o.delivered_pieces)||Number(o.delivered_pieces)===1)&&
+           items[0].unit_cost!==null){
+    received=mergeItems([{model_id:items[0].model_id,name:items[0].name,quantity:2,received:1}],models);
+    cost=round2(items[0].unit_cost);source='inferred_single_model_partial';pieces=1;
+   }
    else if(reviewed&&hasStored){cost=storedCost;source='saved_partial_review';pieces=Number(o.delivered_pieces||0)||recPieces||null;missing=received?'':'القطع المستلمة غير مفصلة — تم استخدام كوست المراجعة المحفوظ'}
    else missing=received?'كوست إحدى القطع المستلمة غير معتمد':'لم تُحدد القطع المستلمة لهذا التسليم الجزئي';
   }
