@@ -111,11 +111,16 @@ export async function onRequest({request,env}){
   const reviewed=!isPartial||(Number(o.delivery_company_settlement_id||0)>0&&Number(o.profit_reviewed_settlement_id||0)===Number(o.delivery_company_settlement_id));
   // Shipped items: read from the order's own text with the current catalogue; the
   // print-time inventory allocation is used only when the text cannot be read.
-  const text=String(o.order_notes||o.raw_text||'');
+  // Notes and original order text are independent sources. A nonempty note may
+  // contain only delivery instructions; never let it hide the product in raw_text.
+  // Do not concatenate the sources: that would count the same item twice.
   let items=[],itemSource='none';
-  const parsed=text.trim()?await classifyInventoryItems(env,text,models):[];
-  if(parsed.length){items=mergeItems(parsed,models);itemSource='order_text'}
-  else if(inventory.get(Number(o.id))?.length){items=mergeItems(inventory.get(Number(o.id)),models);itemSource='inventory'}
+  for(const [source,text] of [['order_notes',o.order_notes],['raw_text',o.raw_text]]){
+   if(!String(text||'').trim())continue;
+   const parsed=await classifyInventoryItems(env,String(text),models);
+   if(parsed.length){items=mergeItems(parsed,models);itemSource=source;break}
+  }
+  if(!items.length&&inventory.get(Number(o.id))?.length){items=mergeItems(inventory.get(Number(o.id)),models);itemSource='inventory'}
   const itemsValid=items.length>0&&items.every(i=>Number.isInteger(i.quantity)&&i.quantity>=1&&i.quantity<=50);
   const shippedPieces=items.reduce((n,i)=>n+i.quantity,0);
   const storedCost=Number(o.cost_of_goods),hasStored=Number.isFinite(storedCost)&&storedCost>0;
