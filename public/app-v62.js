@@ -2435,7 +2435,7 @@ async function deliveryReconcileView(){
                   :r.match_type==='review_amount'
                     ?'<span class="match-badge match-warn">راجع اختلاف القيمة</span>'
                     :r.match_type==='review_amount_higher'
-                      ?'<span class="match-badge match-warn">قيمة الكشف أكبر</span>'
+                      ?'<button type="button" class="btn btn-soft delivery-pieces-btn" data-i="'+i+'">اختيار الموديلات والقطع</button><div class="delivery-pieces-panel" data-i="'+i+'"></div>'
                       :r.match_type==='already_settled'
                         ?'<span class="match-badge match-ok">مسوّى سابقًا</span>'
                         :r.match_type==='other_store'
@@ -2468,6 +2468,29 @@ async function deliveryReconcileView(){
       </div>`;
 
     $('#commitDeliveryReport').onclick=commitReport;
+    document.querySelectorAll('.delivery-pieces-btn').forEach(btn=>btn.addEventListener('click',async()=>{
+      const i=Number(btn.dataset.i),r=previewRows[i];
+      const orderId=Number(document.querySelector(`.delivery-order-choice[data-i="${i}"]`)?.value||r.order?.id||0);
+      if(!orderId)return toast('اختر الطلب الصحيح أولاً حتى تظهر موديلاته');
+      try{
+        const info=await api('/partial-delivery-items?order_id='+orderId);
+        const items=info.items||[];
+        if(!items.length)return toast('لم يتم التعرف على موديلات هذا الطلب');
+        r.pieces_order_id=orderId;
+        r.pieces_items=items;
+        const panel=document.querySelector(`.delivery-pieces-panel[data-i="${i}"]`);
+        panel.innerHTML='<div class="sub">حدد عدد القطع المستلمة فعلياً من كل موديل:</div>'+items.map((item,j)=>
+          `<label style="display:block;margin:8px 0">${esc(item.model_name)} (من ${item.quantity}) <input class="input delivery-piece-qty" data-j="${j}" type="number" min="0" max="${item.quantity}" step="1" value="${item.quantity}" style="max-width:90px"></label>`
+        ).join('')+'<div class="sub">تُحفظ الكميات عند اعتماد الكشف، ولا تتغير قيمة الكاش تلقائياً.</div>';
+      }catch(e){toast(e.message)}
+    }));
+    document.querySelectorAll('.delivery-order-choice').forEach(select=>select.addEventListener('change',()=>{
+      const i=Number(select.dataset.i),r=previewRows[i];
+      r.pieces_order_id=null;r.pieces_items=null;
+      const panel=document.querySelector(`.delivery-pieces-panel[data-i="${i}"]`);
+      if(panel)panel.innerHTML='';
+    }));
+
     document.querySelectorAll('.delivery-amount-choice,.delivery-fee-choice').forEach(input=>input.addEventListener('input',()=>{
       const i=input.dataset.i,row=previewRows[i];
       if(row?.has_net)return;
@@ -2515,8 +2538,12 @@ async function deliveryReconcileView(){
       const items=info.items||[];
       if(!items.length)return toast('لم أتعرف على أصناف الطلب #'+info.order_code+'؛ راجع نص الطلب قبل تسكير الكشف');
       const chosen=[];
-      for(const item of items){
-        const answer=prompt('تسليم جزئي للطلب #'+info.order_code+'\\n'+item.model_name+' — المشحون '+item.quantity+'\\nكم قطعة من هذا الموديل استلم الزبون؟',String(item.quantity));
+      const previewIndex=previewRows.findIndex(x=>Number(x.order?.id||0)===row.order_id || Number(document.querySelector(`.delivery-order-choice[data-i="${previewRows.indexOf(x)}"]`)?.value||0)===row.order_id);
+      const preview=previewRows[previewIndex];
+      const panel=previewIndex>=0?document.querySelector(`.delivery-pieces-panel[data-i="${previewIndex}"]`):null;
+      const prepared=preview?.pieces_order_id===row.order_id && preview?.pieces_items?.length===items.length && panel?.querySelectorAll('.delivery-piece-qty').length===items.length;
+      for(const [j,item] of items.entries()){
+        const answer=prepared?panel.querySelector(`.delivery-piece-qty[data-j="${j}"]`)?.value:prompt('تسليم جزئي للطلب #'+info.order_code+'\\n'+item.model_name+' — المشحون '+item.quantity+'\\nكم قطعة من هذا الموديل استلم الزبون؟',String(item.quantity));
         if(answer===null)return toast('تم إلغاء تسكير الكشف لحين تحديد القطع المسلّمة');
         const qty=Number(answer);
         if(!Number.isInteger(qty)||qty<0||qty>item.quantity)return toast('الكمية غير صحيحة للطلب #'+info.order_code);
