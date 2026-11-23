@@ -35,3 +35,9 @@ test('codes and phones',()=>{
  assert.equal(normalizePhone('+962 79 090 9797'),'0790909797');
  assert.equal(normalizePhone('٠٧٩٠٩٠٩٧٩٧'),'0790909797');
 });
+
+test('stati spellings are the scarfo model at 7.55',async()=>{
+ const {canonicalModelName}=await import('../functions/api/_partial-delivery.js');
+ for(const t of ['جاكيت جوخ ستاتي','جاكيت جوخ ستأتي','جوخ ستائتي','جاكيت ستاتيه']){assert.equal(approvedCost({name:t}),7.55);assert.equal(canonicalModelName(t),'جاكيت جوخ سكايفو')}
+ assert.equal(approvedCost({name:'جاكيت جوخ كاجوال'}),5.2);
+});

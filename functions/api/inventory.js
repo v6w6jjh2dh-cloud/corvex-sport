@@ -1,4 +1,5 @@
 import {ensureInventorySchema} from './_inventory.js';
+import {ensureApprovedCatalogue,ensureStatiMerged} from './_partial-delivery.js';
 
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8'}});
 async function auth(request,env){
@@ -8,13 +9,14 @@ async function auth(request,env){
 
 const NEW_MODELS=[
  ['jokh_casual','جاكيت جوخ كاجوال',5.2,['جاكيت جوخ كاجوال','جكيت جوخ كاجوال','جاكيت جوخ كاجول']],
- ['jokh_scarfo','جاكيت جوخ سكايفو',7.55,['جاكيت جوخ سكايفو','جكيت جوخ سكايفو','جاكيت جوخ سكارفو','جاكيت سكارفو','جاكيت سكايفو','جاكيت نسائي','جاكيت نساءي','جكيت نسائي','جكيت نساءي','جوخ شتائي']],
+ ['jokh_scarfo','جاكيت جوخ سكايفو',7.55,['جاكيت جوخ سكايفو','جكيت جوخ سكايفو','جاكيت جوخ سكارفو','جاكيت سكارفو','جاكيت سكايفو','جاكيت نسائي','جاكيت نساءي','جكيت نسائي','جكيت نساءي','جوخ شتائي','جاكيت جوخ ستاتي','جكيت جوخ ستاتي','جاكيت جوخ ستأتي','جاكيت جوخ ستائتي','جوخ ستاتي','جوخ ستأتي','جاكيت ستاتي','جكيت ستاتي','جاكيت ستأتي']],
  ['gap_filler','مالئ الفراغات',1,['مالئ الفراغات','مالئ فراغات','مليء الفراغات','مالاء فراغات','ملاء فراغات','مالى فراغات','سي ايبوكسي']]
 ];
 async function ensureNewModels(env){
  for(const [key,name,cost,aliases] of NEW_MODELS){
   await env.DB.prepare("INSERT OR IGNORE INTO profit_models(model_key,name,cost,aliases_json,offers_json,delivery_included,active) VALUES(?,?,?,?, '{}',0,1)").bind(key,name,cost,JSON.stringify(aliases)).run();
  }
+ await ensureApprovedCatalogue(env);await ensureStatiMerged(env);
 }
 async function inventoryData(env){
  const models=(await env.DB.prepare(`SELECT p.id,p.model_key,p.name,p.active,COALESCE(b.quantity,0) quantity,b.updated_at

@@ -68,12 +68,17 @@ export function shipmentDateFit(order,shipmentDate){
 }
 
 // ---------------------------------------------------------- approved costs
+// After normalizeArabic: ستأتي→ستاتي, ستائتي→ستايتي, ستاتى→ستاتي.
+export const STATI_NORMALIZED=/(?:جاكيت|جكيت|جاكت|جوخ)\s*(?:جوخ\s*)?ستا?[يء]?ت(?:يه|ي|ه)(?![\u0600-\u06FF])/;
+export const STATI_ALIASES=['جاكيت جوخ ستاتي','جكيت جوخ ستاتي','جاكيت جوخ ستأتي','جكيت جوخ ستأتي','جاكيت جوخ ستائتي','جاكيت جوخ ستايتي','جاكيت جوخ ستاتيه','جوخ ستاتي','جوخ ستأتي','جوخ ستائتي','جوخ ستاتيه','جاكيت ستاتي','جكيت ستاتي','جاكيت ستأتي','جاكيت ستائتي','جاكيت ستاتيه'];
+export const canonicalModelName=name=>approvedCost({name})===7.55?'جاكيت جوخ سكايفو':String(name||'');
 // Approved per-piece costs (JOD) for the jacket season. They override whatever
 // is stored in profit_models when the cost of delivered pieces is computed.
 const APPROVED=[
  {key:'fur_jacket',cost:4.00,test:n=>/فرو/.test(n)&&/(جاكيت|جكيت|جاكت)/.test(n)},
  {key:'jokh_casual',cost:5.20,test:n=>/جوخ/.test(n)&&/كاجو/.test(n)},
- {key:'jokh_scarfo',cost:7.55,test:n=>/(سكايفو|سكارفو)/.test(n)},
+ // «ستاتي» and all its spellings are the same model as «سكايفو» (merchant decision 2026-11-24).
+ {key:'jokh_scarfo',cost:7.55,test:n=>/(سكايفو|سكارفو)/.test(n)||STATI_NORMALIZED.test(n)},
  {key:'gap_filler',cost:1.00,test:n=>/(مال[ياءى]?\s*ال?فراغات|ملا?ء?\s*ال?فراغات|ايبوكسي|ايوبكسي|epoxy)/.test(n)}
 ];
 export function approvedCost(model){
@@ -114,8 +119,34 @@ export async function ensureApprovedCatalogue(env){
  });
 }
 
+// Merges «جاكيت جوخ ستاتي» into «جاكيت جوخ سكايفو»: its spellings become aliases of the
+// single scarfo model. A separately created stati model (if any) is deactivated so the same
+// order line can never be counted under two models.
+export async function ensureStatiMerged(env){
+ await runSchemaMigrationOnce(env,'2026-11-24-merge-stati-into-scarfo-v1',async()=>{
+  const rows=(await env.DB.prepare('SELECT id,model_key,name,aliases_json,active FROM profit_models').all()).results||[];
+  const scarfo=rows.find(r=>r.model_key==='jokh_scarfo')||rows.find(r=>Number(r.active)===1&&/(سكايفو|سكارفو)/.test(normalizeArabic(r.name)));
+  const statements=[];
+  if(scarfo){
+   let aliases=[];try{aliases=JSON.parse(scarfo.aliases_json||'[]')}catch{}
+   const extra=[];
+   for(const r of rows)if(r.id!==scarfo.id&&STATI_NORMALIZED.test(normalizeArabic(r.name))){try{extra.push(r.name,...JSON.parse(r.aliases_json||'[]'))}catch{extra.push(r.name)}}
+   const next=[...new Set([...aliases,...STATI_ALIASES,...extra])];
+   statements.push(env.DB.prepare("UPDATE profit_models SET aliases_json=?,cost=7.55,active=1,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify(next),scarfo.id));
+  }else{
+   statements.push(env.DB.prepare("INSERT OR IGNORE INTO profit_models(model_key,name,cost,aliases_json,offers_json,delivery_included,active) VALUES('jokh_scarfo','جاكيت جوخ سكايفو',7.55,?,'{}',0,1)").bind(JSON.stringify(['جاكيت جوخ سكايفو','جكيت جوخ سكايفو','جاكيت جوخ سكارفو','جاكيت سكايفو','جاكيت نسائي','جوخ شتائي',...STATI_ALIASES])));
+  }
+  for(const r of rows)if((!scarfo||r.id!==scarfo.id)&&Number(r.active)===1&&STATI_NORMALIZED.test(normalizeArabic(r.name))){
+   statements.push(env.DB.prepare("UPDATE profit_models SET active=0,updated_at=datetime('now') WHERE id=?").bind(r.id));
+   statements.push(env.DB.prepare("INSERT INTO profit_model_audit(model_id,action,before_json,after_json) VALUES(?,?,?,?)").bind(r.id,'merged_into_scarfo',JSON.stringify({name:r.name}),JSON.stringify({merged_into:scarfo?.id||'jokh_scarfo'})));
+  }
+  await env.DB.batch(statements);
+ });
+}
+
 export async function loadCostedModels(env){
  await ensureApprovedCatalogue(env);
+ await ensureStatiMerged(env);
  const models=await loadInventoryModels(env);
  const rows=(await env.DB.prepare('SELECT id,model_key,name,cost FROM profit_models WHERE active=1').all()).results||[];
  const byId=new Map(rows.map(r=>[Number(r.id),r]));

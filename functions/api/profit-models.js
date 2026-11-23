@@ -1,3 +1,4 @@
+import {ensureApprovedCatalogue,ensureStatiMerged} from './_partial-delivery.js';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8'}});
 
 const SEED_MODELS=[
@@ -16,7 +17,7 @@ const SEED_MODELS=[
  ['cardigan','كاردونيه',3.5,['كاردونيه','بجامه كاردونيه','بجامة كاردونيه'],{1:[8],2:[14],3:[18]},0],
  ['cotton_tee','تيشيرت قطن',3.3,['تيشيرت قطن','تيشرت قطن','قطن سبور'],{1:[7],2:[12],3:[15]},0],
  ['jokh_casual','جاكيت جوخ كاجوال',5.2,['جاكيت جوخ كاجوال','جكيت جوخ كاجوال','جاكيت جوخ كاجول','جكيت جوخ كاجول'],{},0],
- ['jokh_scarfo','جاكيت جوخ سكايفو',7.55,['جاكيت جوخ سكايفو','جكيت جوخ سكايفو','جاكيت جوخ سكارفو','جكيت جوخ سكارفو','جاكيت سكارفو','جاكيت سكايفو','جاكيت نسائي','جاكيت نساءي','جكيت نسائي','جكيت نساءي','جوخ شتائي'],{},0],
+ ['jokh_scarfo','جاكيت جوخ سكايفو',7.55,['جاكيت جوخ سكايفو','جكيت جوخ سكايفو','جاكيت جوخ سكارفو','جكيت جوخ سكارفو','جاكيت سكارفو','جاكيت سكايفو','جاكيت نسائي','جاكيت نساءي','جكيت نسائي','جكيت نساءي','جوخ شتائي','جاكيت جوخ ستاتي','جكيت جوخ ستاتي','جاكيت جوخ ستأتي','جاكيت جوخ ستائتي','جوخ ستاتي','جوخ ستأتي','جاكيت ستاتي','جكيت ستاتي','جاكيت ستأتي'],{},0],
  ['gap_filler','مالئ الفراغات',1,['مالئ الفراغات','مالئ فراغات','مليء الفراغات','مالاء فراغات','مالاء قراغات','ملاء قراغات','مالى قراغات','ملاء فراغات','مالى فراغات','مالي فراغات','سي ايبوكسي','سي إيبوكسي','سى ايبوكسي','C epoxy'],{},0],
  ['old_money','Old Money',3.5,['اولد ماني','أولد ماني','اولد موني','أولد موني','اولد مني','أولد مني','بلوزه اولد ماني','بلوزه اولد موني','بلوزة أولد ماني','بلوزة أولد موني','old money'],{1:[7],2:[12],3:[15]},0]
 ];
@@ -73,6 +74,8 @@ async function ensure(env){
   await env.DB.prepare(`INSERT OR IGNORE INTO profit_models(model_key,name,cost,aliases_json,offers_json,delivery_included,active) VALUES(?,?,?,?,?,?,1)`)
    .bind(key,name,cost,JSON.stringify(aliases),JSON.stringify(offers),deliveryIncluded).run();
  }
+ // Approved jacket costs and the stati→scarfo merge (run once each).
+ await ensureApprovedCatalogue(env);await ensureStatiMerged(env);
  const zip=await env.DB.prepare("SELECT id,aliases_json FROM profit_models WHERE model_key='zip_pockets'").first();
  if(zip){
   let aliases=[];try{aliases=JSON.parse(zip.aliases_json||'[]')}catch{}
