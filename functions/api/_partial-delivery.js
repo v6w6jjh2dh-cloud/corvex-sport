@@ -144,9 +144,24 @@ export async function ensureStatiMerged(env){
  });
 }
 
+// Approved merchant alias: generic "جاكيت نسائي" means jokh scarfo.
+// Existing scarfo catalogue rows need this migration too; the fallback aliases
+// are skipped whenever a catalogue row with the same canonical name exists.
+async function ensureWomenJacketAlias(env){
+ await runSchemaMigrationOnce(env,'2026-11-24-women-jacket-scarfo-alias-v1',async()=>{
+  const rows=(await env.DB.prepare('SELECT id,model_key,name,aliases_json FROM profit_models WHERE active=1').all()).results||[];
+  const scarfo=rows.find(r=>r.model_key==='jokh_scarfo')||rows.find(r=>/(سكايفو|سكارفو)/.test(normalizeArabic(r.name)));
+  if(!scarfo)return;
+  let aliases=[];try{aliases=JSON.parse(scarfo.aliases_json||'[]')}catch{}
+  const next=[...new Set([...aliases,'جاكيت نسائي','جكيت نسائي'])];
+  if(next.length!==aliases.length)await env.DB.prepare("UPDATE profit_models SET aliases_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify(next),scarfo.id).run();
+ });
+}
+
 export async function loadCostedModels(env){
  await ensureApprovedCatalogue(env);
  await ensureStatiMerged(env);
+ await ensureWomenJacketAlias(env);
  const models=await loadInventoryModels(env);
  const rows=(await env.DB.prepare('SELECT id,model_key,name,cost FROM profit_models WHERE active=1').all()).results||[];
  const byId=new Map(rows.map(r=>[Number(r.id),r]));
