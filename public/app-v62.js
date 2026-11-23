@@ -2406,10 +2406,19 @@ async function deliveryReconcileView(){
               if(autoMatched&&r.order){
                 orderCell=`#${r.order.order_code} • ${esc(r.order.recipient_name||'لا يوجد')}<div class="sub">المتجر: ${esc(r.order.store_name||'—')}</div>`;
               }else if(manualReview){
-                orderCell=`<select class="select delivery-order-choice" data-i="${i}">
+                // Never let an older, closed or different-shipment order be chosen merely by phone.
+                const shipment=String(r.shipment_date||r.raw_date||'').slice(0,10);
+                const eligible=(r.candidates||[]).filter(o=>{
+                  const printed=String(o.first_print_date||'').slice(0,10);
+                  const delivery=String(o.delivery_date||'').slice(0,10);
+                  const dateOK=!shipment||(printed&&printed===shipment)||(delivery&&delivery===shipment);
+                  return dateOK && !Number(o.delivery_company_settled||0);
+                });
+                r.eligible_candidates=eligible;
+                orderCell=eligible.length?`<select class="select delivery-order-choice" data-i="${i}">
                   <option value="">اختر الطلب الصحيح...</option>
-                  ${(r.candidates||[]).map(o=>`<option value="${o.id}">#${o.order_code} • ${esc(o.store_name||'—')} • ${esc(o.recipient_name||'لا يوجد')} • ${money(o.amount)}</option>`).join('')}
-                </select>`;
+                  ${eligible.map(o=>`<option value="${o.id}">#${o.order_code} • ${esc(o.store_name||'—')} • ${esc(o.recipient_name||'لا يوجد')} • ${money(o.amount)} • ${esc(o.first_print_date||'بدون تاريخ طباعة')}</option>`).join('')}
+                </select>`:'<span class="match-badge match-warn">لا يوجد طلب مطابق لتاريخ الشحنة — لا تعتمد السطر</span>';
               }else if(r.match_type==='already_settled'){
                 const o=(r.candidates||[])[0]||{};
                 orderCell=`#${esc(o.order_code||'—')} • ${esc(o.recipient_name||'لا يوجد')}<div class="sub">${esc(o.store_name||'—')} • ${esc(o.settlement_code||'كشف سابق')}</div>`;
@@ -2484,7 +2493,7 @@ async function deliveryReconcileView(){
       const note=document.querySelector(`.delivery-note-choice[data-i="${i}"]`)?.value||'';
       let matchType=r.match_type;
       if(orderId&&!automatic){
-        const selected=(r.candidates||[]).find(o=>Number(o.id)===orderId);
+        const selected=(r.eligible_candidates||[]).find(o=>Number(o.id)===orderId);
         matchType=selected&&Math.abs(Math.abs(Number(selected.amount||0))-amount)<.01?'matched':'matched_partial';
       }
       return {order_id:orderId,phone:r.phone,status,amount,delivery_fee:deliveryFee,net_amount:netAmount,has_net:r.has_net,note,match_type:matchType,original_match_type:r.match_type};
