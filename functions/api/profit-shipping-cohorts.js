@@ -5,7 +5,7 @@
 //  - partial: only the pieces the customer received (partial_received_items)
 //  - profit = actual cash from the delivery company − cost (the delivery fee is
 //    already deducted inside the cash, so it is never subtracted a second time)
-import {classifyInventoryItems} from './_inventory.js';
+import {classifyInventoryItems,loadInventoryModels} from './_inventory.js';
 import {loadCostedModels,approvedCost,canonicalModelName,normalizeArabic,STATI_ALIASES,FILLER_ALIASES,round2} from './_partial-delivery.js';
 
 const json=(x,status=200)=>new Response(JSON.stringify(x),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
@@ -44,8 +44,31 @@ const FALLBACK_MODELS=[
  {id:-18,name:'بلوز صوف',cost:3.5,aliases:['بلوز صوف','بلوزه صوف','صوف بلوز']}
 ].map(m=>({...m,unit_cost:m.cost??null,aliases:[...new Set(m.aliases.map(key))].sort((a,b)=>b.length-a.length)}));
 
+const BARE_JOKH=/(?:^|[^\p{L}])(?:جكيت|جاكيت|جاكت)\s+جوخ(?![\p{L}])(?!\s*(?:ال)?(?:كاجوال|كاجول|سكايفو|سكارفو|ستا|شتا|نسا))/u;
+const QTY_LABEL=/(?:^|[^\p{L}])(?:عدد|العدد|كميه|الكميه|كمية|الكمية)\s*[:：=\-]?\s*(\d{1,2})(?!\d)/u;
+// Explicit quantity in a free-text field: «عدد2», «الكمية: 3», «قطعتين», «لونين».
+function explicitQuantity(text){
+ const t=key(text);const m=t.match(QTY_LABEL);if(m)return Number(m[1]);
+ if(/(?:^|\s)(?:قطعتين|قطعتان|حبتين|لونين)(?=\s|$)/.test(t))return 2;
+ const u=t.match(/(?:^|\s)(\d{1,2})\s*(?:قطعه|قطع|حبه|حبات)(?=\s|$)/);return u?Number(u[1]):0;
+}
+const hasQuantityMarker=text=>/(?:عدد|العدد|كميه|كمية|قطعه|قطع|حبه|حبات|قطعتين|قطعتان|لونين|الوان|\d)/.test(key(text).replace(/(?:وزن|الوزن|طول|مقاس|قياس|سعر|السعر)\S*\s*\d+/g,' ').replace(/0?7\d{8}/g,' ').replace(/\d+(?:[.,]\d+)?\s*(?:دينار|دنانير|jd)/gi,' '));
+let catalogueError='';
 async function loadModels(env){
- let catalogue=[];try{catalogue=await loadCostedModels(env)}catch{catalogue=[]}
+ let catalogue=[];
+ try{catalogue=await loadCostedModels(env)}
+ catch(error){
+  // A failed one-time catalogue migration must not silently drop the whole catalogue
+  // (that leaves only the short fallback list and most orders unrecognised).
+  console.error('cohort: catalogue migration failed, loading catalogue directly',error);
+  catalogueError=String(error?.message||error);
+  try{
+   const base=await loadInventoryModels(env);
+   const rows=(await env.DB.prepare('SELECT id,name,cost FROM profit_models WHERE active=1').all()).results||[];
+   const cost=new Map(rows.map(r=>[Number(r.id),Number(r.cost||0)]));
+   catalogue=base.map(m=>({...m,unit_cost:approvedCost({name:m.name})??cost.get(m.id)??0}));
+  }catch(inner){catalogueError+=' | '+String(inner?.message||inner);catalogue=[]}
+ }
  const names=new Set(catalogue.map(m=>key(canonicalModelName(m.name))));
  // Merge approved aliases even when a catalogue row already exists.
  const enriched=catalogue.map(m=>{
@@ -104,7 +127,7 @@ export async function onRequest({request,env}){
  const where="date(o.first_printed_at,'+3 hours') BETWEEN ? AND ?"+(store?" AND o.store_id=?":"");
  const args=store?[date,toDate,store]:[date,toDate];
  const orders=(await env.DB.prepare(`SELECT o.id,o.order_code,o.delivery_status,o.delivery_company_settled,o.delivery_company_settlement_id,o.delivered_amount,o.cash_collected,o.amount,o.cost_of_goods,o.delivery_fee,o.raw_text,o.order_notes,o.partial_received_items,o.delivered_pieces,o.settlement_note,o.profit_reviewed_settlement_id,o.first_printed_at,date(o.first_printed_at,'+3 hours') shipment_day,o.store_id,so.imported_amount AS statement_amount,so.imported_status AS statement_status,so.match_type AS statement_match_type,ds.settlement_code AS statement_code,ds.source_name AS statement_source,date(ds.created_at,'+3 hours') AS statement_closed_on FROM orders o LEFT JOIN delivery_company_settlement_orders so ON so.rowid=(SELECT MAX(so2.rowid) FROM delivery_company_settlement_orders so2 WHERE so2.order_id=o.id AND so2.settlement_id=o.delivery_company_settlement_id) LEFT JOIN delivery_company_settlements ds ON ds.id=o.delivery_company_settlement_id WHERE o.first_printed_at IS NOT NULL AND ${where} ORDER BY o.id DESC`).bind(...args).all()).results||[];
- const models=await loadModels(env);
+ catalogueError='';const models=await loadModels(env);
 
  const inventory=new Map();
  try{
@@ -121,7 +144,7 @@ export async function onRequest({request,env}){
   const status=o.delivery_status||'pending',settled=Number(o.delivery_company_settled||0)===1;
   const isPartial=status==='partial'||status==='delivered_adjusted',isDelivered=deliveredStatuses.has(status)&&settled;
   const RETURN=new Set(['refused_fee_paid','refused_no_fee','canceled_before_arrival','returned']);
-  const reviewed=!isPartial||(Number(o.delivery_company_settlement_id||0)>0&&Number(o.profit_reviewed_settlement_id||0)===Number(o.delivery_company_settlement_id));
+  let reviewed=!isPartial||(Number(o.delivery_company_settlement_id||0)>0&&Number(o.profit_reviewed_settlement_id||0)===Number(o.delivery_company_settlement_id));
   // Shipped items: read from the order's own text with the current catalogue; the
   // print-time inventory allocation is used only when the text cannot be read.
   // Notes and original order text are independent sources. A nonempty note may
@@ -129,18 +152,35 @@ export async function onRequest({request,env}){
   // Do not concatenate the sources: that would count the same item twice.
   let items=[],itemSource='none';
   const trace=[];
-  for(const [source,text] of [['order_notes',o.order_notes],['raw_text',o.raw_text]]){
-   if(!String(text||'').trim()){trace.push({source,empty:true});continue}
-   const parsed=await classifyInventoryItems(env,String(text),models);
+  const sources=[['order_notes',String(o.order_notes||'')],['raw_text',String(o.raw_text||'')]];
+  for(const [source,text] of sources){
+   if(!text.trim()){trace.push({source,empty:true});continue}
+   const parsed=await classifyInventoryItems(env,text,models);
    trace.push({source,found:parsed.map(x=>({name:(models.find(m=>m.id===Number(x.model_id))||{}).name||String(x.model_id),quantity:x.quantity}))});
-   if(parsed.length){items=mergeItems(parsed,models);itemSource=source;break}
-   // "جكيت جوخ" is scarfo only for an unambiguous single-piece order.
-   if(!parsed.length&&/(?:جكيت|جاكيت)\\s+جوخ(?!\\s*(?:كاجوال|كاجول|سكايفو|سكارفو))/.test(key(text))&&
-      !/عدد\\s*[٢-٩2-9]|قطعتين|قطعتان|قطعتان|قطعتين|عدد\\s*1[0-9]/.test(String(text))){
-    const scarfo=models.find(m=>key(canonicalModelName(m.name))===key('جاكيت جوخ سكايفو'));
-    if(scarfo){items=mergeItems([{model_id:scarfo.id,name:scarfo.name,quantity:1}],models);itemSource=source+'_single_jokh';break}
+   if(!parsed.length)continue;
+   let list=parsed;
+   // Quantity written only in the other field («عدد2» in notes, product in raw_text):
+   // use it for a single-model order whose own text carries no quantity at all.
+   // The sources are never added together, so the same piece is not counted twice.
+   const other=sources.find(([name])=>name!==source)[1];
+   if(parsed.length===1&&parsed[0].quantity===1&&!hasQuantityMarker(text)&&other.trim()&&!(await classifyInventoryItems(env,other,models)).length){
+    const q=explicitQuantity(other);if(q>1){list=[{...parsed[0],quantity:q}];trace.push({source:'quantity_from_'+sources.find(([name])=>name!==source)[0],quantity:q})}
    }
-
+   items=mergeItems(list,models);itemSource=source;break;
+  }
+  // «جكيت جوخ» / «جاكيت جوخ» with no model word is jokh scarfo only for a single piece.
+  if(!items.length){
+   const scarfo=models.find(m=>key(canonicalModelName(m.name))===key('جاكيت جوخ سكايفو'));
+   for(const [source,text] of sources){
+    if(!scarfo||!text.trim()||!BARE_JOKH.test(key(text)))continue;
+    const probe=await classifyInventoryItems(env,text,[{id:scarfo.id,name:scarfo.name,aliases:['جاكيت جوخ','جكيت جوخ','جاكت جوخ']}]);
+    const other=sources.find(([name])=>name!==source)[1];
+    const otherQ=explicitQuantity(other);
+    const q=probe.reduce((n,x)=>n+x.quantity,0);
+    trace.push({source:source+'_bare_jokh',quantity:q,other_quantity:otherQ});
+    if(probe.length===1&&q===1&&otherQ<=1){items=mergeItems([{model_id:scarfo.id,name:scarfo.name,quantity:1}],models);itemSource=source+'_bare_jokh_single'}
+    break;
+   }
   }
   if(!items.length&&inventory.get(Number(o.id))?.length){items=mergeItems(inventory.get(Number(o.id)),models);itemSource='inventory'}
   const itemsValid=items.length>0&&items.every(i=>Number.isInteger(i.quantity)&&i.quantity>=1&&i.quantity<=50);
@@ -167,6 +207,9 @@ export async function onRequest({request,env}){
    else missing=received?'كوست إحدى القطع المستلمة غير معتمد':'لم تُحدد القطع المستلمة لهذا التسليم الجزئي';
   }
   const costKnown=cost!==null&&Number.isFinite(cost);
+  // A settled partial delivery whose received pieces are known (stored items or the
+  // two-identical-pieces rule) uses the statement's actual cash; no manual review needed.
+  if(isPartial&&settled&&costKnown&&(source==='received_items'||source==='inferred_single_model_partial'))reviewed=true;
   let profit=null;
   if(isDelivered){
    delivered++;if(isPartial)partial++;
@@ -204,7 +247,7 @@ export async function onRequest({request,env}){
  const spendArgs=store?[date,toDate,store]:[date,toDate,0];
  const spend=(await env.DB.prepare("SELECT COALESCE(SUM(amount),0) amount FROM shipping_cohort_ad_spend WHERE date BETWEEN ? AND ? AND store_id=?").bind(...spendArgs).first())?.amount||0;
  const gross=costReviewCount?null:round2(cash-costs+returnCash);
- return json({engine:'cohort-v4.1',return_cash:round2(returnCash),returns_unproven:returnsUnproven,delivered_unsettled:deliveredUnsettled,known_profit_with_returns:round2(knownProfit+returnCash),model_costs:MODEL_COSTS,costs_verified:costReviewCount===0,date,to_date:toDate,store_id:store,total:orders.length,delivered,partial,returned,refused_with_fee:refusedWithFee,no_reply_after_arrival:noReplyAfterArrival,other_returns:otherReturns,pending,other,unreviewed,
+ return json({engine:'cohort-v4.2',catalogue_error:catalogueError||null,return_cash:round2(returnCash),returns_unproven:returnsUnproven,delivered_unsettled:deliveredUnsettled,known_profit_with_returns:round2(knownProfit+returnCash),model_costs:MODEL_COSTS,costs_verified:costReviewCount===0,date,to_date:toDate,store_id:store,total:orders.length,delivered,partial,returned,refused_with_fee:refusedWithFee,no_reply_after_arrival:noReplyAfterArrival,other_returns:otherReturns,pending,other,unreviewed,
   cost_review_count:costReviewCount,received_pieces:receivedPieces,pieces_unknown_orders:piecesUnknown,delivered_pieces_mapped:receivedPieces,
   sales:round2(sales),cash:round2(cash),costs:round2(costs),fees:round2(fees),cash_difference:round2(cashDiscrepancy),cash_mismatch_orders:cashMismatchOrders,
   gross_profit:gross,known_profit:round2(knownProfit),known_profit_orders:knownOrders,ad_spend:Number(spend),net_after_ads:gross===null?null:round2(gross-Number(spend)),

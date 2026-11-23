@@ -119,7 +119,9 @@ function quantityFor(lines,index,match,lineMatches,allMatches){
  let found=before.match(/(?:^|\s)(?:عدد|العدد|كميه|الكميه|تفصيل)\s*[:=\-]?\s*(\d{1,3})\s*$/i)||before.match(/(?:^|\s)(\d{1,3})\s*(?:قطعه|قطع|حبه|حبات|لون|الوان)\s*$/i);
  if(found)return Math.max(1,Number(found[1]));
  count=colorQuantityCount(after);if(count)return count;
- found=after.match(QUANTITY_LABEL)||after.match(QUANTITY_UNIT)||after.match(/^\s*(?:[+،,:=\-]\s*)?(\d{1,3})(?=\s|$)/);
+ // A bare number right after the model is a quantity only when it is small and not a
+ // price ("جاكيت جوخ كاجوال 20 دينار شامل التوصيل" is 20 JOD, not 20 pieces).
+ found=after.match(QUANTITY_LABEL)||after.match(QUANTITY_UNIT)||after.match(/^\s*(?:[+،,:=\-x×*]\s*)?([1-9]|1[0-9]|20)(?=\s|$)(?!\s*(?:دينار|دنانير|د(?:\s|$)|jd|jod|شامل|مع\s|بالتوصيل|توصيل|سعر))/i);
  if(found)return Math.max(1,Number(found[1]));
  if(index>0&&!allMatches[index-1].length){const q=standaloneQuantity(lines[index-1]);if(q&&!(index>1&&allMatches[index-2].length))return q}
  let end=index+1,colors=colorCount(lines[index]);

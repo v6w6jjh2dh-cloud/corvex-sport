@@ -2701,7 +2701,7 @@ async function dailyProfitsView(){
         }
         return o.items.length?o.items.map(i=>esc(i.name)+' × '+i.quantity+' × '+(i.unit_cost===null?'؟':money(i.unit_cost))+' = '+(i.total_cost===null?'؟':money(i.total_cost))).join('، '):'لم يتم التعرف على الأصناف';
       };
-      target.innerHTML='<div class="sub" style="font-size:11px">محرك الأرباح: '+esc(d.engine||'')+' • شحنات يوم '+esc(d.date)+' فقط، بنتائجها من كل الكشوف المسكّرة مهما كان تاريخ تسكيرها</div>'+
+      target.innerHTML=(d.catalogue_error?'<div class="partial-summary-warning">⚠ تعذر تحديث قائمة الموديلات تلقائيًا؛ تم استخدام القائمة الحالية: '+esc(d.catalogue_error)+'</div>':'')+'<div class="sub" style="font-size:11px">محرك الأرباح: '+esc(d.engine||'')+' • شحنات يوم '+esc(d.date)+' فقط، بنتائجها من كل الكشوف المسكّرة مهما كان تاريخ تسكيرها</div>'+
       '<div class="accounting-stats" style="margin:12px 0">'+summary.map(([label,value])=>'<div><span>'+label+'</span><b>'+Number(value||0)+'</b></div>').join('')+'</div>'+
       '<div class="accounting-stats" style="margin:12px 0">'+[
         box('الكاش الفعلي من شركة التوصيل',d.cash),
