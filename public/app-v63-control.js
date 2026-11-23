@@ -1,4 +1,6 @@
 (()=>{
+  // returnsCenterView is not part of the current app; skip this legacy layer instead of throwing at load.
+  if(typeof returnsCenterView!=='function')return;
   const CANCELLED=new Set(['refused_fee_paid','refused_no_fee','canceled_before_arrival']);
   const STATUS_DETAIL={refused_fee_paid:'رفض ودفع أجور',refused_no_fee:'رفض وعدم دفع أجور',canceled_before_arrival:'ملغي قبل الوصول'};
   const originalApi=api;

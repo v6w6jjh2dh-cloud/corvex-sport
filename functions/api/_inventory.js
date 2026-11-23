@@ -65,7 +65,7 @@ function parseAliases(row){
  const names=[row.name,...aliases];
  // "ايبوكسي" and "سي ايبوكسي" are the same merchandise model.
  // Resolve both spellings to the existing model id and stored unit cost.
- if(names.some(name=>/^(?:سي\\s+)?ايبوكسي$/.test(normalize(name))))names.push('ايبوكسي','سي ايبوكسي');
+ if(names.some(name=>/^(?:سي\s+)?(?:ايبوكسي|ايوبكسي)$/.test(normalize(name))))names.push('ايبوكسي','سي ايبوكسي','ايوبكسي');
  return [...new Set(names.map(normalize).filter(x=>x.length>1))].sort((a,b)=>b.length-a.length);
 }
 

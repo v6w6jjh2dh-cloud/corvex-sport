@@ -2162,7 +2162,8 @@ function deliveryHeaderGuess(headers,kind){
     amount:['سعر','السعر','مبلغ','القيمه','القيمة','تحصيل','المحصل','cash','amount','cod','price'],
     fee:['اجور التوصيل','أجور التوصيل','توصيل','delivery fee','fee'],
     net:['الصافي','صافي','الصافى','net amount','net'],
-    note:['ملاحظه','ملاحظات','note','notes','سبب','reason']
+    note:['ملاحظه','ملاحظات','note','notes','سبب','reason'],
+    code:['رقم الشحنه','رقم الشحنة','رقم البوليصه','رقم البوليصة','رقم الطلب','كود الطلب','باركود','barcode','shipment','tracking','awb','reference','order id']
   };
   const list=tests[kind]||[];
   const pool=kind==='amount'?hs.filter(x=>!x.n.includes('صافي')&&!x.n.includes('صافى')&&!x.n.includes('net')):hs;
@@ -2173,7 +2174,7 @@ function deliveryHeaderGuess(headers,kind){
 function mapDeliveryCompanyStatus(raw){
   const n=normalizeArabic(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();
   if(!n)return '';
-  if((n.includes('تم التسليم')||n.includes('مسلم'))&&(n.includes('مرتجع')||n.includes('جزئي')||n.includes('جزء')))return 'partial';
+  if((n.includes('تم التسليم')||n.includes('مسلم'))&&(n.includes('مرتجع')||n.includes('جزئي')||n.includes('جزيي')||n.includes('جزء')))return 'partial';
   if(n.includes('تم التسليم')||n.includes('مسلم')||n.includes('delivered')||n==='done')return 'delivered';
   if(n.includes('بعد الوصول')||n.includes('لا رد')||n.includes('لارد'))return 'refused_no_fee';
   if((n.includes('رفض')||n.includes('راجع')||n.includes('مرتجع'))&&(n.includes('عدم')||n.includes('بدون')||n.includes('لم يدفع')))return 'refused_no_fee';
@@ -2217,7 +2218,7 @@ async function deliveryReconcileView(){
     <div class="page-title">
       <div>
         <h1>تسوية شركة التوصيل</h1>
-        <div class="sub">اختر المتجر، ارفع الكشف أو الصقه، والمطابقة تتم برقم الهاتف داخل نفس المتجر</div>
+        <div class="sub">اختر المتجر، ارفع الكشف أو الصقه. المطابقة برقم الشحنة أولًا ثم الهاتف وتاريخ خروج الشحنة والمتجر والقيمة</div>
       </div>
     </div>
 
@@ -2280,12 +2281,14 @@ async function deliveryReconcileView(){
     const fee=deliveryHeaderGuess(parsed.headers,'fee');
     const net=deliveryHeaderGuess(parsed.headers,'net');
     const note=deliveryHeaderGuess(parsed.headers,'note');
+    const shipmentCode=deliveryHeaderGuess(parsed.headers,'code');
 
     $('#deliveryMapping').style.display='block';
     $('#deliveryMapping').innerHTML=`
       <div class="delivery-map-card">
         <h3>تحديد أعمدة الكشف</h3>
         <div class="delivery-map-grid">
+          <div class="field"><label>رقم الشحنة / الطلب</label><select id="mapShipmentCode" class="select">${options(shipmentCode)}</select></div>
           <div class="field"><label>رقم الهاتف *</label><select id="mapPhone" class="select">${options(phone)}</select></div>
           <div class="field"><label>تاريخ الشحنة</label><select id="mapShipmentDate" class="select">${options(shipmentDate)}</select></div>
           <div class="field"><label>الحالة *</label><select id="mapStatus" class="select">${options(status)}</select></div>
@@ -2336,6 +2339,7 @@ async function deliveryReconcileView(){
     const feeCol=decodeURIComponent($('#mapFee').value||'');
     const netCol=decodeURIComponent($('#mapNet').value||'');
     const noteCol=decodeURIComponent($('#mapNote').value||'');
+    const codeCol=decodeURIComponent($('#mapShipmentCode')?.value||'');
 
     if(!phoneCol)return toast('حدد عمود رقم الهاتف');
     if(!statusCol)return toast('حدد عمود الحالة');
@@ -2356,7 +2360,8 @@ async function deliveryReconcileView(){
         delivery_fee:deliveryFee,
         net_amount:netAmount,
         has_net:hasNet,
-        note:noteCol?r[noteCol]||'':''
+        note:noteCol?r[noteCol]||'':'',
+        shipment_code:codeCol?String(r[codeCol]||''):''
       };
     });
 
@@ -2366,204 +2371,255 @@ async function deliveryReconcileView(){
         body:JSON.stringify({store_id:storeId,rows})
       });
 
-      previewRows=(d.rows||[]).map((x,i)=>({...x,raw_status:rows[i]?.raw_status||'',raw_date:rows[i]?.shipment_date||'',status:rows[i]?.status||'',delivery_fee:Number(x.delivery_fee??rows[i]?.delivery_fee??0),net_amount:x.has_net?Number(x.net_amount??0):Number(x.amount||0)-Number(x.delivery_fee||0),has_net:Boolean(x.has_net)}));
+      previewRows=(d.rows||[]).map((x,i)=>({...x,raw_status:rows[i]?.raw_status||'',raw_date:rows[i]?.shipment_date||'',status:rows[i]?.status||x.status||'',delivery_fee:Number(x.delivery_fee??rows[i]?.delivery_fee??0),net_amount:x.has_net?Number(x.net_amount??0):Number(x.amount||0)-Number(x.delivery_fee||0),has_net:Boolean(x.has_net),
+        selected_order_id:['matched','matched_partial'].includes(x.match_type)?Number(x.order_id||0):0,
+        auto:['matched','matched_partial'].includes(x.match_type),items:null,items_order_id:0,piece:{},confirm_higher:false,confirm_outside:false,confirm_discount:false}));
       const settlementRank=row=>{
-        const special=row.status==='partial'||row.status==='delivered_adjusted'||/(مرتجع|جزئي|جزء|تعديل قيم)/.test(normalizeArabic(row.raw_status||''));
-        if(row.match_type==='matched')return special?1:0;
-        if(row.match_type==='duplicate')return 2;
-        return 3;
+        if(row.auto&&!reconcileNeedsItems(row))return 3;
+        if(row.match_type==='already_settled')return 4;
+        if(row.match_type==='unmatched')return 5;
+        return row.auto?1:0;
       };
       previewRows.sort((a,b)=>settlementRank(a)-settlementRank(b)||Number(a.row_index||0)-Number(b.row_index||0));
       renderDeliveryPreview(d.summary||{});
     }catch(e){toast(e.message)}
   }
 
+  // ---------- reconcile helpers (row state lives on previewRows[i]) ----------
+  const RECONCILE_RETURN=['refused_fee_paid','refused_no_fee','canceled_before_arrival'];
+  function reconcileOrder(r){return (r.candidates||[]).find(o=>Number(o.id)===Number(r.selected_order_id))||(Number(r.order?.id)===Number(r.selected_order_id)?r.order:null)}
+  function reconcileNeedsItems(r){
+    const o=reconcileOrder(r);if(!o)return false;
+    if(r.status==='partial'||r.status==='delivered_adjusted')return true;
+    return r.status==='delivered'&&Number(r.amount||0)<Number(o.amount||0)-.001;
+  }
+  function reconcilePieces(r){
+    if(!r.items)return null;
+    const items=r.items.map((it,j)=>{
+      const p=r.piece[j]||{received:it.quantity,returned:0};
+      const received=Number(p.received),returned=Number(p.returned);
+      return {...it,received,returned,cost:Math.round(received*Number(it.unit_cost||0)*100)/100};
+    });
+    return {items,received:items.reduce((n,x)=>n+x.received,0),returned:items.reduce((n,x)=>n+x.returned,0),cost:Math.round(items.reduce((n,x)=>n+x.cost,0)*100)/100};
+  }
+  // Returns {ok:true} or {ok:false,reason} — a line is never committed while ok is false.
+  function reconcileCheck(r){
+    if(r.match_type==='already_settled')return {ok:false,skip:true,reason:r.reason||'مسوّى سابقًا — لن يُحسب مرتين'};
+    const o=reconcileOrder(r);
+    if(!o)return {ok:false,reason:r.reason||(r.match_type==='unmatched'?'لا يوجد طلب مطابق':'اختر الطلب الصحيح')};
+    if(Number(o.delivery_company_settled||0))return {ok:false,reason:'الطلب المختار مسوّى سابقًا'};
+    if(!r.status)return {ok:false,reason:'اختر الحالة المعتمدة'};
+    if(!r.auto&&(o.date_ok===false||!o.same_store)&&!r.confirm_outside)return {ok:false,reason:o.date_ok===false?'الطلب المختار خارج تاريخ خروج الشحنة — أكّد أنه نفس الشحنة':'الطلب المختار من متجر آخر — أكّد الاختيار'};
+    const isReturn=RECONCILE_RETURN.includes(r.status);
+    if(!isReturn&&Number(r.amount||0)>Number(o.amount||0)+.001&&!r.confirm_higher)return {ok:false,reason:`قيمة الكشف (${money(r.amount)}) أكبر من قيمة الطلب (${money(o.amount)}) — أكّد المبلغ المحصل`};
+    if(reconcileNeedsItems(r)){
+      if(!r.items||r.items_order_id!==Number(o.id))return {ok:false,reason:'جارٍ تحميل موديلات الطلب...'};
+      if(!r.items.length)return {ok:false,reason:'لم يتم التعرف على موديلات الطلب من نصه — لا يمكن تحديد القطع'};
+      const p=reconcilePieces(r);
+      for(const it of p.items){
+        if(!Number.isInteger(it.received)||!Number.isInteger(it.returned)||it.received<0||it.returned<0)return {ok:false,reason:`كمية غير صحيحة في ${it.model_name}`};
+        if(it.received+it.returned!==it.quantity)return {ok:false,reason:`${it.model_name}: المستلم + المرتجع يجب أن يساوي ${it.quantity}`};
+      }
+      if(p.received<1)return {ok:false,reason:'لم يُستلم أي قطعة — اختر حالة رفض/مرتجع'};
+      if(p.returned<1){
+        if(r.status==='delivered'){if(!r.confirm_discount)return {ok:false,reason:'كل القطع مستلمة بمبلغ أقل من الطلب — أكّد الخصم'}}
+        else return {ok:false,reason:'كل القطع مستلمة؛ غيّر الحالة إلى «تم التسليم» إن كان خصمًا'};
+      }
+    }
+    return {ok:true};
+  }
+  async function reconcileLoadItems(i){
+    const r=previewRows[i],o=reconcileOrder(r);if(!o)return;
+    if(r.items&&r.items_order_id===Number(o.id))return;
+    if(r.loading_for===Number(o.id))return;
+    r.loading_for=Number(o.id);r.items=null;r.items_order_id=0;r.piece={};
+    try{
+      const info=await api('/partial-delivery-items?order_id='+o.id);
+      if(Number(reconcileOrder(previewRows[i])?.id)!==Number(o.id))return;
+      r.items=info.items||[];r.items_order_id=Number(o.id);r.order_text=info.order_text||'';
+      r.items.forEach((it,j)=>r.piece[j]={received:it.quantity,returned:0});
+    }catch(e){r.items=[];r.items_order_id=Number(o.id);toast('تعذر تحميل موديلات الطلب: '+e.message)}
+    finally{r.loading_for=0}
+    renderReconcilePanel(i);
+  }
+  function renderReconcileStatus(i){
+    const r=previewRows[i],cell=document.querySelector(`.reconcile-state[data-i="${i}"]`);if(!cell)return;
+    const c=reconcileCheck(r);
+    cell.innerHTML=c.ok?'<span class="match-badge match-ok">✓ جاهز للاعتماد</span>':`<span class="match-badge ${c.skip?'match-ok':'match-bad'}">${c.skip?'لن يُعاد احتسابه':'⛔ موقوف'}</span><div class="sub reconcile-reason">${esc(c.reason||'')}</div>`;
+    const bar=$('#reconcileCounters');
+    if(bar){const ready=previewRows.filter(x=>reconcileCheck(x).ok).length,held=previewRows.filter(x=>{const k=reconcileCheck(x);return !k.ok&&!k.skip}).length;bar.innerHTML=`جاهز للاعتماد: <b>${ready}</b> • موقوف بانتظار القرار: <b>${held}</b>`}
+  }
+  function renderReconcilePanel(i){
+    const r=previewRows[i],panel=document.querySelector(`.reconcile-panel[data-i="${i}"]`);if(!panel)return;
+    const o=reconcileOrder(r),showChooser=!r.auto&&(r.candidates||[]).length&&r.match_type!=='already_settled';
+    const tag=(t,cls='')=>`<span class="reconcile-tag ${cls}">${t}</span>`;
+    let html='';
+    if(r.reason&&!r.auto)html+=`<div class="reconcile-why">${esc(r.reason)}</div>`;
+    if(r.auto&&r.match_evidence)html+=`<div class="sub">طريقة المطابقة: ${esc(r.match_evidence)}</div>`;
+    if(showChooser){
+      html+='<div class="reconcile-choices"><b>اختر الطلب الصحيح لهذا السطر:</b>'+(r.candidates||[]).map(c=>{
+        const blocked=Number(c.delivery_company_settled||0)||previewRows.some((x,k)=>k!==i&&Number(x.selected_order_id)===Number(c.id));
+        const tags=[c.date_ok===false?tag('خارج تاريخ الشحنة','warn'):c.date_ok?tag('تاريخ الشحنة مطابق','ok'):'',!c.same_store?tag('متجر آخر: '+esc(c.store_name||'—'),'warn'):'',c.phone_source==='order_text'?tag('الرقم موجود في نص الطلب','warn'):'',c.amount_relation==='order_lower'?tag('قيمة الطلب أقل من الكشف','warn'):c.amount_relation==='equal'?tag('نفس القيمة','ok'):'',Number(c.delivery_company_settled||0)?tag('مسوّى سابقًا '+esc(c.settlement_code||''),'bad'):''].join('');
+        return `<label class="reconcile-choice ${blocked?'disabled':''}"><input type="radio" name="rc-${i}" class="reconcile-order" data-i="${i}" value="${c.id}" ${Number(r.selected_order_id)===Number(c.id)?'checked':''} ${blocked?'disabled':''}>
+          <span><b>#${esc(c.order_code)}</b> • ${esc(c.recipient_name||'لا يوجد')} • ${money(c.amount)} د.أ<br><span class="sub">${esc(c.store_name||'—')} • طباعة: ${esc(c.first_print_date||'بدون')} • ${esc(c.phone||'')}</span><br>${tags}</span></label>`;
+      }).join('')+'</div>';
+      if(o&&(o.date_ok===false||!o.same_store))html+=`<label class="reconcile-confirm"><input type="checkbox" class="reconcile-confirm-outside" data-i="${i}" ${r.confirm_outside?'checked':''}> أؤكد أن الطلب #${esc(o.order_code)} هو نفس هذه الشحنة رغم ${o.date_ok===false?'اختلاف التاريخ':'اختلاف المتجر'}</label>`;
+    }
+    if(o&&!RECONCILE_RETURN.includes(r.status)&&Number(r.amount||0)>Number(o.amount||0)+.001)html+=`<label class="reconcile-confirm"><input type="checkbox" class="reconcile-confirm-higher" data-i="${i}" ${r.confirm_higher?'checked':''}> أؤكد أن شركة التوصيل حصّلت ${money(r.amount)} د.أ فعلًا رغم أن قيمة الطلب ${money(o.amount)} د.أ</label>`;
+    if(o&&reconcileNeedsItems(r)){
+      if(!r.items||r.items_order_id!==Number(o.id)){html+='<div class="sub">جارٍ تحميل موديلات الطلب...</div>';setTimeout(()=>reconcileLoadItems(i),0)}
+      else if(!r.items.length)html+=`<div class="reconcile-why">لم يتم التعرف على موديلات الطلب #${esc(o.order_code)} من نصه؛ لا يمكن اعتماد التسليم الجزئي.</div>`;
+      else{
+        const p=reconcilePieces(r),fee=Number(r.delivery_fee||0),profit=Number(r.amount||0)-p.cost-fee;
+        html+=`<div class="reconcile-items"><b>موديلات الطلب #${esc(o.order_code)} — حدّد المستلم والمرتجع:</b>
+          <table class="table reconcile-items-table"><thead><tr><th>الموديل</th><th>المشحون</th><th>استلم العميل</th><th>مرتجع</th><th>كوست القطعة</th><th>كوست المستلم</th></tr></thead><tbody>
+          ${p.items.map((it,j)=>`<tr><td>${esc(it.model_name)}</td><td>${it.quantity}</td>
+            <td><input class="input reconcile-qty" data-i="${i}" data-j="${j}" data-kind="received" type="number" inputmode="numeric" min="0" max="${it.quantity}" step="1" value="${it.received}"></td>
+            <td><input class="input reconcile-qty" data-i="${i}" data-j="${j}" data-kind="returned" type="number" inputmode="numeric" min="0" max="${it.quantity}" step="1" value="${it.returned}"></td>
+            <td>${money(it.unit_cost)}</td><td class="reconcile-line-cost" data-i="${i}" data-j="${j}">${money(it.cost)}</td></tr>`).join('')}
+          </tbody></table>
+          <div class="reconcile-totals" data-i="${i}">القطع المستلمة: <b>${p.received}</b> • المرتجعة: <b>${p.returned}</b> • كوست المستلم: <b>${money(p.cost)}</b> • الكاش الوارد من الشركة: <b>${money(r.net_amount)}</b> • الربح: <b>${money(profit)}</b></div>
+          ${r.status==='delivered'&&p.returned===0?`<label class="reconcile-confirm"><input type="checkbox" class="reconcile-confirm-discount" data-i="${i}" ${r.confirm_discount?'checked':''}> كل القطع سُلّمت والمبلغ الأقل خصم متفق عليه</label>`:''}
+        </div>`;
+      }
+    }
+    panel.innerHTML=html;
+    panel.closest('tr').style.display=html?'':'none';
+    renderReconcileStatus(i);
+  }
+  function refreshReconcileTotals(i){
+    const r=previewRows[i],p=reconcilePieces(r),box=document.querySelector(`.reconcile-totals[data-i="${i}"]`);
+    if(p&&box){
+      p.items.forEach((it,j)=>{const c=document.querySelector(`.reconcile-line-cost[data-i="${i}"][data-j="${j}"]`);if(c)c.textContent=money(it.cost)});
+      box.innerHTML=`القطع المستلمة: <b>${p.received}</b> • المرتجعة: <b>${p.returned}</b> • كوست المستلم: <b>${money(p.cost)}</b> • الكاش الوارد من الشركة: <b>${money(r.net_amount)}</b> • الربح: <b>${money(Number(r.amount||0)-p.cost-Number(r.delivery_fee||0))}</b>`;
+    }
+    renderReconcileStatus(i);
+  }
+
   function renderDeliveryPreview(summary){
-    const unresolved=previewRows.filter(x=>x.match_type!=='matched').length;
+    const label={matched:['مطابق','match-ok'],matched_partial:['مطابق — قيمة مختلفة','match-ok'],duplicate:['أكثر من طلب محتمل','match-warn'],review_amount:['بحاجة اختيار','match-warn'],review_amount_higher:['قيمة الكشف أكبر','match-warn'],review_date:['تاريخ شحنة مختلف','match-warn'],review_code:['رقم شحنة مختلف','match-warn'],already_settled:['مسوّى سابقًا','match-ok'],other_store:['موجود بمتجر آخر','match-warn'],unmatched:['غير موجود','match-bad']};
     $('#deliveryPreview').innerHTML=`
       <div class="delivery-summary">
         <div><span>إجمالي الكشف</span><b>${summary.total||0}</b></div>
-        <div class="ok"><span>مطابق مؤكد</span><b>${summary.matched||0}</b></div>
-        <div class="warn"><span>رقم مكرر</span><b>${summary.duplicate||0}</b></div>
-        <div class="warn"><span>بحاجة مراجعة</span><b>${summary.review||0}</b></div>
+        <div class="ok"><span>مطابق تلقائيًا</span><b>${summary.matched||0}</b></div>
+        <div class="warn"><span>بحاجة قرار</span><b>${(summary.review||0)+(summary.duplicate||0)+(summary.other_store||0)}</b></div>
         <div><span>مسوّى سابقًا</span><b>${summary.already_settled||0}</b></div>
-        <div class="warn"><span>في متجر آخر</span><b>${summary.other_store||0}</b></div>
         <div class="bad"><span>غير موجود</span><b>${summary.unmatched||0}</b></div>
       </div>
-
-      <div class="sub delivery-review-note">راجع المكرر وغير المعروف قبل الاعتماد. الطلبات غير المحسومة لن تتغير.</div>
-
+      <div class="sub delivery-review-note">المطابقة: رقم الشحنة أولًا، ثم الهاتف + تاريخ خروج الشحنة + المتجر + القيمة. لا يُربط أي سطر بطلب قديم لمجرد تطابق الهاتف، والسطر غير المحسوم يُوقف ولا يُعتمد.</div>
       <div class="table-wrap">
         <table class="table delivery-preview-table">
-          <thead>
-            <tr><th>#</th><th>الهاتف</th><th>تاريخ الشحنة</th><th>المطابقة</th><th>الطلب</th><th>حالة الكشف</th><th>الحالة المعتمدة</th><th>السعر</th><th>أجور التوصيل</th><th>الصافي</th><th>ملاحظة</th></tr>
-          </thead>
+          <thead><tr><th>#</th><th>الهاتف</th><th>تاريخ الشحنة</th><th>المطابقة</th><th>الطلب</th><th>حالة الكشف</th><th>الحالة المعتمدة</th><th>السعر</th><th>أجور التوصيل</th><th>الصافي</th><th>ملاحظة</th><th>القرار</th></tr></thead>
           <tbody>
             ${previewRows.map((r,i)=>{
-              let orderCell='—';
-              const autoMatched=['matched','matched_partial'].includes(r.match_type);
-              const manualReview=['duplicate','review_amount','review_amount_higher','other_store'].includes(r.match_type);
-              if(autoMatched&&r.order){
-                orderCell=`#${r.order.order_code} • ${esc(r.order.recipient_name||'لا يوجد')}<div class="sub">المتجر: ${esc(r.order.store_name||'—')}</div>`;
-              }else if(manualReview){
-                // Never let an older, closed or different-shipment order be chosen merely by phone.
-                const shipment=String(r.shipment_date||r.raw_date||'').slice(0,10);
-                const eligible=(r.candidates||[]).filter(o=>{
-                  const printed=String(o.first_print_date||'').slice(0,10);
-                  const delivery=String(o.delivery_date||'').slice(0,10);
-                  const dateOK=!shipment||(printed&&printed===shipment)||(delivery&&delivery===shipment);
-                  return dateOK && !Number(o.delivery_company_settled||0);
-                });
-                r.eligible_candidates=eligible;
-                orderCell=eligible.length?`<select class="select delivery-order-choice" data-i="${i}">
-                  <option value="">اختر الطلب الصحيح...</option>
-                  ${eligible.map(o=>`<option value="${o.id}">#${o.order_code} • ${esc(o.store_name||'—')} • ${esc(o.recipient_name||'لا يوجد')} • ${money(o.amount)} • ${esc(o.first_print_date||'بدون تاريخ طباعة')}</option>`).join('')}
-                </select>`:'<span class="match-badge match-warn">لا يوجد طلب مطابق لتاريخ الشحنة — لا تعتمد السطر</span>';
-              }else if(r.match_type==='already_settled'){
-                const o=(r.candidates||[])[0]||{};
-                orderCell=`#${esc(o.order_code||'—')} • ${esc(o.recipient_name||'لا يوجد')}<div class="sub">${esc(o.store_name||'—')} • ${esc(o.settlement_code||'كشف سابق')}</div>`;
-              }else if(r.match_type==='other_store'){
-                const stores=[...new Set((r.candidates||[]).map(o=>o.store_name).filter(Boolean))];
-                orderCell=`موجود في: ${esc(stores.join('، ')||'متجر آخر')}`;
-              }
-              const badge=r.match_type==='matched'
-                ?'<span class="match-badge match-ok">مطابق</span>'
-                :r.match_type==='matched_partial'
-                  ?'<span class="match-badge match-ok">مطابق — قيمة معدلة</span>'
-                :r.match_type==='duplicate'
-                  ?'<span class="match-badge match-warn">مكرر</span>'
-                  :r.match_type==='review_amount'
-                    ?'<span class="match-badge match-warn">راجع اختلاف القيمة</span>'
-                    :r.match_type==='review_amount_higher'
-                      ?'<button type="button" class="btn btn-soft delivery-pieces-btn" data-i="'+i+'">اختيار الموديلات والقطع</button><div class="delivery-pieces-panel" data-i="'+i+'"></div>'
-                      :r.match_type==='already_settled'
-                        ?'<span class="match-badge match-ok">مسوّى سابقًا</span>'
-                        :r.match_type==='other_store'
-                          ?'<span class="match-badge match-warn">موجود بمتجر آخر</span>'
-                  :r.match_type==='date_mismatch'
-                    ?'<span class="match-badge match-warn">تاريخ مختلف</span>'
-                    :'<span class="match-badge match-bad">غير موجود</span>';
-
-              return `<tr>
-                <td>${r.row_index}</td>
-                <td>${esc(r.phone||'')}</td>
-                <td>${esc(r.raw_date||r.shipment_date||'—')}</td>
-                <td>${badge}</td>
-                <td>${orderCell}</td>
-                <td>${esc(r.raw_status||'')}</td>
+              const [text,cls]=label[r.match_type]||['غير معروف','match-bad'];
+              const o=r.auto?r.order:null;
+              const orderCell=o?`#${esc(o.order_code)} • ${esc(o.recipient_name||'لا يوجد')}<div class="sub">${esc(o.store_name||'—')} • ${money(o.amount)} د.أ</div>`
+                :r.match_type==='already_settled'?(r.candidates||[]).map(c=>`#${esc(c.order_code)}<div class="sub">${esc(c.settlement_code||'كشف سابق')}</div>`).join('')
+                :(r.candidates||[]).length?'<span class="sub">اختر من الأسفل ↓</span>':'—';
+              return `<tr class="reconcile-row">
+                <td>${r.row_index}</td><td>${esc(r.phone||'')}</td><td>${esc(r.raw_date||r.shipment_date||'—')}</td>
+                <td><span class="match-badge ${cls}">${text}</span></td><td>${orderCell}</td><td>${esc(r.raw_status||'')}</td>
                 <td><select class="select delivery-status-choice" data-i="${i}" data-raw-status="${encodeURIComponent(r.raw_status||'')}">${deliveryStatusOptions(r.status||'')}</select></td>
                 <td><input class="input delivery-amount-choice" data-i="${i}" inputmode="decimal" value="${Number(r.amount||0)}"></td>
                 <td><input class="input delivery-fee-choice" data-i="${i}" inputmode="decimal" value="${Number(r.delivery_fee||0)}"></td>
                 <td><input class="input delivery-net-choice" data-i="${i}" inputmode="decimal" value="${Number(r.net_amount||0)}"></td>
                 <td><input class="input delivery-note-choice" data-i="${i}" value="${esc(r.note||'')}"></td>
-              </tr>`;
+                <td class="reconcile-state" data-i="${i}"></td>
+              </tr><tr class="reconcile-panel-row"><td colspan="12"><div class="reconcile-panel" data-i="${i}"></div></td></tr>`;
             }).join('')}
           </tbody>
         </table>
       </div>
-
       <div class="delivery-commit-bar">
-        <div><b>كل سطر يعرض رقم الطلب ومتجره الصحيح.</b><div class="sub">إذا ظهر الطلب في متجر آخر، اختره من القائمة؛ ولا يمكن اعتماد نفس الطلب مرتين.</div></div>
+        <div><b id="reconcileCounters"></b><div class="sub">الأسطر الموقوفة لا تتغير وتبقى مفتوحة لكشف لاحق. الكاش المعتمد هو صافي شركة التوصيل وليس سعر الطلب.</div></div>
         <button id="commitDeliveryReport" class="btn btn-accent">اعتماد وتسكير الكشف</button>
       </div>`;
+    if(!document.getElementById('reconcileStyles')){
+      const st=document.createElement('style');st.id='reconcileStyles';
+      st.textContent=`.reconcile-panel-row td{background:#f8fafc;padding:8px 12px}.reconcile-why{background:#fff7e6;border:1px solid #f5c26b;border-radius:10px;padding:8px 10px;margin:4px 0 8px}.reconcile-choices{display:grid;gap:6px;margin:6px 0}.reconcile-choice{display:flex;gap:8px;align-items:flex-start;border:1px solid #d9e2ec;border-radius:10px;padding:8px;background:#fff;cursor:pointer}.reconcile-choice.disabled{opacity:.5;cursor:not-allowed}.reconcile-tag{display:inline-block;font-size:12px;border-radius:999px;padding:1px 8px;margin:3px 0 0 4px;background:#e6f4ea;color:#1e6b34}.reconcile-tag.warn{background:#fff4d6;color:#8a5a00}.reconcile-tag.bad{background:#fde8e8;color:#9b1c1c}.reconcile-confirm{display:block;margin:6px 0;font-weight:600}.reconcile-items{margin-top:8px}.reconcile-items-table{min-width:520px;margin:6px 0}.reconcile-items-table input{max-width:80px}.reconcile-totals{background:#eef6ff;border-radius:10px;padding:8px}.reconcile-reason{max-width:240px;white-space:normal}`;
+      document.head.appendChild(st);
+    }
+    previewRows.forEach((r,i)=>renderReconcilePanel(i));
 
     $('#commitDeliveryReport').onclick=commitReport;
-    document.querySelectorAll('.delivery-pieces-btn').forEach(btn=>btn.addEventListener('click',async()=>{
-      const i=Number(btn.dataset.i),r=previewRows[i];
-      const orderId=Number(document.querySelector(`.delivery-order-choice[data-i="${i}"]`)?.value||r.order?.id||0);
-      if(!orderId)return toast('اختر الطلب الصحيح أولاً حتى تظهر موديلاته');
-      try{
-        const info=await api('/partial-delivery-items?order_id='+orderId);
-        const items=info.items||[];
-        if(!items.length)return toast('لم يتم التعرف على موديلات هذا الطلب');
-        r.pieces_order_id=orderId;
-        r.pieces_items=items;
-        const panel=document.querySelector(`.delivery-pieces-panel[data-i="${i}"]`);
-        panel.innerHTML='<div class="sub">حدد عدد القطع المستلمة فعلياً من كل موديل:</div>'+items.map((item,j)=>
-          `<label style="display:block;margin:8px 0">${esc(item.model_name)} (من ${item.quantity}) <input class="input delivery-piece-qty" data-j="${j}" type="number" min="0" max="${item.quantity}" step="1" value="${item.quantity}" style="max-width:90px"></label>`
-        ).join('')+'<div class="sub">تُحفظ الكميات عند اعتماد الكشف، ولا تتغير قيمة الكاش تلقائياً.</div>';
-      }catch(e){toast(e.message)}
-    }));
-    document.querySelectorAll('.delivery-order-choice').forEach(select=>select.addEventListener('change',()=>{
-      const i=Number(select.dataset.i),r=previewRows[i];
-      r.pieces_order_id=null;r.pieces_items=null;
-      const panel=document.querySelector(`.delivery-pieces-panel[data-i="${i}"]`);
-      if(panel)panel.innerHTML='';
-    }));
-
-    document.querySelectorAll('.delivery-amount-choice,.delivery-fee-choice').forEach(input=>input.addEventListener('input',()=>{
-      const i=input.dataset.i,row=previewRows[i];
-      if(row?.has_net)return;
-      const amount=Number(document.querySelector(`.delivery-amount-choice[data-i="${i}"]`)?.value||0);
-      const fee=Number(document.querySelector(`.delivery-fee-choice[data-i="${i}"]`)?.value||0);
-      const netInput=document.querySelector(`.delivery-net-choice[data-i="${i}"]`);
-      if(netInput)netInput.value=String(amount-fee);
-    }));
+    const root=$('#deliveryPreview');
+    root.onchange=e=>{
+      const t=e.target,i=Number(t.dataset.i);if(!Number.isFinite(i)||!previewRows[i])return;
+      const r=previewRows[i];
+      if(t.classList.contains('reconcile-order')){
+        r.selected_order_id=Number(t.value);r.confirm_outside=false;r.confirm_higher=false;r.confirm_discount=false;r.items=null;r.items_order_id=0;
+        previewRows.forEach((x,k)=>{if(k!==i&&!x.auto)renderReconcilePanel(k)});
+        renderReconcilePanel(i);
+      }else if(t.classList.contains('reconcile-confirm-outside')){r.confirm_outside=t.checked;renderReconcileStatus(i)}
+      else if(t.classList.contains('reconcile-confirm-higher')){r.confirm_higher=t.checked;renderReconcileStatus(i)}
+      else if(t.classList.contains('reconcile-confirm-discount')){r.confirm_discount=t.checked;renderReconcileStatus(i)}
+      else if(t.classList.contains('delivery-status-choice')){r.status=t.value;renderReconcilePanel(i)}
+      else if(t.classList.contains('delivery-note-choice')){r.note=t.value}
+    };
+    root.oninput=e=>{
+      const t=e.target,i=Number(t.dataset.i);if(!Number.isFinite(i)||!previewRows[i])return;
+      const r=previewRows[i];
+      if(t.classList.contains('reconcile-qty')){
+        const j=Number(t.dataset.j),it=r.items?.[j];if(!it)return;
+        const v=t.value===''?NaN:Number(t.value),other=t.dataset.kind==='received'?'returned':'received';
+        r.piece[j]={...r.piece[j],[t.dataset.kind]:v};
+        if(Number.isInteger(v)&&v>=0&&v<=it.quantity){
+          r.piece[j][other]=it.quantity-v;
+          const o2=document.querySelector(`.reconcile-qty[data-i="${i}"][data-j="${j}"][data-kind="${other}"]`);if(o2)o2.value=String(it.quantity-v);
+        }
+        const p=reconcilePieces(r);
+        if(r.status==='delivered'&&p&&p.returned>0){
+          // Returned pieces mean a partial delivery, whatever the imported status said.
+          r.status='partial';r.confirm_discount=false;
+          const sel=document.querySelector(`.delivery-status-choice[data-i="${i}"]`);if(sel)sel.value='partial';
+          renderReconcilePanel(i);
+        }else if(r.status==='delivered'&&p&&p.returned===0&&!document.querySelector(`.reconcile-confirm-discount[data-i="${i}"]`))renderReconcilePanel(i);
+        else refreshReconcileTotals(i);
+        return;
+      }
+      if(t.classList.contains('delivery-amount-choice')||t.classList.contains('delivery-fee-choice')||t.classList.contains('delivery-net-choice')){
+        r.amount=Number(document.querySelector(`.delivery-amount-choice[data-i="${i}"]`)?.value||0);
+        r.delivery_fee=Number(document.querySelector(`.delivery-fee-choice[data-i="${i}"]`)?.value||0);
+        const netInput=document.querySelector(`.delivery-net-choice[data-i="${i}"]`);
+        if(!r.has_net&&!t.classList.contains('delivery-net-choice')&&netInput)netInput.value=String(r.amount-r.delivery_fee);
+        r.net_amount=Number(netInput?.value||0);
+        if(t.classList.contains('delivery-net-choice'))r.has_net=true;
+        renderReconcilePanel(i);
+      }
+    };
   }
 
   async function commitReport(){
     const storeId=$('#deliveryStore').value;
     if(!storeId)return;
-
-    const rows=previewRows.map((r,i)=>{
-      const manual=document.querySelector(`.delivery-order-choice[data-i="${i}"]`);
-      const automatic=['matched','matched_partial'].includes(r.match_type);
-      const orderId=automatic?Number(r.order?.id||0):Number(manual?.value||0);
-      const status=document.querySelector(`.delivery-status-choice[data-i="${i}"]`)?.value||'';
-      const amount=Number(document.querySelector(`.delivery-amount-choice[data-i="${i}"]`)?.value||0);
-      const deliveryFee=Number(document.querySelector(`.delivery-fee-choice[data-i="${i}"]`)?.value||0);
-      const netAmount=Number(document.querySelector(`.delivery-net-choice[data-i="${i}"]`)?.value||0);
-      const note=document.querySelector(`.delivery-note-choice[data-i="${i}"]`)?.value||'';
-      let matchType=r.match_type;
-      if(orderId&&!automatic){
-        const selected=(r.eligible_candidates||[]).find(o=>Number(o.id)===orderId);
-        matchType=selected&&Math.abs(Math.abs(Number(selected.amount||0))-amount)<.01?'matched':'matched_partial';
-      }
-      return {order_id:orderId,phone:r.phone,status,amount,delivery_fee:deliveryFee,net_amount:netAmount,has_net:r.has_net,note,match_type:matchType,original_match_type:r.match_type};
+    // Sync values possibly changed by status helper scripts.
+    previewRows.forEach((r,i)=>{
+      const s=document.querySelector(`.delivery-status-choice[data-i="${i}"]`);if(s)r.status=s.value;
+      r.amount=Number(document.querySelector(`.delivery-amount-choice[data-i="${i}"]`)?.value||0);
+      r.delivery_fee=Number(document.querySelector(`.delivery-fee-choice[data-i="${i}"]`)?.value||0);
+      r.net_amount=Number(document.querySelector(`.delivery-net-choice[data-i="${i}"]`)?.value||0);
+      r.note=document.querySelector(`.delivery-note-choice[data-i="${i}"]`)?.value||'';
     });
-
-    const resolvable=rows.filter(r=>r.order_id);
-    const unresolved=rows.filter(r=>!r.order_id&&['duplicate','review_amount','review_amount_higher','other_store'].includes(r.original_match_type));
-    const missingStatus=resolvable.filter(r=>!r.status);
-    if(unresolved.length)return toast(`يوجد ${unresolved.length} سطر بحاجة اختيار طلب أو تصحيح المتجر قبل تسكير الكشف`);
-    if(!resolvable.length)return toast('لا توجد طلبات مطابقة للاعتماد');
-    const selectedIds=resolvable.map(r=>r.order_id);
-    if(new Set(selectedIds).size!==selectedIds.length)return toast('تم اختيار نفس الطلب لأكثر من سطر؛ راجع الأرقام المكررة');
-    if(missingStatus.length)return toast('يوجد طلب مطابق بدون حالة معتمدة');
-
-    // Partial delivery requires exact delivered model quantities, not a guessed piece count.
-    for(const row of resolvable.filter(x=>x.status==='partial'||x.status==='delivered_adjusted')){
-      let info;
-      try{info=await api('/partial-delivery-items?order_id='+row.order_id)}catch(e){return toast('تعذر تحميل أصناف الطلب: '+e.message)}
-      const items=info.items||[];
-      if(!items.length)return toast('لم أتعرف على أصناف الطلب #'+info.order_code+'؛ راجع نص الطلب قبل تسكير الكشف');
-      const chosen=[];
-      const previewIndex=previewRows.findIndex(x=>Number(x.order?.id||0)===row.order_id || Number(document.querySelector(`.delivery-order-choice[data-i="${previewRows.indexOf(x)}"]`)?.value||0)===row.order_id);
-      const preview=previewRows[previewIndex];
-      const panel=previewIndex>=0?document.querySelector(`.delivery-pieces-panel[data-i="${previewIndex}"]`):null;
-      const prepared=preview?.pieces_order_id===row.order_id && preview?.pieces_items?.length===items.length && panel?.querySelectorAll('.delivery-piece-qty').length===items.length;
-      for(const [j,item] of items.entries()){
-        const answer=prepared?panel.querySelector(`.delivery-piece-qty[data-j="${j}"]`)?.value:prompt('تسليم جزئي للطلب #'+info.order_code+'\\n'+item.model_name+' — المشحون '+item.quantity+'\\nكم قطعة من هذا الموديل استلم الزبون؟',String(item.quantity));
-        if(answer===null)return toast('تم إلغاء تسكير الكشف لحين تحديد القطع المسلّمة');
-        const qty=Number(answer);
-        if(!Number.isInteger(qty)||qty<0||qty>item.quantity)return toast('الكمية غير صحيحة للطلب #'+info.order_code);
-        chosen.push({model_id:item.model_id,quantity:qty});
-      }
-      const shipped=items.reduce((n,x)=>n+x.quantity,0),delivered=chosen.reduce((n,x)=>n+x.quantity,0);
-      if(delivered<=0||delivered>=shipped)return toast('التسليم الجزئي يتطلب كمية مسلّمة أكبر من صفر وأقل من المشحون');
-      row.delivered_items=chosen;
-    }
-
-    if(!confirm(`سيتم تحديث ${resolvable.length} طلب. هل تريد اعتماد وتسكير الكشف؟`))return;
-
+    const ids=previewRows.map(r=>reconcileCheck(r).ok?Number(r.selected_order_id):0).filter(Boolean);
+    if(new Set(ids).size!==ids.length)return toast('تم اختيار نفس الطلب لأكثر من سطر؛ صحّح الاختيار');
+    const payload=[],heldLocal=[];
+    previewRows.forEach(r=>{
+      const c=reconcileCheck(r);
+      if(c.skip)return;
+      if(!c.ok){heldLocal.push({row_index:r.row_index,phone:r.phone,reason:c.reason});payload.push({row_index:r.row_index,phone:r.phone,order_id:0,hold_reason:c.reason});return}
+      const p=reconcileNeedsItems(r)?reconcilePieces(r):null;
+      payload.push({row_index:r.row_index,order_id:Number(r.selected_order_id),selection:r.auto?'auto':'manual',phone:r.phone,shipment_date:r.shipment_date||r.raw_date||'',status:r.status,raw_status:r.raw_status,amount:Number(r.amount||0),delivery_fee:Number(r.delivery_fee||0),net_amount:Number(r.net_amount||0),has_net:Boolean(r.has_net),note:r.note||'',match_type:r.match_type,
+        delivered_items:p?p.items.map(x=>({model_id:x.model_id,received:x.received,returned:x.returned})):undefined,
+        confirm_amount_higher:r.confirm_higher===true,confirm_date_outside:r.confirm_outside===true,confirm_discount:r.confirm_discount===true});
+    });
+    const ready=payload.filter(x=>x.order_id).length;
+    if(!ready)return toast('لا توجد أسطر جاهزة للاعتماد — راجع سبب الإيقاف بجانب كل سطر');
+    if(!confirm(`سيتم اعتماد ${ready} سطر.${heldLocal.length?`\n${heldLocal.length} سطر موقوف لن يتغير.`:''}\nهل تريد اعتماد وتسكير الكشف؟`))return;
     try{
       const source=$('#deliveryFile').files?.[0]?.name||'كشف ملصوق';
-      const commitRows=rows.filter(r=>r.original_match_type!=='already_settled');
-      const d=await api('/delivery-reconcile/commit',{
-        method:'POST',
-        body:JSON.stringify({store_id:storeId,source_name:source,rows:commitRows})
-      });
-      const s=d.settlement;
+      const d=await api('/delivery-reconcile/commit',{method:'POST',body:JSON.stringify({store_id:storeId,source_name:source,rows:payload})});
+      const s=d.settlement,held=d.held||[];
       $('#deliveryPreview').innerHTML=`
         <div class="card delivery-done">
           <h2>تم اعتماد الكشف ✓</h2>
@@ -2576,6 +2632,8 @@ async function deliveryReconcileView(){
             <div><span>أجور التوصيل</span><b>${money(s.delivery_fees)}</b></div>
             <div><span>الصافي</span><b>${money(s.net_due)}</b></div>
           </div>
+          ${(d.partial_orders||[]).length?`<h3>التسليم الجزئي المعتمد</h3>${d.partial_orders.map(p=>`<div class="settlement-row"><div><b>#${esc(p.order_code)}</b><div class="sub">${p.items.map(x=>`${esc(x.model_name)}: استلم ${x.received} / مرتجع ${x.returned}`).join(' • ')}</div></div><div class="delivery-history-money"><strong>كوست ${money(p.cost)} • ربح ${money(p.profit)}</strong><span>كاش الشركة ${money(p.cash)}</span></div></div>`).join('')}`:''}
+          ${held.length?`<h3>أسطر موقوفة (${held.length}) — لم تتغير</h3>${held.map(h=>`<div class="settlement-row"><div><b>سطر ${esc(h.row_index||'—')} • ${esc(h.phone||'')}</b><div class="sub">${esc(h.reason)}</div></div></div>`).join('')}`:''}
         </div>`;
       await loadHistory();
       toast('تم تحديث الطلبات وتسكير الكشف');
