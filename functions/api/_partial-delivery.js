@@ -22,7 +22,7 @@ export function normalizePhone(value=''){
  else if(digits.length===9&&digits.startsWith('7'))digits='0'+digits;
  return digits;
 }
-export const normalizeArabic=value=>normalizeDigits(value).toLowerCase()
+export const normalizeArabic=value=>normalizeDigits(value).replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g,'').replace(/[\u00a0\u202f]/g,' ').toLowerCase()
  .replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/ة/g,'ه')
  .replace(/[ًٌٍَُِّْـ]/g,'').replace(/\s+/g,' ').trim();
 export const round2=n=>Math.round((Number(n)||0)*100)/100;

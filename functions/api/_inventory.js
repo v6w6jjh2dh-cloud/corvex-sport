@@ -4,7 +4,9 @@ const normalizeDigits=value=>String(value||'')
  .replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d))
  .replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
 
-const normalize=value=>normalizeDigits(value).toLowerCase()
+// WhatsApp/Excel text often carries invisible direction marks (RLM/LRM, ZWJ, BOM) and
+// non-breaking spaces between words; strip them so "جاكيت\u200f جوخ" still matches.
+const normalize=value=>normalizeDigits(value).replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g,'').replace(/[\u00a0\u202f]/g,' ').toLowerCase()
  .replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/ة/g,'ه')
  .replace(/[ًٌٍَُِّْـ]/g,'').replace(/\s+/g,' ').trim();
 

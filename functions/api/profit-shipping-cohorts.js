@@ -33,8 +33,16 @@ const FALLBACK_MODELS=[
  {id:-9,name:'بنطلون جيوب',aliases:['بنطلون جيوب']},
  {id:-10,name:'تيشيرت سادة تريكو',aliases:['تيشيرت سادة تريكو','تيشيرت ساده تريكو']},
  {id:-11,name:'بجامة جاكار',aliases:['بجامة جاكار','بجامه جاكار','ترينغ','تريننغ']},
- {id:-12,name:'تيشيرت بولو',aliases:['تيشيرت بولو تريكو','بولو ترند','تيشيرت بولو','بولو']}
-].map(m=>({...m,unit_cost:null,aliases:[...new Set(m.aliases.map(key))].sort((a,b)=>b.length-a.length)}));
+ {id:-12,name:'تيشيرت بولو',aliases:['تيشيرت بولو تريكو','بولو ترند','تيشيرت بولو','بولو']},
+ // Models that exist in the app's product catalogue (product-rules.js) with their
+ // approved costs but are missing from the server profit_models table.
+ {id:-13,name:'تيشيرت برادا',cost:2.4,aliases:['تيشيرت برادا','تيشرت برادا','بلوزه برادا','بلوز برادا','برادا']},
+ {id:-14,name:'جاكيت ترند',cost:4,aliases:['جاكيت ترند','جكيت ترند','ترند جاكيت']},
+ {id:-15,name:'بلوزة سادة كوم',cost:3.5,aliases:['بلوزه ساده كوم','بلوز ساده كوم','ساده كوم']},
+ {id:-16,name:'تيشيرت N',cost:3,aliases:['تيشيرت n','تيشرت n','تيشيرت حرف n','تيشرت حرف n','بلوزه n','حرف n']},
+ {id:-17,name:'جاكيت نايك',cost:6,aliases:['جاكيت نايك','جكيت نايك','نايك جاكيت']},
+ {id:-18,name:'بلوز صوف',cost:3.5,aliases:['بلوز صوف','بلوزه صوف','صوف بلوز']}
+].map(m=>({...m,unit_cost:m.cost??null,aliases:[...new Set(m.aliases.map(key))].sort((a,b)=>b.length-a.length)}));
 
 async function loadModels(env){
  let catalogue=[];try{catalogue=await loadCostedModels(env)}catch{catalogue=[]}
@@ -115,9 +123,11 @@ export async function onRequest({request,env}){
   // contain only delivery instructions; never let it hide the product in raw_text.
   // Do not concatenate the sources: that would count the same item twice.
   let items=[],itemSource='none';
+  const trace=[];
   for(const [source,text] of [['order_notes',o.order_notes],['raw_text',o.raw_text]]){
-   if(!String(text||'').trim())continue;
+   if(!String(text||'').trim()){trace.push({source,empty:true});continue}
    const parsed=await classifyInventoryItems(env,String(text),models);
+   trace.push({source,found:parsed.map(x=>({name:(models.find(m=>m.id===Number(x.model_id))||{}).name||String(x.model_id),quantity:x.quantity}))});
    if(parsed.length){items=mergeItems(parsed,models);itemSource=source;break}
   }
   if(!items.length&&inventory.get(Number(o.id))?.length){items=mergeItems(inventory.get(Number(o.id)),models);itemSource='inventory'}
@@ -162,7 +172,8 @@ export async function onRequest({request,env}){
   else if(RETURN.has(status)){returnsUnproven++;pending++;missing='مرتجع بدون كشف مسكّر — معلّق'}
   else if(status==='pending')pending++;
   else other++;
-  details.push({id:o.id,order_code:o.order_code,shipment_day:o.shipment_day,status,settled,reviewed,result:isDelivered?'delivered':o.__returnCash!==undefined?'return':'pending',return_cash:o.__returnCash??null,pending_reason:!isDelivered&&o.__returnCash===undefined?(missing||(status==='pending'?'قيد التوصيل — لم يظهر في كشف مسكّر بعد':'')):'',statement_closed_on:o.statement_closed_on||null,
+  const needsDiagnostics=me.role==='admin'&&isDelivered&&(cost===null||!itemsValid);
+  details.push({diagnostics:needsDiagnostics?{order_notes:String(o.order_notes||'').slice(0,700),raw_text:String(o.raw_text||'').slice(0,700),inventory_items:(inventory.get(Number(o.id))||[]).map(i=>({name:i.name,quantity:i.quantity})),trace,invisible_chars:/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\u00a0]/.test(String(o.raw_text||'')+String(o.order_notes||''))}:null,id:o.id,order_code:o.order_code,shipment_day:o.shipment_day,status,settled,reviewed,result:isDelivered?'delivered':o.__returnCash!==undefined?'return':'pending',return_cash:o.__returnCash??null,pending_reason:!isDelivered&&o.__returnCash===undefined?(missing||(status==='pending'?'قيد التوصيل — لم يظهر في كشف مسكّر بعد':'')):'',statement_closed_on:o.statement_closed_on||null,
    items,item_source:itemSource,item_quantity:shippedPieces,received_items:received,received_pieces:isDelivered?pieces:null,
    cost_of_goods:Number(o.cost_of_goods||0),calculated_cost:isDelivered?cost:null,cost_source:source,cost_difference:hasStored&&costKnown&&source!=='saved_order'&&source!=='saved_partial_review'?round2(storedCost-cost):null,
    cost_needs_review:isDelivered&&(!costKnown||!reviewed),missing_reason:isDelivered&&(!costKnown||!reviewed)?missing:'',cost_note:isDelivered&&costKnown?missing:'',
@@ -173,7 +184,7 @@ export async function onRequest({request,env}){
  const spendArgs=store?[date,toDate,store]:[date,toDate,0];
  const spend=(await env.DB.prepare("SELECT COALESCE(SUM(amount),0) amount FROM shipping_cohort_ad_spend WHERE date BETWEEN ? AND ? AND store_id=?").bind(...spendArgs).first())?.amount||0;
  const gross=costReviewCount?null:round2(cash-costs+returnCash);
- return json({engine:'cohort-v4',return_cash:round2(returnCash),returns_unproven:returnsUnproven,delivered_unsettled:deliveredUnsettled,known_profit_with_returns:round2(knownProfit+returnCash),model_costs:MODEL_COSTS,costs_verified:costReviewCount===0,date,to_date:toDate,store_id:store,total:orders.length,delivered,partial,returned,refused_with_fee:refusedWithFee,no_reply_after_arrival:noReplyAfterArrival,other_returns:otherReturns,pending,other,unreviewed,
+ return json({engine:'cohort-v4.1',return_cash:round2(returnCash),returns_unproven:returnsUnproven,delivered_unsettled:deliveredUnsettled,known_profit_with_returns:round2(knownProfit+returnCash),model_costs:MODEL_COSTS,costs_verified:costReviewCount===0,date,to_date:toDate,store_id:store,total:orders.length,delivered,partial,returned,refused_with_fee:refusedWithFee,no_reply_after_arrival:noReplyAfterArrival,other_returns:otherReturns,pending,other,unreviewed,
   cost_review_count:costReviewCount,received_pieces:receivedPieces,pieces_unknown_orders:piecesUnknown,delivered_pieces_mapped:receivedPieces,
   sales:round2(sales),cash:round2(cash),costs:round2(costs),fees:round2(fees),cash_difference:round2(cashDiscrepancy),cash_mismatch_orders:cashMismatchOrders,
   gross_profit:gross,known_profit:round2(knownProfit),known_profit_orders:knownOrders,ad_spend:Number(spend),net_after_ads:gross===null?null:round2(gross-Number(spend)),
