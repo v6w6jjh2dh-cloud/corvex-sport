@@ -2669,8 +2669,7 @@ async function dailyProfitsView(){
         <h3>الأرباح المتراكمة حسب يوم خروج الشحنة</h3>
         <div class="sub">يُحسب الطلب حسب تاريخ خروجه من المستودع (أول طباعة)، مهما كان تاريخ كشف شركة التوصيل. الرفض هنا يشمل فقط «رفض مع دفع أجور» و«لا رد بعد الوصول» من الكشوف المسكّرة، أما المرتجعات والإلغاءات الأخرى فتظهر منفصلة.</div>
         <div class="toolbar" style="margin:12px 0;flex-wrap:wrap">
-          <label>من تاريخ خروج الشحنات <input id="cohortDate" type="date" class="input" value="${today}" style="min-width:160px;max-width:220px"></label>
-          <label>إلى تاريخ <input id="cohortToDate" type="date" class="input" value="${today}" min="2026-11-17" style="min-width:160px;max-width:220px"></label>
+          <label>تاريخ خروج الشحنات من المستودع <input id="cohortDate" type="date" class="input" value="${today}" style="min-width:160px;max-width:220px"></label>
           <label>إعلانات هذا اليوم (د.أ) <input id="cohortAdSpend" type="number" min="0" step="0.01" class="input" inputmode="decimal" style="max-width:150px"></label>
           <button id="saveCohortAds" type="button" class="btn btn-soft">حفظ الإعلانات</button>
           <button id="reloadCohort" type="button" class="btn btn-primary">تحديث التقرير</button>
@@ -2683,21 +2682,18 @@ async function dailyProfitsView(){
 
   const loadShippingCohort=async()=>{
     const target=$('#shippingCohortResult');if(!target)return;
-    const date=$('#cohortDate').value;let toDate=$('#cohortToDate')?.value||date;
-    if(toDate<date){toDate=date;if($('#cohortToDate'))$('#cohortToDate').value=date}
-    const store=$('#profitStore').value||'0',single=toDate===date;
-    if($('#saveCohortAds'))$('#saveCohortAds').disabled=!single;
-    if($('#cohortAdSpend'))$('#cohortAdSpend').disabled=!single;
+    const date=$('#cohortDate').value;
+    const store=$('#profitStore').value||'0';
     target.textContent='جاري حساب نتائج الشحنات...';
     try{
-      const d=await api('/profit-shipping-cohorts?date='+encodeURIComponent(date)+'&to_date='+encodeURIComponent(toDate)+'&store_id='+encodeURIComponent(store));
+      const d=await api('/profit-shipping-cohorts?date='+encodeURIComponent(date)+'&store_id='+encodeURIComponent(store));
       $('#cohortAdSpend').value=Number(d.ad_spend||0);
       const statusLabel=s=>({pending:'قيد التوصيل',delivered:'تم التسليم',partial:'تسليم جزئي',delivered_adjusted:'تسليم جزئي',returned:'مرتجع',refused_fee_paid:'مرفوض ودفع أجور',refused_no_fee:'مرفوض دون أجور',canceled_before_arrival:'ملغي قبل الوصول'})[s]||s;
       const sourceLabel={order_items:'من أصناف الطلب',received_items:'من القطع المستلمة',saved_order:'كوست محفوظ',saved_partial_review:'كوست مراجعة الجزئي',unknown:'غير معروف'};
-      const deliveredOrders=d.orders.filter(o=>['delivered','delivered_adjusted','partial'].includes(o.status));
+      const deliveredOrders=d.orders.filter(o=>o.result==='delivered');
       const missing=deliveredOrders.filter(o=>o.cost_needs_review);
       const box=(label,value,isMoney=true)=>'<div><span>'+label+'</span><b>'+(value===null||value===undefined?'—':isMoney?money(value)+' د.أ':Number(value))+'</b></div>';
-      const summary=[['إجمالي الشحنات',d.total],['تم التسليم',d.delivered],['منها تسليم جزئي',d.partial],['رفض مع دفع أجور (من الكشوف)',d.refused_with_fee],['لا رد بعد الوصول (من الكشوف)',d.no_reply_after_arrival],['إجمالي الحالتين',d.returned],['مرتجع أو إلغاء آخر (منفصل)',d.other_returns],['قيد التوصيل',d.pending],['بحاجة مراجعة',d.unreviewed+d.other]];
+      const summary=[['إجمالي الشحنات',d.total],['تم التسليم',d.delivered],['منها تسليم جزئي',d.partial],['رفض مع دفع أجور (من الكشوف)',d.refused_with_fee],['لا رد بعد الوصول (من الكشوف)',d.no_reply_after_arrival],['إلغاء/مرتجع آخر (من الكشوف)',d.other_returns],['إجمالي المرتجعات من الكشوف',d.returned],['معلّق (لم يُحسم بكشف مسكّر)',d.pending],['بحاجة مراجعة',d.unreviewed+d.other]];
       const itemLine=o=>{
         if(o.status==='partial'||o.status==='delivered_adjusted'){
           if(!o.received_items)return 'المشحون: '+(o.items.length?o.items.map(i=>esc(i.name)+' × '+i.quantity).join('، '):'غير معروف')+' — القطع المستلمة غير محددة';
@@ -2705,14 +2701,15 @@ async function dailyProfitsView(){
         }
         return o.items.length?o.items.map(i=>esc(i.name)+' × '+i.quantity+' × '+(i.unit_cost===null?'؟':money(i.unit_cost))+' = '+(i.total_cost===null?'؟':money(i.total_cost))).join('، '):'لم يتم التعرف على الأصناف';
       };
-      target.innerHTML='<div class="sub" style="font-size:11px">محرك الأرباح: '+esc(d.engine||'')+' • الفترة حسب تاريخ خروج الشحنة: '+esc(d.date)+(d.to_date&&d.to_date!==d.date?' → '+esc(d.to_date):'')+'</div>'+
+      target.innerHTML='<div class="sub" style="font-size:11px">محرك الأرباح: '+esc(d.engine||'')+' • شحنات يوم '+esc(d.date)+' فقط، بنتائجها من كل الكشوف المسكّرة مهما كان تاريخ تسكيرها</div>'+
       '<div class="accounting-stats" style="margin:12px 0">'+summary.map(([label,value])=>'<div><span>'+label+'</span><b>'+Number(value||0)+'</b></div>').join('')+'</div>'+
       '<div class="accounting-stats" style="margin:12px 0">'+[
         box('الكاش الفعلي من شركة التوصيل',d.cash),
         box('القطع المستلمة'+(d.pieces_unknown_orders?' (المعروف فقط)':''),d.received_pieces,false),
         box('الكوست الكامل للقطع المستلمة'+(d.cost_review_count?' (المعروف فقط)':''),d.costs),
-        box('صافي الربح (الكاش − الكوست)',d.gross_profit),
-        box('ربح الطلبات مكتملة الكوست ('+d.known_profit_orders+' طلب)',d.known_profit),
+        box('رسوم/نتيجة المرتجعات من الكشوف',d.return_cash),
+        box('صافي الربح (الكاش − الكوست ± المرتجعات)',d.gross_profit),
+        box('ربح الطلبات مكتملة الكوست ('+d.known_profit_orders+' طلب) ± المرتجعات',d.known_profit_with_returns),
         box('أجور التوصيل (مخصومة داخل الكاش)',d.fees),
         box('السعر قبل التوصيل (للمقارنة فقط)',d.sales),
         box('الإعلانات',d.ad_spend),
@@ -2720,22 +2717,22 @@ async function dailyProfitsView(){
       ].join('')+'</div>'+
       (d.cash_mismatch_orders?'<div class="partial-summary-warning">⚠ فرق الكاش: '+money(d.cash_difference)+' د.أ في '+d.cash_mismatch_orders+' طلب. الكاش المحفوظ لا يساوي السعر ناقص التوصيل؛ الربح محسوب من الكاش الفعلي ولم نغيّر المبالغ الأصلية.</div>':'')+
       (missing.length?'<div class="partial-summary-warning">⚠ '+missing.length+' طلب كوستها ناقصة — صافي الربح الإجمالي لا يُعرض حتى تكتمل:<ul style="margin:6px 0 0">'+missing.map(o=>'<li><b>#'+esc(o.order_code)+'</b> ('+esc(statusLabel(o.status))+'): '+esc(o.missing_reason||'بحاجة مراجعة')+'</li>').join('')+'</ul></div>':'<div class="badge badge-ok">✓ كوست كل الطلبات المستلمة مكتمل</div>')+
-      (d.complete?'':'<div class="partial-summary-warning">⚠ التقرير غير نهائي: يوجد طلبات قيد التوصيل أو بحاجة مراجعة.</div>')+
+      (d.complete?'':'<div class="partial-summary-warning">⚠ التقرير غير نهائي: '+d.pending+' طلب من شحنات هذا اليوم لم يُحسم بعد بكشف مسكّر'+(d.unreviewed?' و'+d.unreviewed+' تسليم جزئي غير مراجع':'')+'. أي كشف يُسكّر لاحقًا يحدّث هذا اليوم تلقائيًا.</div>')+
+      '<details style="margin-top:12px;border:1px solid #dbe4ed;border-radius:12px;padding:12px"><summary style="cursor:pointer;font-weight:700">الطلبات المعلّقة ('+d.orders.filter(o=>o.result==='pending').length+')</summary><div style="max-height:320px;overflow:auto;margin-top:10px">'+d.orders.filter(o=>o.result==='pending').map(o=>'<div style="padding:8px;border-bottom:1px solid #e5e9ee"><b>#'+esc(o.order_code)+'</b> — '+esc(statusLabel(o.status))+' <span class="sub">'+esc(o.pending_reason||'')+'</span></div>').join('')+'</div></details>'+
+      '<details style="margin-top:12px;border:1px solid #dbe4ed;border-radius:12px;padding:12px"><summary style="cursor:pointer;font-weight:700">المرتجعات المثبتة بالكشوف ('+d.returned+')</summary><div style="max-height:320px;overflow:auto;margin-top:10px">'+d.orders.filter(o=>o.result==='return').map(o=>'<div style="padding:8px;border-bottom:1px solid #e5e9ee"><b>#'+esc(o.order_code)+'</b> — '+esc(statusLabel(o.status))+' — '+money(o.return_cash)+' د.أ <span class="sub">'+esc(o.statement_code||'')+(o.statement_closed_on?' • سُكّر '+esc(o.statement_closed_on):'')+'</span></div>').join('')+'</div></details>'+
       '<details open style="margin-top:12px;border:1px solid #dbe4ed;border-radius:12px;padding:12px"><summary style="cursor:pointer;font-weight:700">كوست الطلبات المستلمة ('+deliveredOrders.length+')</summary><div style="max-height:520px;overflow:auto;margin-top:10px">'+deliveredOrders.map(o=>{
         const state=o.cost_needs_review?'⚠ كوست ناقص':'✓';
-        return '<div style="padding:10px;border-bottom:1px solid #e5e9ee"><b>#'+esc(o.order_code)+'</b> — '+esc(statusLabel(o.status))+' — '+state+(o.shipment_day?' <span class="sub">خرج '+esc(o.shipment_day)+'</span>':'')+
+        return '<div style="padding:10px;border-bottom:1px solid #e5e9ee"><b>#'+esc(o.order_code)+'</b> — '+esc(statusLabel(o.status))+' — '+state+(o.shipment_day?' <span class="sub">خرج '+esc(o.shipment_day)+(o.statement_code?' • كشف '+esc(o.statement_code)+(o.statement_closed_on?' سُكّر '+esc(o.statement_closed_on):''):'')+'</span>':'')+
           '<div>'+itemLine(o)+'</div>'+
           '<div class="sub">القطع المستلمة: '+(o.received_pieces??'—')+' • الكوست: '+(o.calculated_cost===null?'—':money(o.calculated_cost))+' ('+esc(sourceLabel[o.cost_source]||o.cost_source)+') • الكاش: '+(o.cash===null?'—':money(o.cash))+' • الربح: '+(o.profit===null?'—':money(o.profit))+
           (o.cost_difference!==null&&Math.abs(o.cost_difference)>=.01?' • الكوست المحفوظ سابقًا '+money(o.cost_of_goods)+' (فرق '+money(o.cost_difference)+')':'')+'</div>'+
           (o.missing_reason?'<div class="sub" style="color:#9b1c1c">'+esc(o.missing_reason)+'</div>':o.cost_note?'<div class="sub" style="color:#8a5a00">'+esc(o.cost_note)+'</div>':'')+'</div>';
       }).join('')+'</div></details>'+
-      '<details style="margin-top:12px;border:1px solid #dbe4ed;border-radius:12px;padding:12px"><summary style="cursor:pointer;font-weight:700">المرتجعات والإلغاءات الأخرى ('+d.other_returns+')</summary><div style="max-height:420px;overflow:auto;margin-top:10px">'+d.orders.filter(o=>o.status==='returned'||o.status==='canceled_before_arrival'||(o.status.startsWith('refused')&&!o.settled)).map(o=>'<div style="padding:10px;border-bottom:1px solid #e5e9ee"><b>#'+esc(o.order_code)+'</b> — '+esc(statusLabel(o.status))+'</div>').join('')+'</div></details>'+
       '<details style="margin-top:12px;border:1px solid #dbe4ed;border-radius:12px;padding:12px"><summary style="cursor:pointer;font-weight:700">تدقيق الكاش للطلبات المسلّمة ('+d.delivered+')</summary><div style="overflow-x:auto;max-height:460px"><table style="width:100%;min-width:720px;border-collapse:collapse;text-align:right"><thead><tr><th>الطلب</th><th>الكشف</th><th>مبلغ الكشف</th><th>السعر المسجل</th><th>التوصيل</th><th>الكاش الفعلي</th><th>الفرق</th></tr></thead><tbody>'+deliveredOrders.map(o=>'<tr><td>#'+esc(o.order_code)+'</td><td>'+esc(o.statement_code||'—')+'</td><td>'+(o.statement_amount===null?'—':money(o.statement_amount))+'</td><td>'+(o.amount===null?'—':money(o.amount))+'</td><td>'+(o.fee===null?'—':money(o.fee))+'</td><td>'+(o.cash===null?'—':money(o.cash))+'</td><td>'+(o.cash_difference===null?'—':money(o.cash_difference))+'</td></tr>').join('')+'</tbody></table></div></details>'+
       '<details style="margin-top:12px"><summary>كل الطلبات ('+d.orders.length+')</summary><div style="max-height:320px;overflow:auto">'+d.orders.map(o=>'<div style="padding:8px;border-bottom:1px solid #e5e9ee">#'+esc(o.order_code)+' — '+esc(statusLabel(o.status))+(o.profit===null?'':' — '+money(o.profit)+' د.أ')+(o.reviewed?'':' — بحاجة مراجعة')+'</div>').join('')+'</div></details>';
     }catch(e){target.textContent='تعذر حساب التقرير: '+e.message}
   };
   $('#reloadCohort').onclick=loadShippingCohort;
-  $('#cohortToDate').addEventListener('change',loadShippingCohort);
   $('#cohortDate').addEventListener('change',loadShippingCohort);
   $('#saveCohortAds').onclick=async()=>{
     const button=$('#saveCohortAds'),amount=Number($('#cohortAdSpend').value);
@@ -2744,7 +2741,7 @@ async function dailyProfitsView(){
     try{await api('/profit-shipping-cohorts',{method:'POST',body:JSON.stringify({date:$('#cohortDate').value,store_id:Number($('#profitStore').value||0),ad_spend:amount})});await loadShippingCohort();toast('تم حفظ إعلانات اليوم')}
     catch(e){toast(e.message)}finally{button.disabled=false}
   };
-  $('#profitDate').addEventListener('change',()=>{$('#cohortDate').value=$('#profitDate').value;$('#cohortToDate').value=$('#profitDate').value;loadShippingCohort()});
+  $('#profitDate').addEventListener('change',()=>{$('#cohortDate').value=$('#profitDate').value;loadShippingCohort()});
   $('#profitStore').addEventListener('change',loadShippingCohort);
   loadShippingCohort();
 
