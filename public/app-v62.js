@@ -2702,19 +2702,27 @@ async function dailyProfitsView(){
         return o.items.length?o.items.map(i=>esc(i.name)+' × '+i.quantity+' × '+(i.unit_cost===null?'؟':money(i.unit_cost))+' = '+(i.total_cost===null?'؟':money(i.total_cost))).join('، '):'لم يتم التعرف على الأصناف';
       };
       target.innerHTML=(d.catalogue_error?'<div class="partial-summary-warning">⚠ تعذر تحديث قائمة الموديلات تلقائيًا؛ تم استخدام القائمة الحالية: '+esc(d.catalogue_error)+'</div>':'')+'<div class="sub" style="font-size:11px">محرك الأرباح: '+esc(d.engine||'')+' • شحنات يوم '+esc(d.date)+' فقط، بنتائجها من كل الكشوف المسكّرة مهما كان تاريخ تسكيرها</div>'+
-      '<div class="accounting-stats" style="margin:12px 0">'+summary.map(([label,value])=>'<div><span>'+label+'</span><b>'+Number(value||0)+'</b></div>').join('')+'</div>'+
-      '<div class="accounting-stats" style="margin:12px 0">'+[
-        box('الكاش الفعلي من شركة التوصيل',d.cash),
-        box('القطع المستلمة'+(d.pieces_unknown_orders?' (المعروف فقط)':''),d.received_pieces,false),
-        box('الكوست الكامل للقطع المستلمة'+(d.cost_review_count?' (المعروف فقط)':''),d.costs),
-        box('رسوم/نتيجة المرتجعات من الكشوف',d.return_cash),
-        box('صافي الربح (الكاش − الكوست ± المرتجعات)',d.gross_profit),
-        box('ربح الطلبات مكتملة الكوست ('+d.known_profit_orders+' طلب) ± المرتجعات',d.known_profit_with_returns),
-        box('أجور التوصيل (مخصومة داخل الكاش)',d.fees),
-        box('السعر قبل التوصيل (للمقارنة فقط)',d.sales),
-        box('الإعلانات',d.ad_spend),
-        box('الربح بعد الإعلانات',d.net_after_ads)
-      ].join('')+'</div>'+
+      '<section style="margin:16px 0 20px;display:grid;gap:12px;font-family:inherit">'+
+        '<div style="background:linear-gradient(125deg,#152b4c,#263b60);border-radius:18px;color:white;padding:22px 20px;box-shadow:0 8px 22px rgba(22,43,76,.12)">'+
+          '<div style="font-size:13px;opacity:.82;margin-bottom:9px">صافي الربح بعد الإعلانات</div>'+
+          '<div style="font-size:clamp(30px,7vw,43px);font-weight:800;line-height:1.2;direction:ltr;text-align:right">'+(d.net_after_ads===null?'—':money(d.net_after_ads)+' د.أ')+'</div>'+
+          '<div style="font-size:12px;opacity:.8;margin-top:12px">'+(d.complete?'تقرير مكتمل':'الربح الحالي • '+d.pending+' طلب معلّق')+'</div>'+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px">'+[
+          ['الشحنات',d.total],['المستلمة',d.delivered],['المعلّقة',d.pending]
+        ].map(([label,value])=>'<div style="background:#f7f9fc;border:1px solid #e7edf3;border-radius:13px;padding:13px 8px;text-align:center"><div style="font-size:11px;color:#64748b">'+label+'</div><div style="font-size:23px;font-weight:800;color:#19324f;margin-top:5px">'+Number(value||0)+'</div></div>').join('')+'</div>'+
+        '<div style="background:#fff;border:1px solid #e5ebf2;border-radius:16px;padding:17px 16px">'+
+          '<div style="font-weight:800;color:#19324f;margin-bottom:12px">الملخص المالي</div>'+
+          [['الكاش المحصّل',d.cash],['كوست البضاعة المستلمة',d.costs],['رسوم / نتيجة المرتجعات',d.return_cash],['أجور التوصيل (ضمن الكاش)',d.fees],['الإعلانات',d.ad_spend]].map(([label,value],i)=>'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;'+(i?'border-top:1px solid #edf1f5;':'')+'"><span style="color:#64748b;font-size:13px">'+label+'</span><strong style="white-space:nowrap;color:#19324f;font-size:15px;direction:ltr">'+(value===null?'—':money(value)+' د.أ')+'</strong></div>').join('')+
+        '</div>'+
+        '<details style="border:1px solid #e5ebf2;border-radius:14px;padding:12px 15px;background:#fff"><summary style="cursor:pointer;font-weight:700;color:#34465d">مؤشرات إضافية وتفاصيل الحساب</summary><div class="accounting-stats" style="margin-top:12px">'+[
+          ...summary.map(([label,value])=>box(label,value,false)),
+          box('القطع المستلمة',d.received_pieces,false),
+          box('السعر قبل التوصيل (للمقارنة فقط)',d.sales),
+          box('الربح قبل الإعلانات',d.gross_profit),
+          box('ربح الطلبات مكتملة الكوست ± المرتجعات',d.known_profit_with_returns)
+        ].join('')+'</div></details>'+
+      '</section>'+
       (d.cash_mismatch_orders?'<div class="partial-summary-warning">⚠ فرق الكاش: '+money(d.cash_difference)+' د.أ في '+d.cash_mismatch_orders+' طلب. الكاش المحفوظ لا يساوي السعر ناقص التوصيل؛ الربح محسوب من الكاش الفعلي ولم نغيّر المبالغ الأصلية.</div>':'')+
       (missing.length?'<div class="partial-summary-warning">⚠ '+missing.length+' طلب كوستها ناقصة — صافي الربح الإجمالي لا يُعرض حتى تكتمل:<ul style="margin:6px 0 0">'+missing.map(o=>'<li><b>#'+esc(o.order_code)+'</b> ('+esc(statusLabel(o.status))+'): '+esc(o.missing_reason||'بحاجة مراجعة')+(o.diagnostics?'<details style="margin:4px 0 8px"><summary class="sub" style="cursor:pointer">ماذا قرأ النظام من هذا الطلب؟</summary><div class="sub" style="white-space:pre-wrap;background:#f8fafc;border-radius:8px;padding:8px;direction:rtl">order_notes:\n'+esc(o.diagnostics.order_notes||'(فارغ)')+'\n\nraw_text:\n'+esc(o.diagnostics.raw_text||'(فارغ)')+'\n\ninventory_order_items: '+esc(o.diagnostics.inventory_items.map(i=>i.name+' × '+i.quantity).join('، ')||'لا يوجد')+'\nنتيجة القراءة: '+esc(o.diagnostics.trace.map(t=>t.source+': '+(t.empty?'فارغ':t.found.length?t.found.map(f=>f.name+' × '+f.quantity).join('، '):'لا شيء')).join(' | '))+(o.diagnostics.invisible_chars?'\n⚠ النص يحتوي رموزًا مخفية':'')+'</div></details>':'')+'</li>').join('')+'</ul>'+(missing.some(o=>o.diagnostics)?'<button type="button" id="copyCohortDiagnostics" class="btn btn-soft" style="margin-top:8px">نسخ تشخيص الطلبات الناقصة</button>':'')+'</div>':'<div class="badge badge-ok">✓ كوست كل الطلبات المستلمة مكتمل</div>')+
       (d.complete?'':'<div class="partial-summary-warning">⚠ التقرير غير نهائي: '+d.pending+' طلب من شحنات هذا اليوم لم يُحسم بعد بكشف مسكّر'+(d.unreviewed?' و'+d.unreviewed+' تسليم جزئي غير مراجع':'')+'. أي كشف يُسكّر لاحقًا يحدّث هذا اليوم تلقائيًا.</div>')+
