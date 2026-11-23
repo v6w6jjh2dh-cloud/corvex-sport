@@ -1053,8 +1053,12 @@ export async function onRequest(context) {
         const shipmentDate=String(row.shipment_date||'').trim(),rowKey=settlementRowKey(row);
         const remainingCount=remainingRows.get(rowKey)||1;
         const allCandidates=phone?(byPhone.get(phone)||[]):[];
+        // Never offer a previously closed order or an older shipment as a fallback
+        // for a current delivery settlement. A phone number is not an order identity.
         const available=allCandidates.filter(o=>!usedOrderIds.has(Number(o.id)));
-        const candidates=shipmentDate?available.filter(o=>String(o.first_print_date||'')===shipmentDate||String(o.delivery_date||'')===shipmentDate):available;
+        const active=available.filter(o=>['pending','partial','delivered_adjusted'].includes(String(o.delivery_status||'pending')));
+        const dateMatched=shipmentDate?active.filter(o=>String(o.first_print_date||'')===shipmentDate||String(o.delivery_date||'')===shipmentDate):active;
+        const candidates=dateMatched.slice().sort((a,b)=>String(b.first_print_date||b.created_at||'').localeCompare(String(a.first_print_date||a.created_at||''))||Number(b.id)-Number(a.id));
         const exactAmount=amount>0?candidates.filter(o=>Math.abs(Math.abs(Number(o.amount||0))-amount)<.01):candidates;
         let chosen=null;
         if(candidates.length===1)chosen=candidates[0];
@@ -1065,7 +1069,7 @@ export async function onRequest(context) {
         remainingRows.set(rowKey,Math.max(0,remainingCount-1));
         const common={row_index:i+1,phone,shipment_date:shipmentDate,status:String(row.status||''),amount,delivery_fee:deliveryFee,net_amount:netAmount,has_net:hasNet,note:String(row.note||'')};
         if(!phone||allCandidates.length===0){unmatched++;result.push({...common,match_type:'unmatched',candidates:[]})}
-        else if(shipmentDate&&candidates.length===0){unmatched++;result.push({...common,match_type:'date_mismatch',candidates:[]})}
+        else if(candidates.length===0){unmatched++;result.push({...common,match_type:'date_mismatch',candidates:[]})}
         else if(chosen){usedOrderIds.add(Number(chosen.id));matched++;result.push({...common,match_type:'matched',order:chosen,candidates})}
         else{duplicate++;result.push({...common,match_type:'duplicate',candidates})}
       }
