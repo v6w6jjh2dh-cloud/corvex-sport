@@ -24,7 +24,7 @@ const unitCostFor=(name,catalogueCost)=>approvedCost({name})??listCost(name)??(N
 const FALLBACK_MODELS=[
  {id:-1,name:'جاكيت فرو',aliases:['جاكيت فرو','جكيت فرو','جاكيت الفرو','جاكيت فروه']},
  {id:-2,name:'جاكيت جوخ كاجوال',aliases:['جاكيت جوخ كاجوال','جكيت جوخ كاجوال','جاكيت جوخ كاجول','جوخ كاجوال','جاكيت الجوخ الكاجوال']},
- {id:-3,name:'جاكيت جوخ سكايفو',aliases:['جاكيت جوخ سكايفو','جكيت جوخ سكايفو','جاكيت جوخ سكارفو','جاكيت الجوخ سكارفو','جوخ سكايفو','جوخ سكارفو','جاكيت سكايفو','جاكيت سكارفو','جاكيت نسائي','جكيت نسائي','جوخ شتائي',...STATI_ALIASES]},
+ {id:-3,name:'جاكيت جوخ سكايفو',aliases:['جاكيت جوخ سكايفو','جكيت جوخ سكايفو','جاكيت جوخ سكارفو','جاكيت الجوخ سكارفو','جوخ سكايفو','جوخ سكارفو','جاكيت سكايفو','جاكيت سكارفو','جاكيت نسائي','جكيت نسائي','جاكيت نساءي','جكيت نساءي','جوخ شتائي',...STATI_ALIASES]},
  {id:-4,name:'مالئ الفراغات',aliases:['مالئ الفراغات','مالى الفراغات','ملي الفراغات','مالئ فراغات',...FILLER_ALIASES]},
  {id:-5,name:'بنطلون جيوب سحاب',aliases:['بنطلون جيوب سحاب','جيوب سحاب']},
  {id:-6,name:'بنطلون رياضة سحاب',aliases:['بنطلون رياضة سحاب','بنطلون رياضه سحاب','رياضة سحاب']},
@@ -47,7 +47,12 @@ const FALLBACK_MODELS=[
 async function loadModels(env){
  let catalogue=[];try{catalogue=await loadCostedModels(env)}catch{catalogue=[]}
  const names=new Set(catalogue.map(m=>key(canonicalModelName(m.name))));
- return [...catalogue,...FALLBACK_MODELS.filter(m=>!names.has(key(m.name)))];
+ // Merge approved aliases even when a catalogue row already exists.
+ const enriched=catalogue.map(m=>{
+  const fallback=FALLBACK_MODELS.find(f=>key(f.name)===key(canonicalModelName(m.name)));
+  return fallback?{...m,aliases:[...new Set([...(m.aliases||[]),...fallback.aliases])].sort((a,b)=>b.length-a.length)}:m;
+ });
+ return [...enriched,...FALLBACK_MODELS.filter(m=>!names.has(key(m.name)))];
 }
 // One line per canonical model (stati is folded into scarfo); quantities summed, never duplicated.
 function mergeItems(raw,models){
@@ -129,6 +134,13 @@ export async function onRequest({request,env}){
    const parsed=await classifyInventoryItems(env,String(text),models);
    trace.push({source,found:parsed.map(x=>({name:(models.find(m=>m.id===Number(x.model_id))||{}).name||String(x.model_id),quantity:x.quantity}))});
    if(parsed.length){items=mergeItems(parsed,models);itemSource=source;break}
+   // "جكيت جوخ" is scarfo only for an unambiguous single-piece order.
+   if(!parsed.length&&/(?:جكيت|جاكيت)\\s+جوخ(?!\\s*(?:كاجوال|كاجول|سكايفو|سكارفو))/.test(key(text))&&
+      !/عدد\\s*[٢-٩2-9]|قطعتين|قطعتان|قطعتان|قطعتين|عدد\\s*1[0-9]/.test(String(text))){
+    const scarfo=models.find(m=>key(canonicalModelName(m.name))===key('جاكيت جوخ سكايفو'));
+    if(scarfo){items=mergeItems([{model_id:scarfo.id,name:scarfo.name,quantity:1}],models);itemSource=source+'_single_jokh';break}
+   }
+
   }
   if(!items.length&&inventory.get(Number(o.id))?.length){items=mergeItems(inventory.get(Number(o.id)),models);itemSource='inventory'}
   const itemsValid=items.length>0&&items.every(i=>Number.isInteger(i.quantity)&&i.quantity>=1&&i.quantity<=50);
