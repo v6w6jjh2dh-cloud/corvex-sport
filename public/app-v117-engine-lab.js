@@ -34,6 +34,9 @@
    .el-list{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 12px}
    .el-sec{margin:14px 0 4px;font-weight:700}
    .el-note{font-size:12px;opacity:.75;margin-top:6px}
+   /* iOS Safari gives date inputs an intrinsic min-width that overflows the panel */
+   #elBody .filter-group{min-width:0}
+   #elBody input[type=date]{width:100%;max-width:100%;min-width:0;box-sizing:border-box;-webkit-appearance:none;appearance:none;display:block}
   </style>`;
 
   async function view(){
