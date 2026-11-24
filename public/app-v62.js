@@ -2688,6 +2688,7 @@ async function dailyProfitsView(){
     try{
       const d=await api('/profit-shipping-cohorts?date='+encodeURIComponent(date)+'&store_id='+encodeURIComponent(store));
       $('#cohortAdSpend').value=Number(d.ad_spend||0);
+      window.__cohortOrders=d.orders; // used by order-number links (navigation only)
       const statusLabel=s=>({pending:'قيد التوصيل',delivered:'تم التسليم',partial:'تسليم جزئي',delivered_adjusted:'تسليم جزئي',returned:'مرتجع',refused_fee_paid:'مرفوض ودفع أجور',refused_no_fee:'مرفوض دون أجور',canceled_before_arrival:'ملغي قبل الوصول'})[s]||s;
       const sourceLabel={order_items:'من أصناف الطلب',received_items:'من القطع المستلمة',saved_order:'كوست محفوظ',saved_partial_review:'كوست مراجعة الجزئي',unknown:'غير معروف'};
       const deliveredOrders=d.orders.filter(o=>o.result==='delivered');
