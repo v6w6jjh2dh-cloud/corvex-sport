@@ -44,7 +44,9 @@ async function reportDetail(env,row){
  if(!shipments){
   legacy=true;
   shipments=[...(details.closed||[]).map(x=>({...x,match_status:'matched',outcome:'closed',status_at_close:x.previous_status||'pending',new_status:x.new_status||'returned',note:'تم التحويل إلى مرتجع'})),
-   ...(details.skipped||[]).map(x=>({...x,match_status:x.order_id?'matched':'unknown',outcome:'pending',status_at_close:x.current_status||'',note:x.reason||''}))];
+   ...(details.skipped||[]).map(x=>/مرتجع مسبق/.test(String(x.reason||''))&&x.order_id
+     ?{...x,match_status:'matched',outcome:'closed',status_at_close:x.current_status||'returned',new_status:'returned',note:'كان مرتجعًا قبل التسكير — مثبت في هذا الكشف'}
+     :{...x,match_status:x.order_id?'matched':'unknown',outcome:'pending',status_at_close:x.current_status||'',note:x.reason||''})];
  }
  await ensureInventorySchema(env);
  const out=[];
@@ -83,7 +85,8 @@ export async function onRequest({request,env}){
   const result=await env.DB.prepare("SELECT id,created_at,source_name,matched_count,closed_count,skipped_count,details_json FROM cargo_return_close_reports ORDER BY id DESC LIMIT 80").all();
   return json({reports:(result.results||[]).map(r=>{let d={};try{d=JSON.parse(r.details_json||'{}')}catch{}
    const legacy=!Array.isArray(d.shipments);
-   const counts=d.counts||(legacy?{total:null,matched:(d.closed||[]).length+(d.skipped||[]).filter(x=>x.order_id).length,closed:(d.closed||[]).length,pending:(d.skipped||[]).length,unmatched:null,ignored:null}:countShipments(d.shipments));
+   const prior=(d.skipped||[]).filter(x=>x.order_id&&/مرتجع مسبق/.test(String(x.reason||''))).length;
+   const counts=d.counts||(legacy?{total:null,matched:(d.closed||[]).length+(d.skipped||[]).filter(x=>x.order_id).length,closed:(d.closed||[]).length+prior,pending:(d.skipped||[]).length-prior,unmatched:null,ignored:null}:countShipments(d.shipments));
    return {id:r.id,created_at:r.created_at,source_name:r.source_name,matched_count:r.matched_count,closed_count:r.closed_count,skipped_count:r.skipped_count,legacy,counts,details:{closed:d.closed||[],skipped:d.skipped||[]}}})});
  }
  let body;try{body=await request.json()}catch{return json({error:'invalid_json'},400)}

@@ -175,7 +175,7 @@ test('audit explains "no deduction" by print time vs deduct-on-print start and t
  const d=(await t.call(auditApi,'GET')).body;
  const kind=id=>d.rows.find(r=>r.order_id===id).kind;
  assert.equal(kind(before),'count_excluded');assert.equal(kind(after),'never_deducted');assert.equal(kind(nobase),'no_baseline');
- assert.equal(kind(late),'missing');assert.equal(kind(unk),'unrecognized');
+ assert.equal(kind(late),'missing');assert.equal(kind(unk),'bug_not_deducted');
  assert.equal(d.summary.no_deduction,4);assert.equal(d.summary.no_deduction_before_system,3);
  const s0=t.stock(t.FUR);
  const ap=await t.call(auditApi,'POST',{action:'apply',confirm:'تطبيق التصحيح',items:[{order_id:before},{order_id:after},{order_id:nobase}]});
@@ -184,4 +184,19 @@ test('audit explains "no deduction" by print time vs deduct-on-print start and t
  const again=await t.call(auditApi,'POST',{action:'apply',confirm:'تطبيق التصحيح',items:[{order_id:before}]});
  assert.equal(again.body.applied_orders,0);assert.equal(t.stock(t.FUR),s0+2);
  assert.equal((await t.call(auditApi,'GET')).body.rows.find(r=>r.order_id===before).kind,'ok');
+});
+
+test('audit evidence: activation time, deductions log, prints since activation; never "all good" with open rows',async()=>{
+ const t=setup();
+ const a=t.order('جاكيت فرو عدد 1','0796000001');t.db.prepare("UPDATE orders SET first_printed_at='2026-11-23 10:00:00',delivery_status='returned' WHERE id=?").run(a); // after activation, no deduction
+ const b=t.order('جاكيت فرو عدد 1','0796000002');await t.print(b);t.db.prepare("UPDATE orders SET first_printed_at='2026-11-23 11:00:00',delivery_status='returned' WHERE id=?").run(b);
+ await t.call(closeReturns,'GET');
+ t.db.prepare("INSERT INTO cargo_return_close_reports(created_by,details_json) VALUES(1,?)").run(JSON.stringify({closed:[{order_id:a,shipment_code:'E-1'}],skipped:[{order_id:b,order_code:'x',shipment_code:'E-2',reason:'مرتجع مسبقًا'}]}));
+ const d=(await t.call(auditApi,'GET')).body;
+ assert.equal(d.evidence.activated_at,'22/11/2026 11:49');
+ assert.equal(d.evidence.deduction_movements,1);assert.equal(d.evidence.printed_since_activation,2);assert.equal(d.evidence.printed_since_activation_deducted,1);
+ assert.equal(d.summary.closed_shipments,2,'legacy «مرتجع مسبقًا» rows count as received');
+ assert.equal(d.summary.printed_after_activation_without_deduction,1);assert.equal(d.summary.bug_not_deducted,1);
+ assert.equal(d.summary.needs_attention,2);
+ assert.equal(d.rows.find(r=>r.order_id===a).status_ar,'مرتجع');
 });

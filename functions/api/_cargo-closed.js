@@ -14,6 +14,14 @@ export async function loadClosedIndex(env){
     if(info.order_id&&!orders.has(info.order_id))orders.set(info.order_id,info);
     const k=normCode(c.shipment_code);if(k&&!codes.has(k))codes.set(k,info);
    }
+   // Older statements skipped orders that were already "returned" («مرتجع مسبقًا») instead of
+   // closing them, although the shipment was in the returns statement: it is received too.
+   for(const c of d.skipped||[]){
+    if(!Number(c.order_id)||!/مرتجع مسبق/.test(String(c.reason||'')))continue;
+    const info={kind:'report',report_id:Number(r.id),closed_at:r.closed_at,source_name:r.source_name||'',order_id:Number(c.order_id),order_code:c.order_code??null,shipment_code:c.shipment_code||'',prior_returned:true};
+    if(!orders.has(info.order_id))orders.set(info.order_id,info);
+    const k=normCode(c.shipment_code);if(k&&!codes.has(k))codes.set(k,info);
+   }
   }
  }catch{}
  try{

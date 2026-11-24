@@ -68,3 +68,15 @@ test('all orders of the phone already received → "closed before", not unmatche
  const d=(await t.call(preview,'POST',{rows:[t.row('CB-7'),t.row('CB-7')]})).body.rows;
  assert.equal(d[0].status,'matched');assert.equal(d[1].status,'duplicate');
 });
+
+test('#10233 skipped as «مرتجع مسبقًا» in an older closed statement is treated as received',async()=>{
+ const t=setup();
+ const a=t.order(10233,'returned','2026-11-18 08:00:00');await t.print(a);
+ const b=t.order(10437,'pending','2026-11-21 08:00:00');await t.print(b);
+ await t.call(commit,'GET');
+ t.db.prepare("INSERT INTO cargo_return_close_reports(created_by,created_at,details_json) VALUES(1,'2026-11-22 09:00:00',?)").run(JSON.stringify({closed:[],skipped:[{order_id:a,order_code:10233,shipment_code:'CB-10233',current_status:'returned',reason:'مرتجع مسبقًا'}]}));
+ const r=(await t.call(preview,'POST',{rows:[t.row('CB-NEW')]})).body.rows[0];
+ assert.equal(r.status,'matched');assert.equal(Number(r.order_code),10437);
+ const old=(await t.call(preview,'POST',{rows:[t.row('CB-10233')]})).body.rows[0];
+ assert.equal(old.status,'already_closed');assert.match(old.reason,/كشف المرتجعات #1 بتاريخ 22\/11\/2026/);
+});
