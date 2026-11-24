@@ -176,3 +176,56 @@ export async function deductOnFirstPrint(env,order,userId=null,loadedModels=null
 export async function syncOrderInventory(env,beforeOrder,afterOrder,userId=null,loadedModels=null){
  return{changed:false,reason:'print_based_inventory'};
 }
+
+// ---------------------------------------------------------------- return restock
+// Goods come back into stock only when a returns statement is closed (the shipment is
+// physically in the warehouse) or a return receipt is confirmed — never from a status change.
+// Quantities come from the original deduction (inventory_order_items), minus what the
+// customer kept in a partial delivery, minus what was already added back for the order.
+export const RESTOCK_TYPES=['cargo_return'];
+const FULL_RETURN=new Set(['pending','returned','refused_fee_paid','refused_no_fee','canceled_before_arrival']);
+const PARTIAL=new Set(['partial','delivered_adjusted']);
+
+async function receivedByModel(env,order,models){
+ const raw=String(order.partial_received_items||'').trim();if(!raw)return null;
+ let parsed=null;try{parsed=JSON.parse(raw)}catch{}
+ const map=new Map();
+ if(Array.isArray(parsed)){
+  for(const x of parsed){const id=Number(x.model_id),q=Number(x.received??x.quantity);if(!id||!Number.isFinite(q)||q<0)return null;map.set(id,(map.get(id)||0)+q)}
+  return map;
+ }
+ const items=await classifyInventoryItems(env,raw,models);
+ if(!items.length)return null;
+ for(const i of items)map.set(i.model_id,(map.get(i.model_id)||0)+i.quantity);
+ return map;
+}
+
+export async function returnRestockPlan(env,order,loadedModels=null){
+ await ensureInventorySchema(env);
+ const orderId=Number(order?.id||0),status=order?.delivery_status||'pending';
+ const allocated=(await env.DB.prepare('SELECT model_id,quantity FROM inventory_order_items WHERE order_id=?').bind(orderId).all()).results||[];
+ const already=new Map(((await env.DB.prepare(`SELECT model_id,SUM(quantity_delta) q FROM inventory_movements WHERE order_id=? AND quantity_delta>0 AND movement_type IN (${RESTOCK_TYPES.map(()=>'?').join(',')}) GROUP BY model_id`).bind(orderId,...RESTOCK_TYPES).all()).results||[]).map(r=>[Number(r.model_id),Number(r.q||0)]));
+ const base={order_id:orderId,allocated:allocated.map(a=>({model_id:Number(a.model_id),quantity:Number(a.quantity)})),already:[...already].map(([model_id,quantity])=>({model_id,quantity}))};
+ if(!allocated.length)return {...base,ok:false,reason:'لا يوجد خصم مسجل لهذا الطلب عند الطباعة؛ لا تتم إضافة للمخزون',items:[]};
+ let expected;
+ if(PARTIAL.has(status)){
+  const received=await receivedByModel(env,order,loadedModels);
+  if(!received)return {...base,ok:false,reason:'تسليم جزئي بدون تفصيل القطع المستلمة؛ يحتاج مراجعة قبل الإضافة للمخزون',items:[]};
+  expected=allocated.map(a=>({model_id:Number(a.model_id),quantity:Math.max(0,Number(a.quantity)-(received.get(Number(a.model_id))||0))}));
+ }else if(FULL_RETURN.has(status)){
+  expected=allocated.map(a=>({model_id:Number(a.model_id),quantity:Number(a.quantity)}));
+ }else return {...base,ok:false,reason:'الطلب مسجل كمستلم بالكامل؛ لا يُضاف شيء للمخزون',items:[]};
+ const items=expected.map(e=>({model_id:e.model_id,expected:e.quantity,already:already.get(e.model_id)||0,quantity:Math.max(0,e.quantity-(already.get(e.model_id)||0))}));
+ const toAdd=items.filter(i=>i.quantity>0);
+ return {...base,ok:true,expected:items,items:toAdd,reason:toAdd.length?'':'تمت إضافة هذا المرتجع للمخزون سابقًا'};
+}
+
+export function restockStatements(env,orderId,items,userId,note){
+ const out=[];
+ for(const item of items){
+  out.push(env.DB.prepare('INSERT OR IGNORE INTO inventory_balances(model_id,quantity,updated_by) VALUES(?,0,?)').bind(item.model_id,userId));
+  out.push(env.DB.prepare("UPDATE inventory_balances SET quantity=quantity+?,updated_by=?,updated_at=datetime('now') WHERE model_id=?").bind(item.quantity,userId,item.model_id));
+  out.push(env.DB.prepare("INSERT INTO inventory_movements(model_id,order_id,quantity_delta,movement_type,note,created_by) VALUES(?,?,?,'cargo_return',?,?)").bind(item.model_id,orderId,item.quantity,note,userId));
+ }
+ return out;
+}

@@ -29,12 +29,12 @@ export async function onRequest({request,env}){
   let delivered=[];
   try{delivered=JSON.parse(order.partial_received_items||'[]')}catch{}
   if(!Array.isArray(delivered)||!delivered.length)return json({error:'التسليم الجزئي غير مفصل؛ لا يمكن استلام المرتجع تلقائيًا'},422);
-  const deliveredMap=new Map(delivered.map(x=>[Number(x.model_id),Number(x.quantity||0)]));
+  const deliveredMap=new Map(delivered.map(x=>[Number(x.model_id),Number(x.received??x.quantity??0)]));
   partialExpected=new Map(parsed.map(x=>[x.model_id,Math.max(0,x.quantity-(deliveredMap.get(x.model_id)||0))]));
  }
- const returned=(await env.DB.prepare('SELECT items_json FROM cargo_return_receipts WHERE order_id=?').bind(orderId).all()).results||[];
- const already=new Map();
- for(const row of returned){let items=[];try{items=JSON.parse(row.items_json)}catch{}for(const i of items)already.set(Number(i.model_id),(already.get(Number(i.model_id))||0)+Number(i.quantity||0))}
+ // Everything already added back for this order — by earlier receipts or by closing a
+ // returns statement — so the same pieces can never be added twice.
+ const already=new Map(((await env.DB.prepare("SELECT model_id,SUM(quantity_delta) q FROM inventory_movements WHERE order_id=? AND quantity_delta>0 AND movement_type='cargo_return' GROUP BY model_id").bind(orderId).all()).results||[]).map(r=>[Number(r.model_id),Number(r.q||0)]));
  const allocation=new Map(allocated.map(x=>[Number(x.model_id),Number(x.quantity)]));
  const items=Array.isArray(b.items)?b.items.map(x=>({model_id:Number(x.model_id),quantity:Number(x.quantity)})):[];
  if(!items.length||items.some(x=>!Number.isInteger(x.model_id)||!Number.isInteger(x.quantity)||x.quantity<1)||new Set(items.map(x=>x.model_id)).size!==items.length)return json({error:'حدد كميات مرتجع صحيحة'},422);

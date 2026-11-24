@@ -1,4 +1,4 @@
-import {classifyInventoryItems,loadInventoryModels} from './_inventory.js';
+import {classifyInventoryItems,loadInventoryModels,returnRestockPlan,restockStatements} from './_inventory.js';
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 const phone=x=>{let s=String(x??'').replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g,'');if(s.startsWith('00962'))s=s.slice(2);if(s.startsWith('962'))s='0'+s.slice(3);if(s.length===9&&s.startsWith('7'))s='0'+s;return s};
 const txt=(x,n=200)=>String(x??'').trim().slice(0,n);
@@ -59,23 +59,27 @@ export async function onRequest({request,env}){
  const rows=body.rows;
  if(!Array.isArray(rows)||!rows.length||rows.length>500)return json({error:'invalid_rows'},400);
  const unique=new Set(),accepted=[],skipped=[];
+ const invModels=await loadInventoryModels(env).catch(()=>[]);
+ const modelName=id=>(invModels.find(m=>m.id===Number(id))||{}).name||('موديل '+id);
+ const RESTOCK_ONLY=new Set(['returned','partial','delivered_adjusted','refused_fee_paid','refused_no_fee','canceled_before_arrival']);
  for(const row of rows){
   const id=Number(row.order_id),code=String(row.shipment_code||'').trim(),p=phone(row.phone);
   if(!Number.isSafeInteger(id)||id<=0||!code||!p||unique.has(id)){skipped.push({order_id:id,reason:'بيانات ناقصة أو طلب مكرر'});continue}
   unique.add(id);
-  const o=await env.DB.prepare("SELECT id,order_code,phone,delivery_status FROM orders WHERE id=? AND date(COALESCE(first_printed_at,created_at),'+3 hours')>='2026-11-17'").bind(id).first();
+  const o=await env.DB.prepare("SELECT id,order_code,phone,delivery_status,partial_received_items FROM orders WHERE id=? AND date(COALESCE(first_printed_at,created_at),'+3 hours')>='2026-11-17'").bind(id).first();
   if(!o||phone(o.phone)!==p){skipped.push({order_id:id,shipment_code:code,reason:'رقم الهاتف لا يطابق الطلب'});continue}
-  if(o.delivery_status==='partial'||o.delivery_status==='delivered_adjusted'){skipped.push({order_id:id,order_code:o.order_code,shipment_code:code,current_status:o.delivery_status,reason:'تسليم جزئي يحتاج مراجعة منفصلة'});continue}
-  if(o.delivery_status==='returned'){skipped.push({order_id:id,order_code:o.order_code,shipment_code:code,current_status:o.delivery_status,reason:'مرتجع مسبقًا'});continue}
-  if(o.delivery_status!=='pending'){skipped.push({order_id:id,order_code:o.order_code,shipment_code:code,current_status:o.delivery_status,reason:'الطلب ليس قيد التوصيل؛ يحتاج مراجعة ولا يتم تغييره تلقائيًا'});continue}
-  accepted.push({id,code,phone:p,order_code:o.order_code,previous_status:o.delivery_status});
+  if(o.delivery_status!=='pending'&&!RESTOCK_ONLY.has(o.delivery_status)){skipped.push({order_id:id,order_code:o.order_code,shipment_code:code,current_status:o.delivery_status,reason:'الطلب مسجل كمستلم؛ يحتاج مراجعة ولا يتغير تلقائيًا'});continue}
+  // Closing the returns statement = the goods are physically back in the warehouse.
+  const plan=await returnRestockPlan(env,o,invModels);
+  if(o.delivery_status!=='pending'&&(!plan.ok||!plan.items.length)){skipped.push({order_id:id,order_code:o.order_code,shipment_code:code,current_status:o.delivery_status,reason:plan.reason});continue}
+  accepted.push({id,code,phone:p,order_code:o.order_code,previous_status:o.delivery_status,changeStatus:o.delivery_status==='pending',restock:plan.ok?plan.items:[],restockNote:plan.ok?plan.reason:plan.reason});
  }
- if(!accepted.length)return json({ok:true,updated:0,skipped,report_id:null});
- // Only update status: never alter settlement, inventory, or collected cash.
+ if(!accepted.length)return json({ok:true,updated:0,restocked_pieces:0,skipped,report_id:null});
  const sourceName=String(body.source_name||'').slice(0,180);
  const pendingRows=Array.isArray(body.pending_rows)?body.pending_rows.slice(0,500):[];
  for(const row of pendingRows){skipped.push({order_id:Number(row.order_id)||null,order_code:String(row.order_code||''),shipment_code:String(row.shipment_code||''),current_status:String(row.order_status||''),reason:String(row.reason||'شحنة معلّقة تحتاج مراجعة')})}
- const closed=accepted.map(x=>({order_id:x.id,order_code:x.order_code,shipment_code:x.code,phone:x.phone,previous_status:x.previous_status,new_status:'returned'}));
+ const closed=accepted.map(x=>({order_id:x.id,order_code:x.order_code,shipment_code:x.code,phone:x.phone,previous_status:x.previous_status,new_status:x.changeStatus?'returned':x.previous_status,
+  stock_added:x.restock.map(i=>({model_id:i.model_id,model_name:modelName(i.model_id),quantity:i.quantity})),stock_note:x.restock.length?'':x.restockNote}));
  // Full snapshot of every shipment in the statement, saved with the report so it can be
  // reviewed later exactly as it was at closing time (display only).
  const models=await loadInventoryModels(env).catch(()=>[]);
@@ -92,16 +96,21 @@ export async function onRequest({request,env}){
    phone:txt(r.phone,20),recipient_name:order?.recipient_name||'',area:order?.area||'',cargo_area:txt(r.area,80),
    items:Array.isArray(r.items)&&r.items.length?r.items.slice(0,20).map(i=>({model_name:txt(i.model_name,80),quantity:Number(i.quantity)||0})):(order?.items||[]),
    shipment_print_date:order?.shipment_print_date||null,shipment_print_at:order?.shipment_print_at||null,
-   match_status:txt(r.status,20),outcome,status_at_close:order?.current_status||txt(r.order_status,30)||null,new_status:isClosed?'returned':null,
-   return_status:txt(r.return_status,120),note:txt(skip?.reason||r.reason,300)});
+   match_status:txt(r.status,20),outcome,status_at_close:order?.current_status||txt(r.order_status,30)||null,new_status:isClosed?(closed.find(c=>c.order_id===id)?.new_status||'returned'):null,
+   return_status:txt(r.return_status,120),note:txt(skip?.reason||(isClosed?(closed.find(c=>c.order_id===id)?.stock_added?.length?'أُضيف للمخزون: '+closed.find(c=>c.order_id===id).stock_added.map(i=>i.model_name+' × '+i.quantity).join('، '):(closed.find(c=>c.order_id===id)?.stock_note||'لا إضافة للمخزون')):r.reason),300)});
  }
  const counts=shipments.length?countShipments(shipments):null;
  const details=JSON.stringify(shipments.length?{version:2,closed,skipped,shipments,counts}:{closed,skipped});
  // Record the report in the same D1 batch as status updates.
- const statements=accepted.map(x=>env.DB.prepare("UPDATE orders SET delivery_status='returned',updated_at=datetime('now') WHERE id=? AND delivery_status='pending'").bind(x.id));
+ const statements=[];
+ for(const x of accepted){
+  if(x.changeStatus)statements.push(env.DB.prepare("UPDATE orders SET delivery_status='returned',updated_at=datetime('now') WHERE id=? AND delivery_status='pending'").bind(x.id));
+  statements.push(...restockStatements(env,x.id,x.restock,user.id,'استلام مرتجع بتسكير كشف المرتجعات — شحنة '+x.code));
+ }
  statements.push(env.DB.prepare("INSERT INTO cargo_return_close_reports(created_by,source_name,matched_count,closed_count,skipped_count,details_json) VALUES(?,?,?,?,?,?)").bind(user.id,sourceName,accepted.length,accepted.length,skipped.length,details));
  const result=await env.DB.batch(statements);
- const updated=result.slice(0,-1).reduce((n,x)=>n+Number(x.meta?.changes||0),0);
  const reportId=result[result.length-1]?.meta?.last_row_id||null;
- return json({ok:true,updated,skipped,report_id:reportId});
+ const updated=accepted.filter(x=>x.changeStatus).length;
+ const restockedPieces=accepted.reduce((n,x)=>n+x.restock.reduce((m,i)=>m+i.quantity,0),0);
+ return json({ok:true,updated,closed_count:accepted.length,restocked_pieces:restockedPieces,closed,skipped,report_id:reportId});
 }
