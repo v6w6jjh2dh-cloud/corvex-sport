@@ -201,3 +201,18 @@ export function pricePartialDelivery(shipped,submitted){
  if(returned<1)return {ok:false,reason:'كل القطع مستلمة؛ اختر حالة «تم التسليم» بدل التسليم الجزئي'};
  return {ok:true,items,received,returned,cost:round2(items.reduce((n,x)=>n+x.cost,0))};
 }
+
+// Each settled statement line remembers the shipment date it was reported with, so a later
+// statement can prove (or rule out) that it describes the same shipment. Older rows have none.
+const lineShipmentReady=new WeakMap();
+export function ensureSettlementLineShipmentDate(env){
+ const key=env.DB;
+ if(!lineShipmentReady.has(key))lineShipmentReady.set(key,(async()=>{
+  const info=await env.DB.prepare('PRAGMA table_info(delivery_company_settlement_orders)').all();
+  const cols=new Set((info.results||[]).map(r=>r.name));
+  if(!cols.size||cols.has('shipment_date'))return;
+  try{await env.DB.prepare('ALTER TABLE delivery_company_settlement_orders ADD COLUMN shipment_date TEXT').run()}
+  catch(e){if(!/duplicate column/i.test(String(e?.message||e)))throw e}
+ })().catch(e=>{lineShipmentReady.delete(key);throw e}));
+ return lineShipmentReady.get(key);
+}

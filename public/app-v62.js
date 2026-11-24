@@ -2259,7 +2259,7 @@ async function deliveryReconcileView(){
           ${(h.settlements||[]).length?(h.settlements||[]).map(x=>`
             <div class="settlement-row">
               <div>
-                <b>${esc(x.settlement_code)}</b>
+                <button type="button" class="rc-link" data-rc-settlement="${Number(x.id)}">${esc(x.settlement_code)}</button>
                 <div class="sub">تاريخ الكشف: ${x.statement_date||fmtDate(x.created_at)} • تاريخ الحفظ: ${fmtDate(x.created_at)} • مطابق ${x.matched_count} • غير مطابق ${x.unmatched_count} • مكرر ${x.duplicate_count}</div>
               </div>
               <div class="delivery-history-money">
@@ -2455,13 +2455,15 @@ async function deliveryReconcileView(){
     const tag=(t,cls='')=>`<span class="reconcile-tag ${cls}">${t}</span>`;
     let html='';
     if(r.reason&&!r.auto)html+=`<div class="reconcile-why">${esc(r.reason)}</div>`;
+    if(r.match_type==='already_settled')html+=(r.candidates||[]).map(c=>`<div class="reconcile-prev">إثبات: ${esc(r.settled_evidence||'—')} • الطلب <button type="button" class="rc-link" data-rc-order="${Number(c.id)}">#${esc(c.order_code)}</button> • الكشف السابق ${c.settlement_id?`<button type="button" class="rc-link" data-rc-settlement="${Number(c.settlement_id)}">${esc(c.settlement_code||'كشف سابق')}</button>`:esc(c.settlement_code||'كشف سابق')} • ${esc(c.settlement_date||'—')} • ${c.settlement_imported_amount==null?'—':money(c.settlement_imported_amount)+' د.أ'} • ${esc(c.settlement_imported_status||c.delivery_status||'—')}</div>`).join('');
     if(r.auto&&r.match_evidence)html+=`<div class="sub">طريقة المطابقة: ${esc(r.match_evidence)}</div>`;
     if(showChooser){
       html+='<div class="reconcile-choices"><b>اختر الطلب الصحيح لهذا السطر:</b>'+(r.candidates||[]).map(c=>{
         const blocked=Number(c.delivery_company_settled||0)||previewRows.some((x,k)=>k!==i&&Number(x.selected_order_id)===Number(c.id));
-        const tags=[c.date_ok===false?tag('خارج تاريخ الشحنة','warn'):c.date_ok?tag('تاريخ الشحنة مطابق','ok'):'',!c.same_store?tag('متجر آخر: '+esc(c.store_name||'—'),'warn'):'',c.phone_source==='order_text'?tag('الرقم موجود في نص الطلب','warn'):'',c.amount_relation==='order_lower'?tag('قيمة الطلب أقل من الكشف','warn'):c.amount_relation==='equal'?tag('نفس القيمة','ok'):'',Number(c.delivery_company_settled||0)?tag('مسوّى سابقًا '+esc(c.settlement_code||''),'bad'):''].join('');
+        const tags=[c.date_ok===false?tag('خارج تاريخ الشحنة','warn'):c.date_ok?tag('تاريخ الشحنة مطابق','ok'):'',!c.same_store?tag('متجر آخر: '+esc(c.store_name||'—'),'warn'):'',c.phone_source==='order_text'?tag('الرقم موجود في نص الطلب','warn'):'',c.amount_relation==='order_lower'?tag('قيمة الطلب أقل من الكشف','warn'):c.amount_relation==='equal'?tag('نفس القيمة','ok'):'',Number(c.delivery_company_settled||0)?tag('مسوّى سابقًا','bad'):''].join('');
+        const prev=Number(c.delivery_company_settled||0)?`<div class="reconcile-prev">الكشف السابق: ${c.settlement_id?`<button type="button" class="rc-link" data-rc-settlement="${Number(c.settlement_id)}">${esc(c.settlement_code||'كشف سابق')}</button>`:esc(c.settlement_code||'كشف سابق')} • تاريخ الكشف: ${esc(c.settlement_date||'—')}${c.settlement_shipment_date?' • تاريخ الشحنة فيه: '+esc(c.settlement_shipment_date):''} • القيمة بالكشف: ${c.settlement_imported_amount==null?'—':money(c.settlement_imported_amount)+' د.أ'} • الحالة بالكشف: ${esc(c.settlement_imported_status||'—')} • المعتمدة: ${esc(({delivered:'تم التسليم',partial:'تسليم جزئي',delivered_adjusted:'تسليم بقيمة معدلة',refused_fee_paid:'رفض ودفع أجور',refused_no_fee:'رفض وعدم دفع أجور',canceled_before_arrival:'ملغي قبل الوصول',pending:'قيد التوصيل'})[c.settlement_applied_status||c.delivery_status]||c.settlement_applied_status||c.delivery_status||'—')}</div>`:'';
         return `<label class="reconcile-choice ${blocked?'disabled':''}"><input type="radio" name="rc-${i}" class="reconcile-order" data-i="${i}" value="${c.id}" ${Number(r.selected_order_id)===Number(c.id)?'checked':''} ${blocked?'disabled':''}>
-          <span><b>#${esc(c.order_code)}</b> • ${esc(c.recipient_name||'لا يوجد')} • ${money(c.amount)} د.أ<br><span class="sub">${esc(c.store_name||'—')} • طباعة: ${esc(c.first_print_date||'بدون')} • ${esc(c.phone||'')}</span><br>${tags}</span></label>`;
+          <span><button type="button" class="rc-link" data-rc-order="${Number(c.id)}">#${esc(c.order_code)}</button> • ${esc(c.recipient_name||'لا يوجد')} • ${money(c.amount)} د.أ<br><span class="sub">${esc(c.store_name||'—')} • طباعة: ${esc(c.first_print_date||'بدون')} • ${esc(c.phone||'')}</span><br>${tags}${prev}</span></label>`;
       }).join('')+'</div>';
       if(o&&(o.date_ok===false||!o.same_store))html+=`<label class="reconcile-confirm"><input type="checkbox" class="reconcile-confirm-outside" data-i="${i}" ${r.confirm_outside?'checked':''}> أؤكد أن الطلب #${esc(o.order_code)} هو نفس هذه الشحنة رغم ${o.date_ok===false?'اختلاف التاريخ':'اختلاف المتجر'}</label>`;
     }
@@ -2497,7 +2499,7 @@ async function deliveryReconcileView(){
   }
 
   function renderDeliveryPreview(summary){
-    const label={matched:['مطابق','match-ok'],matched_partial:['مطابق — قيمة مختلفة','match-ok'],duplicate:['أكثر من طلب محتمل','match-warn'],review_amount:['بحاجة اختيار','match-warn'],review_amount_higher:['قيمة الكشف أكبر','match-warn'],review_date:['تاريخ شحنة مختلف','match-warn'],review_code:['رقم شحنة مختلف','match-warn'],already_settled:['مسوّى سابقًا','match-ok'],other_store:['موجود بمتجر آخر','match-warn'],unmatched:['غير موجود','match-bad']};
+    const label={matched:['مطابق','match-ok'],matched_partial:['مطابق — قيمة مختلفة','match-ok'],duplicate:['أكثر من طلب محتمل','match-warn'],review_amount:['بحاجة اختيار','match-warn'],review_amount_higher:['قيمة الكشف أكبر','match-warn'],review_date:['تاريخ شحنة مختلف','match-warn'],review_code:['رقم شحنة مختلف','match-warn'],review_settled:['تحتاج مراجعة','match-warn'],already_settled:['مسوّى سابقًا','match-ok'],other_store:['موجود بمتجر آخر','match-warn'],unmatched:['غير موجود','match-bad']};
     $('#deliveryPreview').innerHTML=`
       <div class="delivery-summary">
         <div><span>إجمالي الكشف</span><b>${summary.total||0}</b></div>
@@ -2514,8 +2516,8 @@ async function deliveryReconcileView(){
             ${previewRows.map((r,i)=>{
               const [text,cls]=label[r.match_type]||['غير معروف','match-bad'];
               const o=r.auto?r.order:null;
-              const orderCell=o?`#${esc(o.order_code)} • ${esc(o.recipient_name||'لا يوجد')}<div class="sub">${esc(o.store_name||'—')} • ${money(o.amount)} د.أ</div>`
-                :r.match_type==='already_settled'?(r.candidates||[]).map(c=>`#${esc(c.order_code)}<div class="sub">${esc(c.settlement_code||'كشف سابق')}</div>`).join('')
+              const orderCell=o?`<button type="button" class="rc-link" data-rc-order="${Number(o.id)}">#${esc(o.order_code)}</button> • ${esc(o.recipient_name||'لا يوجد')}<div class="sub">${esc(o.store_name||'—')} • ${money(o.amount)} د.أ</div>`
+                :r.match_type==='already_settled'?(r.candidates||[]).map(c=>`<button type="button" class="rc-link" data-rc-order="${Number(c.id)}">#${esc(c.order_code)}</button><div class="sub">${c.settlement_id?`<button type="button" class="rc-link" data-rc-settlement="${Number(c.settlement_id)}">${esc(c.settlement_code||'كشف سابق')}</button>`:esc(c.settlement_code||'كشف سابق')}${c.settlement_date?' • '+esc(c.settlement_date):''}</div>`).join('')
                 :(r.candidates||[]).length?'<span class="sub">اختر من الأسفل ↓</span>':'—';
               return `<tr class="reconcile-row">
                 <td>${r.row_index}</td><td>${esc(r.phone||'')}</td><td>${esc(r.raw_date||r.shipment_date||'—')}</td>
@@ -2537,7 +2539,7 @@ async function deliveryReconcileView(){
       </div>`;
     if(!document.getElementById('reconcileStyles')){
       const st=document.createElement('style');st.id='reconcileStyles';
-      st.textContent=`.reconcile-panel-row td{background:#f8fafc;padding:8px 12px}.reconcile-why{background:#fff7e6;border:1px solid #f5c26b;border-radius:10px;padding:8px 10px;margin:4px 0 8px}.reconcile-choices{display:grid;gap:6px;margin:6px 0}.reconcile-choice{display:flex;gap:8px;align-items:flex-start;border:1px solid #d9e2ec;border-radius:10px;padding:8px;background:#fff;cursor:pointer}.reconcile-choice.disabled{opacity:.5;cursor:not-allowed}.reconcile-tag{display:inline-block;font-size:12px;border-radius:999px;padding:1px 8px;margin:3px 0 0 4px;background:#e6f4ea;color:#1e6b34}.reconcile-tag.warn{background:#fff4d6;color:#8a5a00}.reconcile-tag.bad{background:#fde8e8;color:#9b1c1c}.reconcile-confirm{display:block;margin:6px 0;font-weight:600}.reconcile-items{margin-top:8px}.reconcile-items-table{min-width:520px;margin:6px 0}.reconcile-items-table input{max-width:80px}.reconcile-totals{background:#eef6ff;border-radius:10px;padding:8px}.reconcile-reason{max-width:240px;white-space:normal}`;
+      st.textContent=`.reconcile-panel-row td{background:#f8fafc;padding:8px 12px}.reconcile-why{background:#fff7e6;border:1px solid #f5c26b;border-radius:10px;padding:8px 10px;margin:4px 0 8px}.reconcile-choices{display:grid;gap:6px;margin:6px 0}.reconcile-choice{display:flex;gap:8px;align-items:flex-start;border:1px solid #d9e2ec;border-radius:10px;padding:8px;background:#fff;cursor:pointer}.reconcile-choice.disabled{opacity:.5;cursor:not-allowed}.reconcile-tag{display:inline-block;font-size:12px;border-radius:999px;padding:1px 8px;margin:3px 0 0 4px;background:#e6f4ea;color:#1e6b34}.reconcile-tag.warn{background:#fff4d6;color:#8a5a00}.reconcile-tag.bad{background:#fde8e8;color:#9b1c1c}.reconcile-confirm{display:block;margin:6px 0;font-weight:600}.reconcile-items{margin-top:8px}.reconcile-items-table{min-width:520px;margin:6px 0}.reconcile-items-table input{max-width:80px}.reconcile-totals{background:#eef6ff;border-radius:10px;padding:8px}.reconcile-reason{max-width:240px;white-space:normal}@media(max-width:760px){.reconcile-panel{position:sticky;right:0;width:calc(100vw - 64px);max-width:calc(100vw - 64px);white-space:normal}}.reconcile-prev{font-size:12px;color:#475467;background:#f2f4f7;border-radius:8px;padding:5px 8px;margin-top:5px;line-height:1.7}`;
       document.head.appendChild(st);
     }
     previewRows.forEach((r,i)=>renderReconcilePanel(i));
