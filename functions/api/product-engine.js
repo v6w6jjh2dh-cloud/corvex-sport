@@ -92,7 +92,7 @@ export async function onRequest({request,env}){
   }
   if(view==='compare'){
    const to=url.searchParams.get('to')||todayAmman(),from=url.searchParams.get('from')||shift(to,-13);
-   const limit=Math.min(500,Math.max(1,Number(url.searchParams.get('limit')||300)));
+   const limit=Math.min(500,Math.max(1,Number(url.searchParams.get('limit')||150)));
    if(!DAY.test(from)||!DAY.test(to)||from>to)return json({error:'تاريخ غير صالح'},400);
    const orders=await corvexOrders(env,store.id,from,to,limit);
    const cat=await loadCatalogue(env,{storeId:store.id});
@@ -105,7 +105,7 @@ export async function onRequest({request,env}){
     try{const r=await cohortEngine({request:new Request(`${url.origin}/api/profit-shipping-cohorts?date=${d}&store_id=${store.id}`,{headers:{authorization:auth}}),env});
      if(r.ok)for(const o of (await r.json()).orders||[])cohort.set(Number(o.id),o)}catch{}
    }
-   const rows=[];const counts={orders:orders.length,central_vs_profit_engine:0,baseline_vs_profit_engine:0,knowledge_changes:0,central_vs_print_engine:0,central_vs_print_allocation:0,central_unrecognised:0,central_cost_unknown:0};
+   const rows=[];const counts={orders:orders.length,central_vs_profit_engine:0,baseline_vs_profit_engine:0,knowledge_changes:0,central_vs_print_engine:0,central_vs_print_allocation:0,central_unrecognised:0,central_cost_unknown:0,central_needs_review:0,cost_differences:0};
    for(const o of orders){
     // read with the rules in force when the order was created (no automatic re-interpretation of history)
     const central=await resolveOrderItems(env,o,await asOfCat(o.created_at),alloc.get(Number(o.id))||null);
@@ -120,13 +120,21 @@ export async function onRequest({request,env}){
     d.knowledge_vs_baseline=knowledgeDiff;
     if(d.vs_print_engine.length)counts.central_vs_print_engine++;
     if(alloc.has(Number(o.id))&&d.vs_print_allocation.length)counts.central_vs_print_allocation++;
+    // cost per order: active profit engine (items × approved unit cost) vs central engine
+    const ho=cohort.get(Number(o.id))||null;
+    const hCost=ho&&(ho.items||[]).length&&(ho.items||[]).every(i=>i.total_cost!=null)?round2(ho.items.reduce((n,i)=>n+Number(i.total_cost||0),0)):null;
+    const costDiff=ho?(hCost===null)!==(central.cost===null)||(hCost!==null&&central.cost!==null&&Math.abs(hCost-central.cost)>0.001):false;
+    if(costDiff){counts.cost_differences++;d.cost=['cost']}
+    if(central.needs_review)counts.central_needs_review++;
     if(!central.items.length)counts.central_unrecognised++;
     if(central.items.length&&central.cost===null)counts.central_cost_unknown++;
-    const differs=knowledgeDiff.length||d.vs_print_engine.length||(h&&d.vs_profit_engine.length)||(alloc.has(Number(o.id))&&d.vs_print_allocation.length)||!central.items.length;
+    const differs=costDiff||central.needs_review||knowledgeDiff.length||d.vs_print_engine.length||(h&&d.vs_profit_engine.length)||(alloc.has(Number(o.id))&&d.vs_print_allocation.length)||!central.items.length;
     if(differs||url.searchParams.get('all')==='1')rows.push({id:o.id,order_code:o.order_code,ship_day:o.ship_day,text:String(o.order_notes||o.raw_text||'').slice(0,400),
      central:{items:central.items.map(i=>({ref:i.ref,name:i.name,quantity:i.quantity,unit_cost:i.unit_cost})),source:central.source,cost:central.cost,knowledge:central.trace.filter(t=>t.source==='knowledge')},
      baseline:{items:baseline.items.map(i=>({name:i.name,quantity:i.quantity})),source:baseline.source},
-     profit_engine:h,print_engine:p,print_allocation:a,differences:d});
+     profit_engine:h,profit_engine_detail:ho?{items:(ho.items||[]).map(i=>({name:i.name,quantity:i.quantity,unit_cost:i.unit_cost})),cost:hCost,source:ho.item_source}:null,
+     needs_review:central.needs_review,uncertain:(central.uncertain||[]).map(u=>({alias:u.alias,reason:u.reason})),
+     print_engine:p,print_allocation:a,differences:d});
    }
    return json({engine:ENGINE_VERSION,read_only:true,store,from,to,counts,rows});
   }
@@ -153,19 +161,20 @@ export async function onRequest({request,env}){
    return json({store,current_version:decided?decided.id:0,events:rows});
   }
   if(view==='knowledge'){
-   const cat=await loadCatalogue(env,{storeId:store.id}),failures=[];
+   const cat=await loadCatalogue(env,{storeId:store.id}),failures=[],check=url.searchParams.get('check')==='1';
    // T-11: a single general word needs product evidence, so each name is checked with a quantity («… عدد 2»).
    const probe=a=>/\s/.test(key(a).trim())?a:a+' عدد 2';
-   for(const k of PRODUCT_KNOWLEDGE.filter(x=>x.status!=='superseded'&&x.status!=='disabled'))for(const a of [...k.aliases,...(k.review||[])]){
+   // the self-check reads every alias (heavy): only on request (?check=1)
+   if(check)for(const k of PRODUCT_KNOWLEDGE.filter(x=>x.status!=='superseded'&&x.status!=='disabled'))for(const a of [...k.aliases,...(k.review||[])]){
     const r=await resolveOrderItems(env,{order_notes:'',raw_text:probe(a)},cat);
     if(r.items.length!==1)failures.push({id:k.id,alias:a,got:r.items.map(i=>i.name)});
    }
-   for(const m of cat.models)for(const a of m.aliases||[]){
+   if(check)for(const m of cat.models)for(const a of m.aliases||[]){
     const r=await resolveOrderItems(env,{order_notes:'',raw_text:probe(a)},cat);
     if(!r.items.some(i=>Number(i.model_id)===Number(m.id)))failures.push({product:m.name,alias:a,got:r.items.map(i=>i.name)});
    }
    return json({engine:ENGINE_VERSION,knowledge_version:KNOWLEDGE_VERSION,store,read_only:true,
-    self_check:{ok:!failures.length,failures:failures.slice(0,200)},
+    self_check:check?{ok:!failures.length,failures:failures.slice(0,200)}:null,
     products:PRODUCT_KNOWLEDGE,quantity_rules:QUANTITY_RULES,guards:GUARD_RULES,name_synonyms:NAME_SYNONYMS,
     catalogue:describeCatalogue(cat).map(p=>({ref:p.ref,name:p.name,aliases:p.aliases,in_database:p.in_database}))});
   }

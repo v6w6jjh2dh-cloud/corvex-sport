@@ -152,7 +152,7 @@ test('knowledge view: self-check passes, read-only; interpretation memory: inter
  const {db,env}=setup();const ids=seedCorpus(db);
  const dump=()=>JSON.stringify(db.prepare('SELECT * FROM orders').all())+JSON.stringify(db.prepare('SELECT * FROM inventory_movements').all())+JSON.stringify(db.prepare('SELECT * FROM profit_models').all());
  const before=dump();
- const k=await call(env,engineApi,'/product-engine?view=knowledge');
+ const k=await call(env,engineApi,'/product-engine?view=knowledge&check=1');
  assert.equal(k.status,200);assert.equal(k.body.read_only,true);
  assert.deepEqual(k.body.self_check.failures,[]);assert.ok(k.body.products.length>=30);
  assert.equal((await call(env,engineApi,'/product-engine',{action:'interpret',order_id:ids.get('10389')},'e')).status,403,'staff');
