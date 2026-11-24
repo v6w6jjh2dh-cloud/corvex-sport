@@ -2476,7 +2476,7 @@ async function deliveryReconcileView(){
     const card=cell.closest('.dr-card');if(card){card.dataset.ready=c.ok?'1':'0'}
     drRefreshCounts();
     const bar=$('#reconcileCounters');
-    if(bar){const ready=previewRows.filter(x=>reconcileCheck(x).ok).length,held=previewRows.filter(x=>{const k=reconcileCheck(x);return !k.ok&&!k.skip}).length;bar.innerHTML=`جاهز للاعتماد: <b>${ready}</b> • موقوف بانتظار القرار: <b>${held}</b>`}
+    if(bar){const ready=previewRows.filter(x=>reconcileCheck(x).ok).length,held=previewRows.filter(x=>{const k=reconcileCheck(x);return !k.ok&&!k.skip}).length;bar.innerHTML=`<span><strong>${previewRows.length}</strong><small>الشحنات</small></span><span><strong>${ready}</strong><small>جاهز للاعتماد</small></span><span><strong>${held}</strong><small>تحتاج مراجعة</small></span>`}
   }
   function renderReconcilePanel(i){
     const r=previewRows[i],panel=document.querySelector(`.reconcile-panel[data-i="${i}"]`);if(!panel)return;
@@ -2601,7 +2601,7 @@ async function deliveryReconcileView(){
 .dr-wrap .reconcile-panel:empty{display:none}
 .dr-wrap .rc-link{color:var(--navy)}
 .dr-bar.delivery-commit-bar{position:fixed;bottom:calc(8px + env(safe-area-inset-bottom));left:8px;right:8px;z-index:40;margin:0;padding:10px 12px;display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.97);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);box-shadow:0 6px 20px rgba(16,42,67,.10)}
-.dr-bar-text{display:flex;flex-direction:column;gap:2px;min-width:0}.dr-bar-text b{font-size:13px;font-weight:600;color:var(--navy)}.dr-bar-text small{font-size:11px;color:var(--mut);line-height:1.5}
+.dr-bar-text{display:flex;flex-direction:column;gap:2px;min-width:0}.dr-bar-text b{font-size:13px;font-weight:600;color:var(--navy)}.dr-bar-text small{font-size:11px;color:var(--mut);line-height:1.5}.dr-bar #reconcileCounters{display:flex;gap:16px}.dr-bar #reconcileCounters span{display:flex;gap:4px;align-items:center}
 .dr-bar .btn{flex:none;border-radius:12px;background:var(--navy)!important;color:#fff!important;border:0;padding:11px 16px;font-weight:700;white-space:nowrap}
 body.dr-typing .dr-bar.delivery-commit-bar{display:none}
 @media(max-width:899px){
@@ -2615,7 +2615,7 @@ body.dr-typing .dr-bar.delivery-commit-bar{display:none}
   .reconcile-items-table td:first-child{grid-column:1/-1;font-weight:700}
   .reconcile-items-table input{max-width:100%!important;width:100%;font-size:16px}
 }
-@media(max-width:420px){.dr-bar.delivery-commit-bar{flex-direction:column;align-items:stretch;gap:8px}.dr-bar .btn{width:100%}}
+@media(max-width:899px){.dr-bar.delivery-commit-bar{display:grid!important;grid-template-columns:minmax(0,1fr)!important;align-items:stretch!important;gap:6px!important;padding:8px 10px!important;box-sizing:border-box;width:auto!important;max-width:none!important;max-height:130px;bottom:calc(4px + env(safe-area-inset-bottom));}.dr-bar .dr-bar-text{width:100%;min-width:0;display:block!important}.dr-bar #reconcileCounters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;text-align:center}.dr-bar #reconcileCounters span{display:flex;flex-direction:column;align-items:center;min-width:0;line-height:1.2}.dr-bar #reconcileCounters strong{font-size:18px}.dr-bar #reconcileCounters small{white-space:nowrap;font-size:11px}.dr-bar .dr-bar-sum,.dr-bar .dr-bar-note{display:none!important}.dr-bar #commitDeliveryReport{width:100%!important;min-width:0!important;margin:0!important;padding:9px!important;min-height:40px;box-sizing:border-box}body.dr-typing .dr-bar.delivery-commit-bar{display:none!important}}
 @media(min-width:900px){
   .dr-head{display:grid;grid-template-columns:150px minmax(0,1.4fr) minmax(0,1fr);gap:16px;padding:8px 14px;font-size:12px;color:var(--mut);background:var(--soft);border-radius:12px 12px 0 0;border:1px solid var(--line);border-bottom:0}
   .dr-list{gap:0;border:1px solid var(--line);border-radius:0 0 12px 12px;overflow:hidden}
