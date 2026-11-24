@@ -96,13 +96,16 @@ test('historical audit reports missing restocks, applies once, then shows none',
  t.db.exec("CREATE TABLE IF NOT EXISTS cargo_return_close_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT (datetime('now')), created_by INTEGER NOT NULL, source_name TEXT NOT NULL DEFAULT '', matched_count INTEGER NOT NULL DEFAULT 0, closed_count INTEGER NOT NULL DEFAULT 0, skipped_count INTEGER NOT NULL DEFAULT 0, details_json TEXT NOT NULL DEFAULT '{}')");
  t.db.prepare("INSERT INTO cargo_return_close_reports(created_by,details_json) VALUES(1,?)").run(JSON.stringify({closed:[{order_id:a,shipment_code:'OLD-1'},{order_id:b,shipment_code:'OLD-2'}],skipped:[]}));
  const rep=await t.call(auditApi,'GET');
- assert.equal(rep.body.summary.missing_orders,2);assert.equal(rep.body.summary.missing_pieces,3);
+ assert.equal(rep.body.summary.missing,2);assert.equal(rep.body.summary.missing_pieces,3);
  assert.equal(t.stock(t.FUR),-2,'the report alone changes nothing');
- const bad=await t.call(auditApi,'POST',{action:'apply'});assert.equal(bad.status,400);
- const ap=await t.call(auditApi,'POST',{action:'apply',confirm:'تطبيق التصحيح'});
- assert.equal(ap.body.applied_pieces,3);assert.equal(t.stock(t.FUR),0);assert.equal(t.stock(t.SC),0);
- const ap2=await t.call(auditApi,'POST',{action:'apply',confirm:'تطبيق التصحيح'});assert.equal(ap2.body.applied_orders,0);
- assert.equal((await t.call(auditApi,'GET')).body.summary.missing_orders,0);
+ const bad=await t.call(auditApi,'POST',{action:'apply',items:[{order_id:a}]});assert.equal(bad.status,400,'confirmation required');
+ const none=await t.call(auditApi,'POST',{action:'apply',confirm:'تطبيق التصحيح'});assert.equal(none.status,400,'explicit selection required');
+ const one=await t.call(auditApi,'POST',{action:'apply',confirm:'تطبيق التصحيح',items:[{order_id:a}]});
+ assert.equal(one.body.applied_pieces,2);assert.equal(t.stock(t.FUR),0);assert.equal(t.stock(t.SC),-1,'unselected order untouched');
+ const ap=await t.call(auditApi,'POST',{action:'apply',confirm:'تطبيق التصحيح',items:[{order_id:a},{order_id:b}]});
+ assert.equal(ap.body.applied_pieces,1);assert.equal(t.stock(t.SC),0);
+ const ap2=await t.call(auditApi,'POST',{action:'apply',confirm:'تطبيق التصحيح',items:[{order_id:a},{order_id:b}]});assert.equal(ap2.body.applied_orders,0);
+ assert.equal((await t.call(auditApi,'GET')).body.summary.missing,0);
 });
 
 test('guarded restock: two plans computed before either runs add the pieces only once',async()=>{
@@ -146,4 +149,39 @@ test('a legacy closed return without a movement is shown as missing, not as adde
  const rid=t.db.prepare('SELECT MAX(id) id FROM cargo_return_close_reports').get().id;
  const det=(await t.call(closeReturns,'GET',null,'https://x/api/cargo-returns-commit?id='+rid)).body.report;
  assert.equal(det.shipments[0].stock.state,'missing');
+});
+
+
+test('print deducts into negative stock even from zero (no prior balance row)',async()=>{
+ const t=setup();const id=t.order('جاكيت فرو عدد 3');
+ assert.equal(t.db.prepare('SELECT COUNT(*) c FROM inventory_balances').get().c,0);
+ await t.print(id);assert.equal(t.stock(t.FUR),-3);
+});
+
+test('audit explains "no deduction" by print time vs deduct-on-print start and the last stock count',async()=>{
+ const t=setup();
+ const mk=(text,phone,printedAt)=>{const id=t.order(text,phone);t.db.prepare("UPDATE orders SET first_printed_at=?,delivery_status='returned' WHERE id=?").run(printedAt,id);return id};
+ // stock counts (manual "set") per model
+ t.db.prepare("INSERT INTO inventory_movements(model_id,quantity_delta,movement_type,note,created_at) VALUES(?,?,'manual','تعيين الرصيد','2026-11-19 12:00:00')").run(t.FUR,0);
+ // shipments printed before deduct-on-print started (first deduction below is 2026-11-22)
+ const before=mk('جاكيت فرو عدد 2','0795000001','2026-11-18 10:00:00');     // left before the count → candidate
+ const after=mk('جاكيت فرو عدد 1','0795000002','2026-11-20 10:00:00');      // left after the count → never deducted
+ const nobase=mk('جاكيت جوخ سكايفو 1','0795000003','2026-11-18 10:00:00');  // no count for scarfo
+ const late=t.order('جاكيت فرو عدد 1','0795000004');await t.print(late);t.db.prepare("UPDATE inventory_movements SET created_at='2026-11-22 09:00:00' WHERE order_id=?").run(late);
+ const unk=mk('جاكيت فرو عدد 1','0795000005','2026-11-23 10:00:00');       // printed after start but no deduction
+ t.db.prepare("UPDATE orders SET delivery_status='returned' WHERE id=?").run(late);
+ await t.call(closeReturns,'GET');
+ t.db.prepare("INSERT INTO cargo_return_close_reports(created_by,created_at,details_json) VALUES(1,'2026-11-24 09:00:00',?)").run(JSON.stringify({closed:[before,after,nobase,late,unk].map((id,i)=>({order_id:id,shipment_code:'H-'+i})),skipped:[]}));
+ const d=(await t.call(auditApi,'GET')).body;
+ const kind=id=>d.rows.find(r=>r.order_id===id).kind;
+ assert.equal(kind(before),'count_excluded');assert.equal(kind(after),'never_deducted');assert.equal(kind(nobase),'no_baseline');
+ assert.equal(kind(late),'missing');assert.equal(kind(unk),'unrecognized');
+ assert.equal(d.summary.no_deduction,4);assert.equal(d.summary.no_deduction_before_system,3);
+ const s0=t.stock(t.FUR);
+ const ap=await t.call(auditApi,'POST',{action:'apply',confirm:'تطبيق التصحيح',items:[{order_id:before},{order_id:after},{order_id:nobase}]});
+ assert.equal(ap.body.applied_pieces,2,'only the candidate is applied; never-deducted and no-baseline are refused');
+ assert.equal(t.stock(t.FUR),s0+2);assert.equal(t.stock(t.SC),0);
+ const again=await t.call(auditApi,'POST',{action:'apply',confirm:'تطبيق التصحيح',items:[{order_id:before}]});
+ assert.equal(again.body.applied_orders,0);assert.equal(t.stock(t.FUR),s0+2);
+ assert.equal((await t.call(auditApi,'GET')).body.rows.find(r=>r.order_id===before).kind,'ok');
 });

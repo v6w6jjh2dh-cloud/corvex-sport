@@ -1122,7 +1122,7 @@ async function cargoReturnsView(){
   const c=$('#content');
   if(state.user?.role!=='admin'){c.innerHTML='<div class="empty">صلاحية مدير مطلوبة</div>';return}
   c.innerHTML=`<div class="page-title"><div><h1>تسكير كشف المرتجع</h1><div class="sub">مطابقة كشف Cargo Box واستلام المرتجعات وربطها بالجرد</div></div></div>
-    <div class="card" style="padding:0;overflow:hidden"><iframe title="كشف مرتجعات Cargo Box" src="/cargo-upload-v2.html?embedded=1&amp;v=20261124-no-reclose-7" style="width:100%;height:80vh;min-height:650px;border:0;display:block" loading="lazy"></iframe></div>`;
+    <div class="card" style="padding:0;overflow:hidden"><iframe title="كشف مرتجعات Cargo Box" src="/cargo-upload-v2.html?embedded=1&amp;v=20261124-separated-8" style="width:100%;height:80vh;min-height:650px;border:0;display:block" loading="lazy"></iframe></div>`;
 }
 async function inventoryView(){
   const c=$('#content');
@@ -1131,7 +1131,7 @@ async function inventoryView(){
   try{
     const data=await api('/inventory'),models=data.models||[],movements=data.movements||[];
     const total=models.reduce((sum,item)=>sum+Number(item.quantity||0),0);
-    c.innerHTML=`<div class="page-title"><div><h1>المستودع والجرد</h1><div class="sub">الرصيد ينقص تلقائياً مرة واحدة عند تسليم الطلب، ويرجع عند إعادته لقيد التوصيل.</div></div><span class="pill" style="background:#e8f0f5;color:#173750">${total} قطعة</span></div>
+    c.innerHTML=`<div class="page-title"><div><h1>المستودع والجرد</h1><div class="sub">الرصيد ينقص مرة واحدة عند أول طباعة للبوليصة (ويُسمح بالسالب)، ويرجع فقط عند تسكير كشف المرتجعات. تغيير حالة الطلب يدويًا لا يغيّر المخزون.</div></div><span class="pill" style="background:#e8f0f5;color:#173750">${total} قطعة</span></div>
       <div class="card" style="margin-bottom:16px"><b>بدء جرد جديد</b><div class="sub">تصفير أرصدة جميع الموديلات فقط؛ الطلبات والمبيعات والحركات السابقة محفوظة.</div><button id="inventoryResetAll" class="btn btn-soft" style="margin-top:12px;color:#b42318">تصفير جرد جميع الموديلات</button></div>
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-bottom:20px">
         ${models.length?models.map(model=>`<div class="card inventory-model" data-model-id="${model.id}">
