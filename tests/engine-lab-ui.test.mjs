@@ -71,3 +71,24 @@ test('the five completeness classes are rendered, and stale pages are offered a 
  assert.match(src,/\['known','missing','learn','failure','unclear'\]\.map\(card\)/);
  assert.match(src,/function checkFresh\(\)/);
 });
+
+test('diagnosis report: button right under the counters, all batches merged by order, CSV without personal data',()=>{
+ assert.match(src,/el-rates[\s\S]{0,600}\$\{exportBoxHtml\(acc\)\}/,'directly under the counters / rates');
+ assert.match(src,/تنزيل تقرير التشخيص/);
+ const stub={querySelector:()=>null,querySelectorAll:()=>[],getElementById:()=>null,documentElement:{},addEventListener(){}};
+ const ctx={console,document:stub,MutationObserver:class{observe(){}},state:{user:{role:'admin'}}};ctx.window=ctx;vm.createContext(ctx);vm.runInContext(src,ctx);
+ const {diagnosisRecords,diagnosisCsv}=ctx.__engineLabExport;
+ const b1={completeness:{missing:{orders:[{id:1,order_code:10401,reason:'details_without_product',before:'missing',diag:{read:[]},full_text:{order_notes:'',raw_text:'[بيانات شخصية]\n2 أسود'}}]},
+  known:{orders:[{id:2,order_code:10402,reason:'recognised',diag:{read:[{name:'جاكيت فرو',quantity:2}]}}]}},rows:[]};
+ const b2={completeness:{learn:{orders:[{id:3,order_code:10403,reason:'new_name',before:'learn',diag:{names:['مالاء فراغات'],source:{system:'LiteSale',product:'=cmd',quantity:3}},full_text:{order_notes:'مالاء فراغات, "3" قطع',raw_text:''}}]}},
+  rows:[{id:2,order_code:10402,differences:{vs_print_engine:['quantity']},stock_reasons:['different_field'],print_engine:{'جاكيت فرو':1},print_allocation:{'جاكيت فرو':1}}]};
+ const recs=diagnosisRecords([b1,b2,b2]);   // a repeated batch never duplicates an order
+ assert.equal(recs.length,3);
+ const k=recs.find(r=>r.order_code===10402);assert.equal(k.stock_difference,'نعم');assert.equal(k.engine_read,'جاكيت فرو × 2');
+ const csv=diagnosisCsv(recs);
+ assert.ok(csv.startsWith('﻿'),'BOM for Excel / Numbers (Arabic)');
+ assert.equal(csv.split('\r\n').length,4);
+ assert.match(csv,/"مالاء فراغات, ""3"" قطع"/,'commas and quotes escaped');
+ assert.match(csv,/"'=cmd"/,'formula injection neutralised');
+ assert.match(csv,/\[بيانات شخصية\] ⏎ 2 أسود/,'one line per order');
+});

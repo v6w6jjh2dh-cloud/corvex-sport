@@ -51,6 +51,10 @@
    .el-diag{margin:6px 0 0;padding-inline-start:18px;font-size:13px;line-height:1.7}
    .el-ba{width:100%;border-collapse:collapse;font-size:14px;margin:6px 0}.el-ba td,.el-ba th{padding:6px;border-bottom:1px solid rgba(127,127,127,.2);text-align:start}
    .el-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-inline-end:6px;vertical-align:middle}
+   .el-export-box{margin:12px 0;padding:12px;border-radius:12px;border:1px dashed rgba(15,118,110,.5);background:rgba(15,118,110,.05)}
+   .el-export-box .el-export{width:100%;font-size:16px;padding:12px}
+   .el-export-ready{display:grid;gap:8px;margin-top:10px}.el-export-ready .btn{width:100%;font-size:15px}
+   .el-copybox{margin:8px 0}.el-copybox textarea{width:100%;min-height:220px;font-size:12px;direction:rtl;box-sizing:border-box}
    .el-scope{font-size:13px;margin:10px 0;padding:8px 10px;border-radius:10px;background:rgba(15,118,110,.08)}
    .el-more{width:100%;margin:8px 0}
    .el-stats-3{grid-template-columns:repeat(3,1fr)}
@@ -197,13 +201,13 @@
      <div class="el-rates"><div>اكتمال بيانات الطلبات: <b>${complete}%</b> <span class="el-muted">(${cnt('missing')} طلب بدون اسم منتج)</span></div>
       <div>نجاح المحرك في الطلبات التي فيها اسم منتج: <b>${engine}%</b> <span class="el-muted">(${cnt('known')} من ${judged})</span></div>
       <div class="el-note">الطلبات البرتقالية نقص في بيانات الطلب وليست خطأ في المحرك، ولا يُخمَّن منتجها من اللون أو السعر أو التاريخ.</div></div>
+     ${exportBoxHtml(acc)}
      ${acc.show?`<div class="el-row"><div class="el-head"><b>${CLS[acc.show].t} (${shown.length})</b><button class="btn btn-soft" data-cls="">إخفاء</button></div>
        <div class="el-note">${CLS[acc.show].d}</div>
        ${shown.map(o=>`<div class="el-clsrow"><button class="el-order" data-order="${esc(o.id)}">#${esc(o.order_code)}</button>
         <span class="el-muted">${esc(WHY[o.reason]||o.reason)}${o.before&&o.before!==acc.show?` · قبل الإصلاح: ${esc(CLS[o.before]?.t||o.before)}`:''}</span>
         <div class="el-text">${esc(o.text)}</div>${diagHtml(o.diag)}</div>`).join('')||'<div class="el-muted">لا يوجد</div>'}</div>`:''}
      ${beforeAfterHtml(acc)}
-     <div class="el-tools"><button class="btn btn-soft el-export" type="button">تنزيل تقرير الطلبات غير الخضراء (بدون بيانات شخصية)</button></div>
      <div class="el-sec">المقارنة مع المحركات الحالية</div>
      <div class="el-stats">
       <div class="el-stat"><b>${esc(acc.checked)}</b><span>طلبات مفحوصة</span></div>
@@ -237,7 +241,9 @@
         </div>`}).join('')}
      ${acc.next?`<button class="btn btn-soft el-more">فحص الدفعة التالية (${acc.total-acc.checked} متبقٍ)</button>`:''}`;
     out.querySelectorAll('[data-cls]').forEach(b=>b.onclick=()=>{if(!Scan.live(acc))return;acc.show=b.dataset.cls||null;paintCompare(out,acc)});
-    out.querySelectorAll('.el-export').forEach(b=>b.onclick=()=>exportReport(acc,b));
+    out.querySelectorAll('.el-export').forEach(b=>b.onclick=()=>prepareExport(acc,out));
+    out.querySelectorAll('.el-save').forEach(b=>b.onclick=()=>saveExport(acc,b.dataset.fmt));
+    out.querySelectorAll('.el-copy').forEach(b=>b.onclick=()=>showCopy(acc));
     openOrder(out);
   }
   // why an order is not green — evidence only
@@ -266,21 +272,76 @@
      <table class="el-ba"><tr><th></th><th>قبل</th><th>بعد</th></tr>${keys.map(k=>`<tr><td><span class="el-dot el-${k}"></span>${CLS[k].t}</td><td>${b[k]}</td><td><b>${n[k]}</b></td></tr>`).join('')}</table>
      ${changed.length?`<div class="el-note">تغيّر تصنيف ${changed.length} طلب: ${changed.slice(0,40).map(x=>`<button class="el-order" data-order="${esc(x.o.id)}">#${esc(x.o.order_code)}</button> (${CLS[x.before].t} ← ${CLS[x.now].t})`).join('، ')}</div>`:'<div class="el-note">لم يتغير تصنيف أي طلب.</div>'}`;
   }
-  // full export of non-green orders for review outside the system (server removes personal data), same range, all batches
-  async function exportReport(acc,btn){
-    const s=Scan.start('export',acc.from,acc.to),list=[];let next=null,guard=0;btn.disabled=true;
+  // ---- Diagnosis report: every order of the scan range (all batches), personal data removed by the server.
+  // Two taps on purpose: 1) prepare (fetch all batches) 2) save/share — Safari on iPhone only allows saving or
+  // sharing a file directly from a tap, not after a long wait.
+  const CLASS_AR={known:'منتج معروف',missing:'اسم المنتج مفقود',learn:'اسم جديد يحتاج تعلّمًا',failure:'فشل في منتج معروف',unclear:'تفاصيل غير مفهومة'};
+  const COLS=[['order_code','رقم الطلب'],['class','التصنيف'],['reason','السبب'],['before','التصنيف قبل الإصلاح'],['unknown_names','أسماء غير معروفة'],['near','كتابة قريبة من منتج معروف'],
+   ['not_counted','كلمات لم تُحتسب'],['unclear','نص غير مفهوم'],['source_system','مصدر الطلب'],['source_product','منتج المصدر'],['source_color','لون المصدر'],['source_size','مقاس المصدر'],
+   ['source_quantity','كمية المصدر'],['engine_read','قراءة المحرك الجديد'],['profit_engine','محرك الأرباح'],['stock_engine','محرك المخزون اليوم'],['stock_deduction','الخصم المسجل'],
+   ['stock_difference','اختلاف مخزون'],['stock_reasons','أسباب اختلاف المخزون'],['order_notes','الملاحظات (بدون بيانات شخصية)'],['raw_text','نص الطلب (بدون بيانات شخصية)']];
+  const pairs=o=>o?Object.entries(o).map(([k,v])=>`${k} × ${v}`).join('، '):'';
+  function diagnosisRecords(batches){
+    const by=new Map();
+    for(const d of batches){
+      for(const [k,v] of Object.entries(d.completeness||{}))for(const o of v.orders||[]){const g=o.diag||{},src=g.source||{};
+        by.set(Number(o.id),{...(by.get(Number(o.id))||{}),order_code:o.order_code,class:CLASS_AR[k]||k,reason:WHY[o.reason]||o.reason,before:CLASS_AR[o.before]||o.before||'',
+          unknown_names:(g.names||[]).join('، '),near:(g.near||[]).map(n=>`${n.phrase} ← ${n.product}`).join('، '),
+          not_counted:(g.uncertain||[]).map(u=>`${u.word} (${DIAG_REASON[u.reason]||u.reason})`).join('، '),unclear:(g.unclear||[]).join('، '),
+          source_system:src.system||'',source_product:src.product||'',source_color:src.color||'',source_size:src.size||'',source_quantity:src.quantity??'',
+          engine_read:(g.read||[]).map(i=>`${i.name} × ${i.quantity}`).join('، '),profit_engine:pairs(g.others?.profit),stock_engine:pairs(g.others?.print),stock_deduction:pairs(g.others?.allocation),
+          order_notes:o.full_text?.order_notes??'',raw_text:o.full_text?.raw_text??''})}
+      for(const r of d.rows||[])if((r.differences?.vs_print_engine||[]).length){const x=by.get(Number(r.id))||{order_code:r.order_code};
+        x.stock_difference='نعم';x.stock_reasons=(r.stock_reasons||[]).map(k=>STOCK[k]||k).join('، ');x.stock_engine=pairs(r.print_engine);x.stock_deduction=pairs(r.print_allocation);
+        if(r.full_text){x.order_notes=r.full_text.order_notes;x.raw_text=r.full_text.raw_text}by.set(Number(r.id),x)}
+    }
+    return [...by.values()];
+  }
+  function diagnosisCsv(records){
+    const cell=v=>{const t=String(v??'').replace(/\r?\n/g,' ⏎ ');return /[",\n]/.test(t)||/^[=+\-@]/.test(t)?'"'+(/^[=+\-@]/.test(t)?"'":'')+t.replace(/"/g,'""')+'"':t};
+    return '﻿'+[COLS.map(c=>cell(c[1])).join(','),...records.map(r=>COLS.map(([k])=>cell(r[k])).join(','))].join('\r\n');
+  }
+  window.__engineLabExport={diagnosisRecords,diagnosisCsv};
+  function exportBoxHtml(acc){
+    const e=acc.export;
+    return `<div class="el-export-box"><button class="btn btn-accent el-export" type="button" ${e?.busy?'disabled':''}>${e?.busy?`جاري تجهيز التقرير... ${e.done} من ${acc.total}`:'⬇️ تنزيل تقرير التشخيص'}</button>
+      <div class="el-note">كل طلبات الفترة <bdi>${esc(acc.from)}</bdi> – <bdi>${esc(acc.to)}</bdi> من كل الدفعات، بدون أسماء العملاء وهواتفهم وعناوينهم.</div>
+      ${e?.ready?`<div class="el-export-ready"><b>التقرير جاهز (${e.count} طلب)</b>
+        <button class="btn btn-accent el-save" data-fmt="csv" type="button">حفظ ملف CSV</button>
+        <button class="btn btn-soft el-save" data-fmt="json" type="button">حفظ ملف JSON</button>
+        <button class="btn btn-soft el-copy" type="button">عرض للنسخ</button></div>`:''}
+      ${e?.error?`<div class="el-note" style="color:#b91c1c">تعذر تجهيز التقرير: ${esc(e.error)}</div>`:''}</div>`;
+  }
+  async function prepareExport(acc,out){
+    if(acc.export?.busy)return;
+    const s=Scan.start('export',acc.from,acc.to),batches=[];let next=null,guard=0,done=0;
+    acc.export={busy:true,done:0};paintCompare(out,acc);
     try{
       do{const d=await window.api(`/product-engine?view=compare&from=${encodeURIComponent(s.from)}&to=${encodeURIComponent(s.to)}&limit=150&export=1${next?'&before='+next:''}`);
         if(!Scan.live(s)||d.from!==s.from||d.to!==s.to)return;
-        for(const [k,v] of Object.entries(d.completeness||{}))if(k!=='known')for(const o of v.orders||[])if(!list.some(x=>x.id===o.id))list.push({class:k,...o,text:undefined});
-        for(const r of d.rows||[])if((r.differences?.vs_print_engine||[]).length&&!list.some(x=>x.id===r.id&&x.class==='stock_difference'))
-          list.push({class:'stock_difference',id:r.id,order_code:r.order_code,stock_reasons:r.stock_reasons,central:r.central?.items,print_engine:r.print_engine,stock_deduction:r.print_allocation,full_text:r.full_text});
-        next=d.batch.next_cursor;btn.textContent=`جاري التجهيز... ${list.length}`;
-      }while(next&&++guard<50);
-      const blob=new Blob([JSON.stringify({range:{from:s.from,to:s.to},engine:'shadow',generated_at:new Date().toISOString(),orders:list},null,1)],{type:'application/json'});
-      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`corvex-engine-review-${s.from}_${s.to}.json`;document.body.appendChild(a);a.click();a.remove();
-      btn.textContent=`تم التنزيل (${list.length} طلب)`;
-    }catch(e){btn.textContent='تعذر التنزيل: '+(e?.message||e)}finally{btn.disabled=false}
+        batches.push(d);done+=d.batch.checked;next=d.batch.next_cursor;acc.export.done=done;
+        const b=out.querySelector('.el-export');if(b)b.textContent=`جاري تجهيز التقرير... ${done} من ${d.total}`;
+      }while(next&&++guard<60);
+      const records=diagnosisRecords(batches),stamp=`${s.from}_${s.to}`;
+      acc.export={ready:true,count:records.length,csv:diagnosisCsv(records),
+        json:JSON.stringify({range:{from:s.from,to:s.to},engine:'shadow',generated_at:new Date().toISOString(),orders:records},null,1),name:`corvex-diagnosis-${stamp}`};
+    }catch(e){acc.export={error:e?.message||String(e)}}
+    if(Scan.live(acc))paintCompare(out,acc);
+  }
+  async function saveExport(acc,fmt){
+    const e=acc.export;if(!e?.ready)return;
+    const type=fmt==='csv'?'text/csv;charset=utf-8':'application/json',name=`${e.name}.${fmt}`,blob=new Blob([fmt==='csv'?e.csv:e.json],{type});
+    // iPhone: the share sheet («حفظ في الملفات» / إرسال) works in Safari and in the home-screen app
+    try{const file=new File([blob],name,{type});if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:name});return}}catch(err){if(err?.name==='AbortError')return}
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.rel='noopener';document.body.appendChild(a);a.click();
+    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},4000);
+  }
+  function showCopy(acc){
+    const e=acc.export;if(!e?.ready)return;
+    const box=document.createElement('div');box.className='el-copybox';
+    box.innerHTML=`<div class="el-head"><b>التقرير (CSV) — انسخيه</b><button class="btn btn-soft" type="button">إغلاق</button></div><textarea readonly></textarea>`;
+    box.querySelector('textarea').value=e.csv.replace(/^﻿/,'');box.querySelector('button').onclick=()=>box.remove();
+    document.querySelector('.el-export-box')?.after(box);box.querySelector('textarea').select();
   }
   const CLS={known:{t:'منتج معروف',d:'تعرّف المحرك على المنتج.'},missing:{t:'اسم المنتج مفقود',d:'فيه لون أو عدد أو مقاس بدون اسم منتج في النص والملاحظات وبيانات المصدر.'},
    learn:{t:'اسم جديد يحتاج تعلّمًا',d:'اسم منتج أو طريقة كتابة لم يتعلمها المحرك بعد.'},failure:{t:'فشل في منتج معروف',d:'محرك آخر أو الخصم المسجل أو مصدر الطلب يذكر منتجًا معروفًا لم يتعرف عليه المحرك الجديد.'},
