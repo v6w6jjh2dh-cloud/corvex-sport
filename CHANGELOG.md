@@ -16,6 +16,16 @@
 
 ## السجل
 
+### 2026-11-24 — تفعيل حماية الإنتاج والتحقق منها
+- صاحب المستودع فعّل Ruleset ‏«CORVEX Production Protection» (id 27970952): `main`، Active، بدون Bypass؛ Pull Request إلزامي،
+  الفحص `checks` إلزامي (strict)، منع force push والحذف (مقروءة من `GET /repos/.../rules/branches/main`).
+- التحقق العملي (بدون أي تغيير على `main` أو الإنتاج — بقي `main` على `62995e2`):
+  1. دفع commit مباشر إلى `main` ← **مرفوض** (GH013: يجب Pull Request + فحص `checks`).
+  2. Pull Request ‏#6 فيه اختبار فاشل متعمد ← `checks` فشل، `mergeable_state = blocked`، ومحاولة الدمج عبر API ← **مرفوضة** (405: Required status check "checks" is failing).
+  3. دمج محلي للفرع الفاشل ثم دفعه إلى `main` ← **مرفوض** (GH013).
+  4. أُغلق PR ‏#6 دون دمج. الفرع `protection-test/failing-pr` (وكذلك `ci-proof/must-fail`) يحتاجان حذفًا يدويًا — بيئة الوكيل تمنع حذف الفروع.
+- تحديث `CLAUDE.md` §6 و`AGENTS.md` لتوثيق الحماية (هذا التعديل نفسه دُمج عبر Pull Request بعد نجاح `checks`).
+
 ### 2026-11-24 — مرحلة التأسيس والحماية الهندسية (فرع `hardening/foundation`)
 - توثيق: `CLAUDE.md`، `AGENTS.md`، `BUSINESS_RULES.md`، `ARCHITECTURE.md`، `REGRESSION_TESTS.md`، `CHANGELOG.md`.
 - حماية: `.github/workflows/ci.yml` (فحص الصياغة + روابط `index.html` + كسر الكاش + كل الاختبارات مع PGlite)، `scripts/check-project.mjs`، `package.json` (سكربتات فقط)، `tests/regression-guards.test.mjs`.

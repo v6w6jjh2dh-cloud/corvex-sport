@@ -53,21 +53,26 @@
 - الواجهة: افحص الموبايل (آيفون/أندرويد، عمودي وأفقي) والكمبيوتر عند أي تعديل في الواجهة. لا يوجد Safari حقيقي في بيئة
   الوكلاء — صرّح بذلك ولا تدّعِ أنه اختُبر.
 
-## 6. الفروع والنشر
-- Cloudflare Pages ينشر الإنتاج تلقائيًا من فرع `main` (معاينة لبقية الفروع). لذلك:
-  1. اعمل على فرع منفصل، وشغّل `npm run verify`.
-  2. ادفع الفرع وانتظر نجاح GitHub Actions (`CI / checks`).
-  3. ادمج في `main` فقط بعد نجاح CI (Pull Request، أو fast-forward بعد نجاح CI على نفس الـ commit).
-  4. تأكد من نجاح نشر Cloudflare (`gh api repos/<repo>/commits/<sha>/check-runs` → «Cloudflare Pages»).
+## 6. الفروع والنشر — الحماية مفعّلة
+**حماية الإنتاج مفعّلة منذ 2026-11-24:** Ruleset ‏«CORVEX Production Protection» (id ‏27970952) على الفرع الافتراضي `main`،
+الحالة Active، **بدون أي Bypass** (يشمل المدراء والوكلاء). القواعد:
+- كل تعديل على `main` عبر **Pull Request** فقط (الدفع المباشر مرفوض: GH013).
+- الفحص المطلوب **`checks`** (GitHub Actions، workflow ‏`CI`) يجب أن ينجح، والفرع محدّث مع `main` (strict).
+- ممنوع force push وممنوع حذف `main`.
+- Cloudflare Pages ينشر الإنتاج من `main` فقط ← لا يصل إلى الإنتاج إلا ما نجح في `checks`. بقية الفروع معاينات فقط.
+
+خطوات أي تعديل:
+1. `git pull` ثم فرع جديد من `main`. شغّل `npm run verify` محليًا.
+2. ادفع الفرع، وافتح Pull Request إلى `main`
+   (من بيئة الوكلاء: `gh api repos/<owner>/<repo>/pulls -f title=… -f head=<branch> -f base=main -f body=…` لأن GraphQL غير متاح).
+3. انتظر نجاح `checks`. إذا فشل: أصلح على نفس الفرع — لا تحاول تجاوز الحماية، ولا تحذف أو تعطّل اختبارًا.
+4. الدمج بعد النجاح فقط (`gh api -X PUT repos/<owner>/<repo>/pulls/<n>/merge`)، ثم تحقق من نجاح نشر «Cloudflare Pages» على commit الدمج.
+5. أغلق Pull Requests التجريبية دون دمج.
 - أي ملف في `public/` محمّل من `index.html` وتغيّر **يجب** تغيير رقم `?v=` الخاص به في `index.html` (CI يرفض غير ذلك)،
   وإلا تبقى الأجهزة على النسخة القديمة من الكاش.
-- **إلزام CI قبل الدمج (يفعّله صاحب المستودع مرة واحدة):** GitHub → Settings → Branches (أو Rules → Rulesets) → قاعدة لفرع `main`:
-  «Require a pull request before merging» + «Require status checks to pass» واختر `checks` (من workflow ‏CI) +
-  «Require branches to be up to date» + «Do not allow bypassing the above settings» (يشمل المدراء) + منع force push والحذف.
-  بعدها لا يصل إلى `main` — وبالتالي إلى نشر Cloudflare الإنتاجي — إلا ما نجح في CI. (الوكلاء لا يملكون صلاحية تعديل هذه الإعدادات.)
-- **اختياري لمنع النشر حتى لو تجاوز أحد الحماية:** في Cloudflare Pages → Settings → Builds → Build command:
-  `node scripts/check-project.mjs` (ينجح البناء فقط إذا مرّت فحوص الصياغة والروابط). الاختبارات الكاملة تبقى في CI.
-- نقطة الاستعادة الحالية وآلية الرجوع: `CHANGELOG.md` قسم «نقاط الاستعادة».
+- ممنوع تعديل الـ Ruleset أو ملف `.github/workflows/ci.yml` أو `scripts/check-project.mjs` لإضعاف الفحص دون موافقة صاحب النظام.
+- **اختياري:** Cloudflare Pages → Settings → Builds → Build command: `node scripts/check-project.mjs` كطبقة إضافية.
+- نقطة الاستعادة الحالية وآلية الرجوع: `CHANGELOG.md` قسم «نقاط الاستعادة» (الرجوع نفسه يمر عبر Pull Request، أو Rollback من لوحة Cloudflare).
 
 ## 7. التقرير بعد كل مهمة
 اذكر: رقم الـ commit، حالة CI، حالة نشر Cloudflare، الاختبارات (ناجح/فاشل)، **ما تم التحقق منه على الإنتاج وما اختُبر
