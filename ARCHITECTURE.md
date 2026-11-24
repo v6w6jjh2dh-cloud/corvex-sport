@@ -39,6 +39,7 @@
 | الوحدة | يستخدمها | ملاحظات |
 |---|---|---|
 | `_inventory.js`: `classifyInventoryItems`, `loadInventoryModels`, `FUR_ALIASES`, `deductOnFirstPrint`, `returnRestockPlan`, `restockStatements` | الطباعة، الكوست، الأرباح (القسمان)، المرتجعات، التدقيق، المطابقة الجزئية | **أخطر ملف**: أي تغيير في التعرف/الكميات يغيّر الكوست والمخزون والأرباح معًا |
+| `public/app-v118-order-product-guard.js` + `/api/order-product-check` + `/api/order-drafts` | نموذج الطلب اليدوي الجديد (كورفكس) | يسأل عن المنتج فقط إذا لم يُكتب اسم منتج؛ المسودات ليست طلبات (O-5) |
 | `public/app-v117-engine-lab.js` (مختبر المحرك الذكي) | المدير فقط، قراءة | واجهة `/api/product-engine` (compare/unknown/knowledge/lexicon) بنفس الجلسة |
 | `_order-language.js` (محلل لغة الطلب العام، معجم بيانات) | المحرك المركزي فقط (وضع الظل) | مطابق للمحرك النشط بالمعجم الافتراضي؛ القواعد الجديدة بيانات في `store_lexicon` |
 | `_product-engine.js` (وضع الظل) + `/api/product-engine` | لا أحد بعد — مقارنة فقط | المحرك المركزي المستقبلي؛ انظر `docs/PRODUCT_ENGINE.md`. لا يُستخدم في أي حساب قبل الموافقة |

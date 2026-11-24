@@ -37,6 +37,15 @@
    /* iOS Safari gives date inputs an intrinsic min-width that overflows the panel */
    #elBody .filter-group{min-width:0}
    #elBody input[type=date]{width:100%;max-width:100%;min-width:0;box-sizing:border-box;-webkit-appearance:none;appearance:none;display:block}
+   .el-clsgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:8px 0}
+   @media(max-width:640px){.el-clsgrid{grid-template-columns:repeat(2,1fr)}.el-clsgrid .el-known{grid-column:1/-1}}
+   .el-cls{border:0;border-radius:12px;padding:10px 6px;text-align:center;cursor:pointer;font:inherit;color:#0f172a}
+   .el-cls b{display:block;font-size:24px}.el-cls span{font-size:12px;font-weight:600}
+   .el-cls.on{outline:3px solid #0f172a33}
+   .el-known{background:#dcfce7}.el-known b{color:#15803d}.el-missing{background:#ffedd5}.el-missing b{color:#c2410c}
+   .el-learn{background:#fef9c3}.el-learn b{color:#a16207}.el-failure{background:#fee2e2}.el-failure b{color:#b91c1c}.el-unclear{background:#e5e7eb}.el-unclear b{color:#374151}
+   .el-rates{font-size:14px;line-height:1.9;margin:6px 0 10px}
+   .el-clsrow{padding:8px 0;border-bottom:1px solid rgba(127,127,127,.2)}
    .el-scope{font-size:13px;margin:10px 0;padding:8px 10px;border-radius:10px;background:rgba(15,118,110,.08)}
    .el-more{width:100%;margin:8px 0}
    .el-stats-3{grid-template-columns:repeat(3,1fr)}
@@ -66,13 +75,14 @@
       <button class="btn btn-soft" data-tab="unknown">العبارات غير المعروفة</button>
       <button class="btn btn-soft" data-tab="knowledge">المعرفة التراكمية</button>
       <button class="btn btn-soft" data-tab="lexicon">معجم فهم الطلبات</button>
+      <button class="btn btn-soft" data-tab="drafts">مسودات ناقصة</button>
      </div><div id="elBody"></div></div>`;
     c.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;paint()});
     paint();
   }
   function paint(){
     document.querySelectorAll('.el-tabs [data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
-    ({compare,unknown,knowledge,lexicon})[tab]();
+    ({compare,unknown,knowledge,lexicon,drafts})[tab]();
   }
   const body=()=>document.getElementById('elBody');
   const loading=()=>{body().innerHTML='<div class="empty">جاري الفحص...</div>'};
@@ -97,7 +107,7 @@
     let acc=null;
     const run=async(first)=>{
       const f=document.getElementById('elCmpFrom').value,t=document.getElementById('elCmpTo').value;
-      if(first)acc={from:f,to:t,total:0,checked:0,counts:{},rows:new Map(),next:null};
+      if(first)acc={from:f,to:t,total:0,checked:0,counts:{},rows:new Map(),next:null,classes:{known:new Map(),missing:new Map(),learn:new Map(),failure:new Map(),unclear:new Map()},show:null};
       const more=document.getElementById('elCmpMore');if(more)more.disabled=true;
       if(first)out.innerHTML='<div class="empty">جاري الفحص...</div>';
       try{
@@ -105,6 +115,7 @@
         acc.total=d.total;acc.checked+=d.batch.checked;acc.next=d.batch.next_cursor;
         for(const [k,v] of Object.entries(d.counts||{}))acc.counts[k]=(acc.counts[k]||0)+Number(v||0);
         for(const r of d.rows||[])acc.rows.set(r.id,r);
+        for(const [k,v] of Object.entries(d.completeness||{}))for(const o of v.orders||[])acc.classes[k]?.set(o.id,o);
         paintCompare(out,acc);
       }catch(e){out.innerHTML=`<div class="empty">تعذر الفحص: ${esc(e?.message||e)}</div>`}
     };
@@ -115,8 +126,24 @@
     const n=acc.counts;
     const stat=(v,label,tone='')=>`<div class="el-stat ${v?tone:'ok'}"><b>${esc(v??0)}</b><span>${label}</span></div>`;
     const rows=[...acc.rows.values()];
+    const K=acc.classes,cnt=k=>K[k].size,checked=acc.checked||0;
+    const complete=checked?Math.round(100*(checked-cnt('missing'))/checked):0,judged=cnt('known')+cnt('failure')+cnt('learn');
+    const engine=judged?Math.round(100*cnt('known')/judged):0;
+    const card=k=>`<button class="el-cls el-${k} ${acc.show===k?'on':''}" data-cls="${k}"><b>${cnt(k)}</b><span>${CLS[k].t}</span></button>`;
+    const shown=acc.show?[...K[acc.show].values()]:[];
     out.innerHTML=`${scopeNote(acc,acc.checked)}
      ${acc.next?`<button id="elCmpMore" class="btn btn-soft el-more">فحص الدفعة التالية (${acc.total-acc.checked} متبقٍ)</button>`:''}
+     <div class="el-sec">تصنيف الطلبات (اضغطي على الرقم لعرض الطلبات)</div>
+     <div class="el-clsgrid">${['known','missing','learn','failure','unclear'].map(card).join('')}</div>
+     <div class="el-rates"><div>اكتمال بيانات الطلبات: <b>${complete}%</b> <span class="el-muted">(${cnt('missing')} طلب بدون اسم منتج)</span></div>
+      <div>نجاح المحرك في الطلبات التي فيها اسم منتج: <b>${engine}%</b> <span class="el-muted">(${cnt('known')} من ${judged})</span></div>
+      <div class="el-note">الطلبات البرتقالية نقص في بيانات الطلب وليست خطأ في المحرك، ولا يُخمَّن منتجها من اللون أو السعر أو التاريخ.</div></div>
+     ${acc.show?`<div class="el-row"><div class="el-head"><b>${CLS[acc.show].t} (${shown.length})</b><button class="btn btn-soft" data-cls="">إخفاء</button></div>
+       <div class="el-note">${CLS[acc.show].d}</div>
+       ${shown.map(o=>`<div class="el-clsrow"><button class="el-order" data-order="${esc(o.id)}">#${esc(o.order_code)}</button>
+        <span class="el-muted">${esc(WHY[o.reason]||o.reason)}${o.names?.length?' — «'+o.names.map(esc).join('»، «')+'»':''}${o.source?' — المصدر '+esc(o.source):''}</span>
+        <div class="el-text">${esc(o.text)}</div></div>`).join('')||'<div class="el-muted">لا يوجد</div>'}</div>`:''}
+     <div class="el-sec">المقارنة مع المحركات الحالية</div>
      <div class="el-stats">
       <div class="el-stat"><b>${esc(acc.checked)}</b><span>طلبات مفحوصة</span></div>
       ${stat(n.central_vs_profit_engine,'اختلاف مع محرك الأرباح','warn')}
@@ -148,8 +175,14 @@
            <div class="el-note">السبب: ${(r.stock_reasons||[]).map(x=>esc(STOCK[x]||x)).join('، ')||'—'}</div></div>`:''}
         </div>`}).join('')}
      ${acc.next?`<button id="elCmpMore" class="btn btn-soft el-more">فحص الدفعة التالية (${acc.total-acc.checked} متبقٍ)</button>`:''}`;
+    out.querySelectorAll('[data-cls]').forEach(b=>b.onclick=()=>{acc.show=b.dataset.cls||null;paintCompare(out,acc)});
     openOrder(out);
   }
+  const CLS={known:{t:'منتج معروف',d:'تعرّف المحرك على المنتج.'},missing:{t:'اسم المنتج مفقود',d:'فيه لون أو عدد أو مقاس بدون اسم منتج في النص والملاحظات وبيانات المصدر.'},
+   learn:{t:'اسم جديد يحتاج تعلّمًا',d:'اسم منتج أو طريقة كتابة لم يتعلمها المحرك بعد.'},failure:{t:'فشل في منتج معروف',d:'محرك آخر أو الخصم المسجل أو مصدر الطلب يذكر منتجًا معروفًا لم يتعرف عليه المحرك الجديد.'},
+   unclear:{t:'تفاصيل غير مفهومة',d:'لا يوجد ما يكفي للحكم — تحتاج مراجعة.'}};
+  const WHY={recognised:'معروف',known_plus_new_name:'منتج معروف + اسم جديد',stock_deduction_names_product:'الخصم المسجل في المخزون يذكر منتجًا',other_engine_recognised:'محرك حالي تعرّف عليه',
+   source_names_known_product:'مصدر الطلب يذكر منتجًا معروفًا',source_product_unknown:'مصدر الطلب يذكر اسمًا غير معروف',new_name:'اسم غير معروف',details_without_product:'لون/عدد بدون اسم منتج',unclear_text:'نص غير مفهوم',empty:'لا يوجد نص'};
 
   // ---- 2) unknown phrases: grouped, filtered, merged across batches
   const UKIND={products:{t:'منتجات جديدة محتملة',d:'عبارات معها كمية أو لون أو مقاس ولا تشبه أي منتج معروف'},
@@ -232,6 +265,28 @@
        ${group('عبارات تعني كمية',(K.phraseQuantities||[]).map(p=>`${p.phrase} = ${p.quantity}`))}
        <div class="el-sec">قواعد خاصة بكورفكس (${d.entries.length})</div>
        ${d.entries.length?d.entries.map(e=>`<div class="el-row"><div class="el-head"><b>«${esc(e.value_raw)}»</b><span class="el-badge">${esc(STATUS[e.status]||e.status)}</span></div><div class="el-note">${esc(d.kinds[e.kind]?.label||e.kind)}${e.data?.quantity?' = '+esc(e.data.quantity):''}${e.decided_at?' · '+esc(e.decided_at):''}</div></div>`).join(''):'<div class="el-muted">لا توجد قواعد مضافة بعد.</div>'}`;
+    }catch(e){failed(e)}
+  }
+
+  // ---- 5) incomplete manual orders saved as drafts (not orders). Opening one fills the normal new-order form;
+  // saving that form creates the order the usual way and closes the draft.
+  async function drafts(){
+    loading();
+    try{
+      const d=await window.api('/order-drafts');
+      body().innerHTML=`<div class="el-note">طلبات يدوية حُفظت كمسودة لأن اسم المنتج غير مكتوب. ليست طلبات: لا تُطبع ولا تدخل المخزون أو الأرباح.</div>
+       ${d.drafts.length?'':'<div class="empty">لا توجد مسودات ✓</div>'}
+       ${d.drafts.map(x=>`<div class="el-row"><div class="el-head"><b>${esc(x.payload.recipient_name||'بدون اسم')} · <bdi>${esc(x.payload.phone||'')}</bdi></b><span class="el-muted">${esc(x.created_at)}${x.creator?' · '+esc(x.creator):''}</span></div>
+         <div class="el-text">${esc([x.payload.order_notes,x.payload.raw_text].filter(Boolean).join('\n'))}</div>
+         <button class="btn btn-soft" data-draft="${esc(x.id)}">فتح في نموذج طلب جديد</button></div>`).join('')}`;
+      body().querySelectorAll('[data-draft]').forEach(b=>b.onclick=async()=>{
+        const x=d.drafts.find(y=>String(y.id)===b.dataset.draft);if(!x||typeof window.newOrder!=='function')return;
+        await window.newOrder();
+        const set=(id,v)=>{const el=document.getElementById(id);if(el&&v!=null){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}))}};
+        set('store',x.payload.store_id);set('name',x.payload.recipient_name);set('phone',x.payload.phone);set('area',x.payload.area);
+        set('address',x.payload.detailed_address);set('amount',x.payload.amount);set('notes',x.payload.order_notes);set('raw',x.payload.raw_text);
+        window.__corvexDraftId=x.id;
+      });
     }catch(e){failed(e)}
   }
 

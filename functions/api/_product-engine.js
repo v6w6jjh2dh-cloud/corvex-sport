@@ -197,6 +197,27 @@ export async function catalogueAsOf(env,storeId){
  };
 }
 
+// Order completeness (engine lab): one clear class per order. Never guesses a product from colour, price or date.
+//  known   (green)  the central engine recognised the product(s) and nothing new is written
+//  missing (orange) colour/quantity/size are written but no product name anywhere (text, notes, source data)
+//  learn   (yellow) a new name or a new way of writing that the engine should learn (incl. near spellings)
+//  failure (red)    another engine / the stored stock deduction / the source data names a KNOWN product,
+//                   but the central engine did not recognise it
+//  unclear (grey)   nothing usable or only text that needs a human look
+// «missing» is a data-completeness issue, not an engine error.
+export function classifyCompleteness({central,analysis,others={},sourceProduct=null,sourceKnown=false}){
+ const has=x=>x&&Object.keys(x).length>0;
+ const named=(analysis?.candidates||[]).length>0;
+ // read only from the stored stock deduction, not from the text → the engine did not understand the text
+ if(central?.items?.length&&central.source==='inventory')return {cls:'failure',reason:'stock_deduction_names_product'};
+ if(central?.items?.length)return named?{cls:'learn',reason:'known_plus_new_name'}:{cls:'known',reason:'recognised'};
+ if(has(others.profit)||has(others.print)||has(others.allocation)||sourceKnown)
+  return {cls:'failure',reason:sourceKnown?'source_names_known_product':has(others.allocation)?'stock_deduction_names_product':'other_engine_recognised'};
+ if(named||sourceProduct)return {cls:'learn',reason:sourceProduct&&!named?'source_product_unknown':'new_name'};
+ if((analysis?.details||0)>0)return {cls:'missing',reason:'details_without_product'};
+ return {cls:'unclear',reason:(analysis?.unclear||[]).length?'unclear_text':'empty'};
+}
+
 // storeId: aliases approved for that store are added to their product (Corvex only for now).
 // extraAliases: [{product_ref, alias}] — used by the dry-run test of a proposed alias.
 // Accumulated knowledge (_product-knowledge.js): its aliases are added to the catalogue product with

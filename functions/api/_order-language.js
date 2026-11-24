@@ -9,7 +9,7 @@
 // real Corvex orders that the active matcher does not read (applied only by the central engine).
 // Pure module: no database access.
 
-export const LANGUAGE_VERSION='order-language-2';
+export const LANGUAGE_VERSION='order-language-3';
 
 export const DEFAULT_LEXICON={
  locale:'ar-JO',
@@ -52,6 +52,11 @@ export const DEFAULT_LEXICON={
   price:['دينار','دنانير','د','jd','jod','سعر','السعر','شامل','التوصيل','توصيل','بالتوصيل','مجاني','delivery','included','include','free','shipping','price','total','المجموع','الاجمالي','خصم'],
   dates:['يناير','فبراير','مارس','ابريل','مايو','يونيو','يوليو','اغسطس','سبتمبر','اكتوبر','نوفمبر','ديسمبر','كانون','شباط','اذار','نيسان','ايار','حزيران','تموز','اب','ايلول','تشرين','الاول','الثاني',
    'january','february','march','april','may','june','july','august','september','october','november','december','am','pm','ص','م','الساعه','ساعه','صباحا','مساء','مساءا','الصبح','المسا','اليوم','بكرا','بكره','امس','مبارح','الاحد','الاثنين','الثلاثاء','الاربعاء','الخميس','الجمعه','السبت'],
+  // a «label: value» segment whose label is one of these is order metadata (status, source, reference, note)
+  metaLabels:['حاله','حالة','حاله التواصل','التواصل','ملاحظه','ملاحظات','ملاحظة','المصدر','مصدر','litesale','lite sale','رقم الطلب','رقم','الكود','كود','المرجع','مرجع','order','ord','id','ref','source','status','note','notes','تاريخ','التاريخ','الوقت','وقت'],
+  // words that only point to a reference/code (the code itself is detected by shape: letters+digits, ORD-…, #123)
+  referenceWords:['ord','order','ref','id','code','litesale','كود','الكود','مرجع','المرجع'],
+  ordinals:['الاول','الاولي','الاولى','الثاني','الثانيه','الثالث','الثالثه','الرابع','الرابعه','الخامس','الخامسه','اول','اولى','ثاني','ثانيه','ثالث','ثالثه'],
   formLabels:['القطعه الاولي','القطعه الثانيه','القطعه الثالثه','القطعه الرابعه','اختر العرض المطلوب','اختار العرض المطلوب','اختر العرض','العرض المطلوب','اختر اللون','اختر المقاس'],
   fillers:['و','او','مع','في','فيه','على','عل','من','الى','عن','لون','الوان','اللون','الالوان','كل','عدد','العدد','كميه','الكميه','كمية','الكمية','نوع','موديل','الموديل','طلب','الطلب','جديد','بدي','بدها','بده','لو','سمحت','يا','هاد','هذا','هذه','هاي','اياه','اياها','منه','منها','منهم','ال']
  }
@@ -242,13 +247,18 @@ function analysisSets(c){
   sizes:set([...(L.sizeWords||[]),...(A.sizes||[])]),
   measures:set(A.measures),price:set(A.price),dates:set(A.dates),
   labels:set(L.quantityLabels),numbers:new Set(Object.keys(L.numberWords).map(N)),pairs:new Set([...Object.keys(L.pairWords),...Object.keys(LEARNED_DEFAULTS.inlinePairWords)].map(N)),
-  formLabels:set(A.formLabels),fillers:set([...(A.fillers||[]),L.colourConjunction]),operations:set(L.operationWords),personal:set(L.personalMarkers||[]),address:set(L.addressWords||[])
+  formLabels:set(A.formLabels),metaLabels:set(A.metaLabels),references:set(A.referenceWords),ordinals:set(A.ordinals),fillers:set([...(A.fillers||[]),L.colourConjunction]),operations:set(L.operationWords),personal:set(L.personalMarkers||[]),address:set(L.addressWords||[])
  };
  return c.__an=an;
 }
 // Split numbers glued to words («2أسود», «عدد2», «3قطع», «25قطعة»), keep times/ratios/dates, drop punctuation.
 function tokens(line){
  return line
+  // reference codes by SHAPE (any source): ORD-5F2K9, ref#88, #10415, ab12cd34 — not product words
+  .replace(/(?:^|\s)(?:ord|order|ref|inv)\s*[-:#]?\s*[a-z0-9][a-z0-9-]{1,}(?=\s|$)/gi,' __ref__ ')
+  .replace(/(?:^|\s)#\s*\d{2,}(?=\s|$)/g,' __ref__ ')
+  .replace(/(?:^|\s)(?=[a-z0-9-]*\d)(?=[a-z0-9-]*[a-z])[a-z0-9]+(?:-[a-z0-9]+)+(?=\s|$)/gi,' __ref__ ')
+  .replace(/(?:^|\s)(?=[a-z]*\d)(?=\d*[a-z])[a-z0-9]{6,}(?=\s|$)/gi,' __ref__ ')
   .replace(/\b\d{1,2}:\d{2}\b/g,' __time__ ').replace(/\b\d{1,4}[\/\-.]\d{1,4}(?:[\/\-.]\d{2,4})?\b/g,' __ratio__ ')
   .replace(/(\d)(\p{L})/gu,'$1 $2').replace(/(\p{L})(\d)/gu,'$1 $2')
   .replace(/[()\[\]{}«»"'`،,؛;:!?؟.*+=#_\-–—\/\\|<>~^&%$@]/g,m=>m==='_'?m:' ')
@@ -256,6 +266,8 @@ function tokens(line){
 }
 function classifyToken(w,an,personalWords){
  if(w==='__time__'||w==='__ratio__')return w==='__time__'?'date':'measure';
+ if(w==='__ref__'||an.references.has(w))return 'reference';
+ if(an.ordinals.has(w))return 'ordinal';
  if(/^\d+$/.test(w))return 'number';
  const bare=w.length>2&&w.startsWith('و')?w.slice(1):w;
  if(personalWords.has(w)||personalWords.has(bare))return 'personal';
@@ -266,6 +278,7 @@ function classifyToken(w,an,personalWords){
  return 'word';
 }
 const SIGNAL=new Set(['number','unit','colour','size','quantity']);
+// detail evidence of a product (colour / quantity / size / unit) — used to tell «product name missing» apart
 
 export function analyzeOrder(order,models,lexicon=DEFAULT_LEXICON){
  const c=compile(lexicon),an=analysisSets(c);
@@ -277,7 +290,8 @@ export function analyzeOrder(order,models,lexicon=DEFAULT_LEXICON){
  const seen=new Set();
  for(const [field,text] of fields){
   if(!text.trim())continue;
-  const rawLines=text.split(/\n+/);
+  // structured sources write «product | اللون: … | الكمية: …» on one line: each «|» segment is read on its own
+  const rawLines=text.split(/\n+/).flatMap(l=>l.split(/\s\|\s|\s*¦\s*/));
   const lines=rawLines.map(l=>{
    const v=saleLine(c,l);if(!v)return {kind:'empty'};
    if(/(?:^|\D)(?:\+?962|0)?7\d{8}(?:\D|$)/.test(v.replace(/[\s-]/g,'')))return {kind:'personal'};
@@ -285,12 +299,22 @@ export function analyzeOrder(order,models,lexicon=DEFAULT_LEXICON){
    // Form headings and external order references are metadata, not product evidence.
    const heading=v.replace(/[:：؟?]+$/g,'').trim();
    if(an.formLabels.has(heading)||/^(?:litesale\s+)?(?:رقم\s+)?ord(?:er)?\b/i.test(heading)||/^رقم\s+(?:الطلب|طلب)\b/u.test(heading))return {kind:'metadata'};
-   const matches=matchesInLine(c,models,v);
-   let rest=v;for(const m of [...matches].sort((a,b)=>b.index-a.index))rest=rest.slice(0,m.index)+' '+rest.slice(m.index+m.length);
+   // «label: value» (forms, imports): a metadata label → the segment is metadata; another label is dropped
+   // and only its value is read (unless the label itself names a known product)
+   let body=v;const lab=v.match(/^([^:：]{1,40})[:：]\s*(.*)$/);
+   if(lab&&!matchesInLine(c,models,lab[1]).length){
+    const label=lab[1].trim(),first=label.split(' ')[0];
+    if(an.metaLabels.has(label)||an.metaLabels.has(first)||tokens(label).some(w=>classifyToken(w,an,personalWords)==='reference'))return {kind:'metadata'};
+    if(label.split(' ').length<=3)body=lab[2];
+   }
+   if(!body.trim())return {kind:'metadata'};
+   const matches=matchesInLine(c,models,body);
+   let rest=body;for(const m of [...matches].sort((a,b)=>b.index-a.index))rest=rest.slice(0,m.index)+' '+rest.slice(m.index+m.length);
    const toks=tokens(rest).map(w=>({w,k:classifyToken(w,an,personalWords)}));
    // the order amount next to a price word, or equal to the order amount, is a price
    for(const t of toks)if(t.k==='number'&&amount&&Number(t.w)===amount&&toks.some(x=>x.k==='price'))t.k='price';
    const words=toks.filter(t=>t.k==='word').map(t=>t.w);
+   if(!matches.length&&!words.length&&toks.some(t=>t.k==='reference'))return {kind:'metadata'};
    return {kind:matches.length?'product':words.length?'text':'detail',signal:toks.some(t=>SIGNAL.has(t.k)),words,dateOrPrice:toks.some(t=>t.k==='date'||t.k==='price'||t.k==='measure'),
     known:matches.map(m=>m.model.name),toks};
   });
