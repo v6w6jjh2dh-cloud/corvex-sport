@@ -39,6 +39,7 @@
 | الوحدة | يستخدمها | ملاحظات |
 |---|---|---|
 | `_inventory.js`: `classifyInventoryItems`, `loadInventoryModels`, `FUR_ALIASES`, `deductOnFirstPrint`, `returnRestockPlan`, `restockStatements` | الطباعة، الكوست، الأرباح (القسمان)، المرتجعات، التدقيق، المطابقة الجزئية | **أخطر ملف**: أي تغيير في التعرف/الكميات يغيّر الكوست والمخزون والأرباح معًا |
+| `_product-engine.js` (وضع الظل) + `/api/product-engine` | لا أحد بعد — مقارنة فقط | المحرك المركزي المستقبلي؛ انظر `docs/PRODUCT_ENGINE.md`. لا يُستخدم في أي حساب قبل الموافقة |
 | `_partial-delivery.js`: `approvedCost`, `loadCostedModels`, `shippedItems`, `pricePartialDelivery`, `shipmentDateFit`, `normalizePhone`, `refusalCash`, ترحيلات الكتالوج | المطابقة، الاعتماد، التصحيح، الأرباح | |
 | `_cargo-closed.js`: `loadClosedIndex` | مرتجعات المستودع، التدقيق، الأرباح السفلية، التصحيح، التحقيق | تعريف «مستلم فعليًا» |
 | `_settlement-date.js` | اعتماد الكشف، التصحيح | تاريخ الكشف |
@@ -83,5 +84,5 @@
 مرتجع فعلي → كشف مرتجعات/تأكيد استلام → إرجاع مخزون مرة واحدة → يُعتبر مرتجعًا مثبتًا في الأرباح السفلية وتحذير العميل.
 
 ## 9. الاتجاه المستقبلي
-الرؤية (CORVEX CORE / AI / AUTOMATION / SHIELD)، الأحداث المخطط لها ونقاط نشوئها الحالية في الكود، ونقاط الضعف المعمارية
+الرؤية (CORVEX CORE / AI / AUTOMATION / SHIELD / COMMERCE)، الأحداث المخطط لها ونقاط نشوئها الحالية في الكود، ونقاط الضعف المعمارية
 W-1…W-12 وخطة التحسين التدريجي: `FUTURE_ROADMAP.md`.

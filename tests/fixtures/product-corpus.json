@@ -1,0 +1,33 @@
+{
+ "note": "Order texts from earlier incidents and approved rules (BUSINESS_RULES.md). expected = approved result (canonical name → pieces); null = no approved expectation, compared only.",
+ "cases": [
+  {"id":"10389","notes":"عدد 2 فرو","raw":"","expected":{"جاكيت فرو":2},"rule":"P-2"},
+  {"id":"10375","notes":"عدد2","raw":"جاكيت نساءي","expected":{"جاكيت جوخ سكايفو":2},"rule":"P-4,Q-2"},
+  {"id":"10376","notes":"جكيت جوخ","raw":"جكيت جوخ","expected":{"جاكيت جوخ سكايفو":1},"rule":"P-5"},
+  {"id":"jokh-2","notes":"جكيت جوخ عدد 2","raw":"","expected":{},"rule":"P-5 (two pieces not guessed)"},
+  {"id":"10400","notes":"سلمى\n0791234567\nجاكيت جوخ كاجوال 2 قطعه بيج واسود\n20 دينار شامل التوصيل","raw":"","expected":{"جاكيت جوخ كاجوال":2},"rule":"Q-1"},
+  {"id":"price-not-qty","notes":"جاكيت جوخ كاجوال 20 دينار شامل التوصيل","raw":"","expected":{"جاكيت جوخ كاجوال":1},"rule":"Q-1"},
+  {"id":"stati","notes":"جاكيت جوخ ستاتي عدد 1","raw":"","expected":{"جاكيت جوخ سكايفو":1},"rule":"P-3"},
+  {"id":"stati-2","notes":"جكيت جوخ ستأتي","raw":"","expected":{"جاكيت جوخ سكايفو":1},"rule":"P-3"},
+  {"id":"epoxy","notes":"سي ايبوكسي 3","raw":"","expected":{"مالئ الفراغات":3},"rule":"P-6"},
+  {"id":"epoxy-2","notes":"ايوبكسي 2","raw":"","expected":{"مالئ الفراغات":2},"rule":"P-6"},
+  {"id":"fur+casual","notes":"جكيت جوخ كاجوال\nعدد 2 فرو","raw":"","expected":{"جاكيت جوخ كاجوال":1,"جاكيت فرو":2},"rule":"P-2"},
+  {"id":"fur-lining","notes":"جاكيت جوخ كاجوال مبطن فرو","raw":"","expected":{"جاكيت جوخ كاجوال":1},"rule":"P-2"},
+  {"id":"fur-word","notes":"فروع عمان - جاكيت جوخ كاجوال","raw":"","expected":{"جاكيت جوخ كاجوال":1},"rule":"P-2"},
+  {"id":"fur-colours","notes":"الفرو اسود وبني","raw":"","expected":{"جاكيت فرو":2},"rule":"Q-1"},
+  {"id":"fur-1","notes":"جاكيت فرو 1\nرقم الهاتف 0791234567","raw":"","expected":{"جاكيت فرو":1},"rule":"Q-1"},
+  {"id":"fur-weight","notes":"جاكيت فرو\nالوزن 70 الطول 175","raw":"","expected":{"جاكيت فرو":1},"rule":"Q-1"},
+  {"id":"fur+epoxy","notes":"جاكيت فرو عدد 2\nسي ايبوكسي 1","raw":"","expected":{"جاكيت فرو":2,"مالئ الفراغات":1},"rule":"P-2,P-6"},
+  {"id":"notes-raw-dup","notes":"جاكيت فرو عدد 1","raw":"جاكيت فرو عدد 1","expected":{"جاكيت فرو":1},"rule":"Q-2"},
+  {"id":"sahab-address","notes":"سحاب - المدينة الصناعية\nجاكيت فرو","raw":"","expected":{"جاكيت فرو":1},"rule":"P-7"},
+  {"id":"sahab-pants","notes":"بنطلون جيوب سحاب عدد 2","raw":"","expected":null,"rule":"P-7"},
+  {"id":"prada","notes":"تيشيرت برادا عدد 2","raw":"","expected":null,"rule":"catalogue gap"},
+  {"id":"jakar","notes":"بجامة جاكار 1","raw":"","expected":null,"rule":"catalogue gap"},
+  {"id":"polo","notes":"تيشيرت بولو تريكو اسود","raw":"","expected":null,"rule":"compare"},
+  {"id":"trend","notes":"جاكيت ترند عدد 1","raw":"","expected":null,"rule":"compare"},
+  {"id":"nike","notes":"جاكيت نايك 1","raw":"","expected":null,"rule":"compare"},
+  {"id":"women-short","notes":"جاكيت نسائي اسود","raw":"","expected":{"جاكيت جوخ سكايفو":1},"rule":"P-4"},
+  {"id":"two-lines-colours","notes":"جاكيت فرو\nاسود\nبني","raw":"","expected":null,"rule":"compare"},
+  {"id":"return-line","notes":"جاكيت فرو عدد 1\nاسترجاع جاكيت جوخ كاجوال","raw":"","expected":{"جاكيت فرو":1},"rule":"returns are not sales"}
+ ]
+}
