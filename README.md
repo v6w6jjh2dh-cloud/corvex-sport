@@ -1,5 +1,8 @@
 # CORVEX SPORT
 
+> **قبل أي تعديل:** اقرأ `CLAUDE.md` (دستور المشروع) و`BUSINESS_RULES.md` و`ARCHITECTURE.md` و`REGRESSION_TESTS.md`،
+> وسجّل كل تعديل في `CHANGELOG.md`. الفحوص: `npm run verify`. تعليمات الوكلاء: `AGENTS.md`.
+
 MVP لنظام إدخال وطباعة طلبات متجر ملابس.
 
 ## الوظائف الحالية

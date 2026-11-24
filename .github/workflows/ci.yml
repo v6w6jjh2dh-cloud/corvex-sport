@@ -1,0 +1,46 @@
+# CORVEX SPORT — required checks. Must pass before anything reaches `main` (see CLAUDE.md §6).
+# Branch protection on `main` (GitHub → Settings → Branches) must require the "CI / checks" job;
+# Cloudflare Pages deploys production from `main` only.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Node version (node:sqlite needs Node ≥ 22.13)
+        run: node --version
+
+      - name: Syntax, index.html assets and cache-busting versions
+        env:
+          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/check-project.mjs "$BASE_REF"
+
+      - name: Test-only dependency (PGlite for the Cepoxy PostgreSQL tests)
+        run: npm install --prefix /tmp/corvex-test-deps --no-audit --no-fund --no-save @electric-sql/pglite
+
+      - name: All automated tests
+        env:
+          NODE_PATH: /tmp/corvex-test-deps/node_modules
+        run: node --test --test-force-exit tests/*.test.mjs

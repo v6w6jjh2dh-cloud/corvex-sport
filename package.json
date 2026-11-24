@@ -1,0 +1,11 @@
+{
+  "name": "corvex-sport",
+  "private": true,
+  "description": "CORVEX SPORT — Cloudflare Pages + D1. No runtime npm dependencies; see CLAUDE.md.",
+  "scripts": {
+    "check": "node scripts/check-project.mjs",
+    "test": "node --test --test-force-exit tests/*.test.mjs",
+    "verify": "node scripts/check-project.mjs && node --test --test-force-exit tests/*.test.mjs"
+  },
+  "engines": { "node": ">=22.13" }
+}
