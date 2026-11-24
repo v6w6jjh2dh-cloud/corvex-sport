@@ -23,8 +23,11 @@ function setup(){
 }
 async function read(env,cat,text,notes=''){
  const r=await resolveOrderItems(env,{order_notes:notes,raw_text:text},cat);
- const out={};for(const i of r.items)out[canon(i.name)]=(out[canon(i.name)]||0)+i.quantity;return {items:out,trace:r.trace};
+ const out={};for(const i of r.items)out[canon(i.name)]=(out[canon(i.name)]||0)+i.quantity;return {items:out,trace:r.trace,needs_review:r.needs_review};
 }
+// T-11 (owner decision 2026-11-24): a single general word alone is not enough evidence. Such a name is kept
+// (never lost) but needs product evidence on its line: alone it is flagged for review, never guessed.
+const single=t=>!/\s/.test(key(t).trim());
 
 // The older browser engines exactly as they run today (built-in rules, no remote catalogue).
 function oldEngines(){
@@ -52,15 +55,20 @@ function oldEngines(){
 test('every knowledge example is read by the central engine as the documented product and quantity',async()=>{
  const env=setup();const cat=await loadCatalogue(env,{storeId:2});
  for(const k of PRODUCT_KNOWLEDGE)for(const [text,qty] of k.examples){
-  const {items}=await read(env,cat,text);
-  assert.deepEqual(items,{[key(k.product)]:qty},`${k.id}: «${text}»`);
+  const r=await read(env,cat,text);
+  if(single(text)){assert.deepEqual(r.items,{},`${k.id}: «${text}» alone`);assert.equal(r.needs_review,true,`${k.id}: «${text}» review`);
+   assert.deepEqual((await read(env,cat,text+' عدد 2')).items,{[key(k.product)]:2},`${k.id}: «${text} عدد 2»`);continue}
+  if(k.status==='superseded'){assert.ok(!r.items[key(k.product)],`${k.id} defers (T-10): «${text}»`);
+   const rq=await read(env,cat,text+' عدد 2');assert.deepEqual(rq.items,{[key(k.defers_to)]:2},`${k.id} → ${k.defers_to}`);continue}
+  assert.deepEqual(r.items,{[key(k.product)]:qty},`${k.id}: «${text}»`);
  }
 });
 
 test('every alias of every knowledge entry resolves to its product (none lost, none moved)',async()=>{
  const env=setup();const cat=await loadCatalogue(env,{storeId:2});
  for(const k of PRODUCT_KNOWLEDGE)for(const alias of [...k.aliases,...(k.review||[])]){
-  const {items}=await read(env,cat,alias);
+  const {items}=await read(env,cat,single(alias)?alias+' عدد 2':alias);
+  if(k.status==='superseded'){assert.ok(!items[key(k.product)],`${k.id} defers: «${alias}»`);continue}
   assert.deepEqual(Object.keys(items),[key(k.product)],`${k.id}: «${alias}»`);
  }
 });
@@ -77,17 +85,19 @@ test('no older rule is lost: every alias of the active profit catalogue keeps it
  const env=setup();
  const base=await loadCatalogue(env,{storeId:2,knowledge:false}),full=await loadCatalogue(env,{storeId:2});
  for(const m of base.models)for(const alias of m.aliases){
-  const a=await read(env,base,alias),b=await read(env,full,alias);
-  assert.deepEqual(b.items,a.items,`«${alias}» (${m.name})`);
+  const t=single(alias)?alias+' عدد 2':alias;
+  const a=await read(env,base,t),b=await read(env,full,t);
+  assert.deepEqual(b.items,a.items,`«${t}» (${m.name})`);
+  if(single(alias)){const r=await read(env,full,alias);assert.equal(r.needs_review,true,`«${alias}» alone → review`)}
  }
 });
 
 test('server alias lists (fur, stati, filler) and app-v62 cost terms are all recognised as the same product',async()=>{
  const env=setup();const cat=await loadCatalogue(env,{storeId:2});const old=oldEngines();
  for(const [list,product] of [[FUR_ALIASES,'جاكيت فرو'],[STATI_ALIASES,'جاكيت جوخ سكايفو'],[FILLER_ALIASES,'مالئ الفراغات']])
-  for(const a of list)assert.deepEqual(Object.keys((await read(env,cat,a)).items),[key(product)],`«${a}»`);
+  for(const a of list)assert.deepEqual(Object.keys((await read(env,cat,single(a)?a+' عدد 2':a)).items),[key(product)],`«${a}»`);
  for(const r of old.v62Rules)for(const t of r.terms)
-  assert.deepEqual(Object.keys((await read(env,cat,t)).items),[canon(r.name.split(' / ')[0])],`app-v62 «${t}» → ${r.name}`);
+  assert.deepEqual(Object.keys((await read(env,cat,single(t)?t+' عدد 2':t)).items),[canon(r.name.split(' / ')[0])],`app-v62 «${t}» → ${r.name}`);
 });
 
 test('quantity conventions (Q-*) are kept, only for single-product orders',async()=>{
@@ -110,4 +120,18 @@ test('guards: M only beside a product word, «سحاب» alone is a place, name/
  const r=await resolveOrderItems(env,{recipient_name:'جاكيت فرو',detailed_address:'بنطلون تركي',order_notes:'',raw_text:''},cat);
  assert.equal(r.items.length,0,'address fields');
  for(const g of GUARD_RULES)assert.ok(g.id&&g.where&&g.test&&g.description,g.id);
+});
+
+test('T-11: a general word is understood in context — description vs customer name, address, notes, price, weight, size',async()=>{
+ const env=setup();const cat=await loadCatalogue(env,{storeId:2});
+ const T=key('بنطلون تركي');
+ for(const [text,exp] of [
+  ['تركي',null],['ام تركي',null],['الاسم: تركي العلي',null],['عمان - شارع تركي',null],['ابو تركي\n0791234567',null],
+  ['تركي عدد 2',{[T]:2}],['تركي اسود وبني',{[T]:2}],['تركي مقاس xl',{[T]:1}],['تركي 12 دينار',{[T]:1}],['بنطلون تركي',{[T]:1}],
+  ['الاسم: تركي العلي\nبنطلون تركي عدد 3',{[T]:3}],['ام تركي\nجاكيت فرو',{[key('جاكيت فرو')]:1}]
+ ]){
+  const r=await read(env,cat,text);
+  if(exp===null){assert.deepEqual(r.items,{},`«${text}»`);assert.equal(r.needs_review,true,`«${text}» review`)}
+  else assert.deepEqual(r.items,exp,`«${text}»`);
+ }
 });

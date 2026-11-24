@@ -166,9 +166,35 @@ export function buildLexicon(entries=[]){
  }
  return {lexicon:lex,learned};
 }
-async function storeLexicon(env,storeId){
+async function storeLexicon(env,storeId,asOf=null){
  if(!storeId)return [];
- try{await ensureLexiconTable(env);return (await env.DB.prepare("SELECT kind,value,data_json FROM store_lexicon WHERE store_id=? AND status='approved'").bind(storeId).all()).results||[]}catch{return []}
+ try{await ensureLexiconTable(env);return (await env.DB.prepare(`SELECT kind,value,data_json FROM store_lexicon WHERE store_id=? AND status='approved'${asOf?' AND decided_at<=?':''}`).bind(...(asOf?[storeId,asOf]:[storeId])).all()).results||[]}catch{return []}
+}
+
+// Rule versioning: append-only log of every rule decision (aliases and store language). The store's rule
+// version is the id of its latest decision; rollback disables (never deletes) rules approved after a version.
+export async function ensureRuleEventsTable(env){
+ await env.DB.prepare(`CREATE TABLE IF NOT EXISTS knowledge_rule_events(id INTEGER PRIMARY KEY AUTOINCREMENT,store_id INTEGER NOT NULL,
+  rule_table TEXT NOT NULL,rule_id INTEGER NOT NULL,action TEXT NOT NULL,from_status TEXT,to_status TEXT,actor_id INTEGER,note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')))`).run();
+ await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_rule_events_store ON knowledge_rule_events(store_id,id)').run();
+}
+export async function logRuleEvent(env,{storeId,table,ruleId,action,from=null,to=null,actor=null,note=''}){
+ await ensureRuleEventsTable(env);
+ const r=await env.DB.prepare('INSERT INTO knowledge_rule_events(store_id,rule_table,rule_id,action,from_status,to_status,actor_id,note) VALUES(?,?,?,?,?,?,?,?)')
+  .bind(storeId,table,Number(ruleId),action,from,to,actor,String(note||'').slice(0,300)).run();
+ return r.meta.last_row_id;
+}
+// Catalogue per moment (memoised by how many rules were in force): orders are read with the rules of their time.
+export async function catalogueAsOf(env,storeId){
+ const times=[];
+ for(const t of ['product_aliases','store_lexicon']){try{times.push(...((await env.DB.prepare(`SELECT decided_at FROM ${t} WHERE store_id=? AND status='approved' AND decided_at IS NOT NULL`).bind(storeId).all()).results||[]).map(r=>String(r.decided_at)))}catch{}}
+ times.sort();const memo=new Map();
+ return async asOf=>{
+  const at=String(asOf||'9999-12-31 23:59:59'),k=times.filter(x=>x<=at).length;
+  if(!memo.has(k))memo.set(k,loadCatalogue(env,{storeId,asOf:k===times.length?null:(times[k-1]||'0000-00-00 00:00:00')}));
+  return memo.get(k);
+ };
 }
 
 // storeId: aliases approved for that store are added to their product (Corvex only for now).
@@ -181,7 +207,7 @@ export function withKnowledge(models){
  const owner=new Map();for(const m of models)for(const a of m.aliases||[])if(!owner.has(a))owner.set(a,m.id);
  const out=models.map(m=>({...m,aliases:[...(m.aliases||[])]}));
  PRODUCT_KNOWLEDGE.forEach((k,i)=>{
-  if(k.status==='disabled')return;
+  if(k.status==='disabled'||k.status==='superseded')return;
   let target=out.find(m=>canonicalFor(m.name)===key(k.product));
   if(!target){target={id:-101-i,name:k.product,unit_cost:k.cost??null,aliases:[],knowledge_id:k.id};out.push(target)}
   for(const a of [...k.aliases,...(k.review||[])].map(key).filter(a=>a.length>1)){
@@ -192,20 +218,25 @@ export function withKnowledge(models){
  });
  return out;
 }
-export async function loadCatalogue(env,{storeId=0,extraAliases=[],knowledge=true,extraLexicon=[]}={}){
+// asOf (UTC 'YYYY-MM-DD HH:MM:SS'): only rules approved at or before that moment — a historical order is read
+// with the rules of its own time, never re-interpreted automatically when a new rule is learned.
+export async function loadCatalogue(env,{storeId=0,extraAliases=[],knowledge=true,extraLexicon=[],asOf=null}={}){
  const base=await cohortModels(env),catalogueError=base.catalogueError;
- const models=knowledge?withKnowledge(base.models):base.models;
+ // knowledge:false = exactly the active engine (its catalogue, default lexicon, no store rules)
+ if(!knowledge)return {models:base.models,primaryModels:base.models,catalogueError,storeId,knowledge,lexicon:DEFAULT_LEXICON,learned:null,asOf,
+  version:ENGINE_VERSION+'+'+LANGUAGE_VERSION};
  let approved=[];
- if(storeId){try{await ensureProductAliasTable(env);approved=(await env.DB.prepare("SELECT product_ref,alias FROM product_aliases WHERE store_id=? AND status='approved'").bind(storeId).all()).results||[]}catch{}}
+ if(storeId){try{await ensureProductAliasTable(env);approved=(await env.DB.prepare(`SELECT product_ref,alias FROM product_aliases WHERE store_id=? AND status='approved'${asOf?' AND decided_at<=?':''}`).bind(...(asOf?[storeId,asOf]:[storeId])).all()).results||[]}catch{}}
  const add=[...approved,...extraAliases];
- const out=models.map(m=>{
+ const withStore=models=>models.map(m=>{
   const ref=productRef(m),extra=add.filter(a=>a.product_ref===ref).map(a=>key(a.alias)).filter(a=>a.length>1);
   return extra.length?{...m,aliases:[...new Set([...(m.aliases||[]),...extra])].sort((a,b)=>b.length-a.length)}:m;
  });
- // knowledge:false = exactly the active engine (default lexicon, no learned conventions, no store language)
- const lang=knowledge?buildLexicon([...(await storeLexicon(env,storeId)),...extraLexicon]):{lexicon:DEFAULT_LEXICON,learned:null};
- return {models:out,catalogueError,storeId,knowledge,lexicon:lang.lexicon,learned:lang.learned,
-  version:ENGINE_VERSION+'+'+LANGUAGE_VERSION+(knowledge?'+'+KNOWLEDGE_VERSION:'')};
+ // primary = the active catalogue + this store's approved aliases; models = primary + the legacy seed (fills gaps only, T-10)
+ const primaryModels=withStore(base.models),models=withStore(withKnowledge(base.models));
+ const lang=buildLexicon([...(await storeLexicon(env,storeId,asOf)),...extraLexicon]);
+ return {models,primaryModels,catalogueError,storeId,knowledge,lexicon:lang.lexicon,learned:lang.learned,asOf,
+  version:ENGINE_VERSION+'+'+LANGUAGE_VERSION+'+'+KNOWLEDGE_VERSION};
 }
 
 export function describeCatalogue(cat){
@@ -219,21 +250,24 @@ export function describeCatalogue(cat){
 // allocation: [{model_id,name,quantity}] from inventory_order_items (print-time deduction), used
 // only when the text cannot be read — exactly like the cohort engine.
 export async function resolveOrderItems(env,o,cat,allocation=null){
- const models=cat.models;
+ const trace=[],uncertain=[];
+ const sources=[['order_notes',String(o.order_notes||'')],['raw_text',String(o.raw_text||'')]];
+ const ctx=cat.knowledge?{requireContext:true}:{};
+ const P=(text,list)=>{const r=parseOrderText(text,list,cat.lexicon||DEFAULT_LEXICON,ctx);for(const u of r.uncertain||[])uncertain.push({...u,name:(list.find(m=>m.id===u.model_id)||{}).name||''});return r.items};
+ // the cohort reading (verbatim) over one model list
+ const readWith=(models,tag='')=>{
   let items=[],itemSource='none';
-  const trace=[];
-  const sources=[['order_notes',String(o.order_notes||'')],['raw_text',String(o.raw_text||'')]];
   for(const [source,text] of sources){
    if(!text.trim()){trace.push({source,empty:true});continue}
-   const parsed=parse(text,models,cat.lexicon);
-   trace.push({source,found:parsed.map(x=>({name:(models.find(m=>m.id===Number(x.model_id))||{}).name||String(x.model_id),quantity:x.quantity}))});
+   const parsed=P(text,models);
+   trace.push({source:source+tag,found:parsed.map(x=>({name:(models.find(m=>m.id===Number(x.model_id))||{}).name||String(x.model_id),quantity:x.quantity}))});
    if(!parsed.length)continue;
    let list=parsed;
    // Quantity written only in the other field («عدد2» in notes, product in raw_text):
    // use it for a single-model order whose own text carries no quantity at all.
    // The sources are never added together, so the same piece is not counted twice.
    const other=sources.find(([name])=>name!==source)[1];
-   if(parsed.length===1&&parsed[0].quantity===1&&!hasQuantityMarker(text)&&other.trim()&&!parse(other,models,cat.lexicon).length){
+   if(parsed.length===1&&parsed[0].quantity===1&&!hasQuantityMarker(text)&&other.trim()&&!parseOrderText(other,models,cat.lexicon||DEFAULT_LEXICON,ctx).items.length){
     const q=explicitQuantity(other);if(q>1){list=[{...parsed[0],quantity:q}];trace.push({source:'quantity_from_'+sources.find(([name])=>name!==source)[0],quantity:q})}
    }
    items=mergeItems(list,models);itemSource=source;break;
@@ -252,6 +286,13 @@ export async function resolveOrderItems(env,o,cat,allocation=null){
     break;
    }
   }
+  return {items,itemSource};
+ };
+ // T-10: the active catalogue (+ this store's approved aliases) decides first; the legacy seed only fills a gap.
+ let models=cat.knowledge?cat.primaryModels:cat.models;
+ let {items,itemSource}=readWith(models);
+ // the seed fills a gap only (superseded seed entries are not loaded — T-10)
+ if(cat.knowledge&&!items.length){const seeded=readWith(cat.models,'_seed');if(seeded.items.length){({items,itemSource}=seeded);models=cat.models;trace.push({source:'seed_fill'})}}
   // Knowledge quantity conventions (Q-* rules): single-product orders read as 1 piece only.
   if(cat.knowledge&&items.length===1&&items[0].quantity===1&&(itemSource==='order_notes'||itemSource==='raw_text')){
    const text=sources.find(([name])=>name===itemSource)[1],model=models.find(m=>m.id===Number(items[0].model_id))||{};
@@ -264,7 +305,10 @@ export async function resolveOrderItems(env,o,cat,allocation=null){
   }
   if(!items.length&&allocation?.length){items=mergeItems(allocation,models);itemSource='inventory'}
  const itemsValid=items.length>0&&items.every(i=>Number.isInteger(i.quantity)&&i.quantity>=1&&i.quantity<=50);
- const byId=new Map(models.map(m=>[m.id,m]));
+ const byId=new Map(cat.models.map(m=>[m.id,m]));
+ // T-11: when unsure, nothing is guessed — the order is flagged for review and its cost stays unknown.
+ const needsReview=!items.length&&uncertain.length>0;
  return {items:items.map(i=>({...i,ref:productRef(byId.get(Number(i.model_id))||{name:i.name})})),source:itemSource,trace,valid:itemsValid,
+  uncertain:[...new Map(uncertain.map(u=>[u.alias+'|'+u.reason,u])).values()],needs_review:needsReview,
   cost:itemsValid&&items.every(i=>i.unit_cost!==null)?round2(items.reduce((n,i)=>n+i.total_cost,0)):null};
 }

@@ -16,6 +16,9 @@
 //  POST {action:'lexicon_propose', kind, value, quantity?, fix?, product?} → pending language rule (no effect)
 //  POST {action:'lexicon_test', id}         → dry run on recent orders (which readings would change)
 //  POST {action:'lexicon_approve', id, confirm:'اعتماد القاعدة'} | {action:'lexicon_reject'|'lexicon_disable', id}
+//  GET  ?view=versions                      → rule decision log; current_version = latest decision id
+//  POST {action:'rules_rollback', to_version, confirm:'تراجع عن القواعد'} → disable rules approved after that version
+//  Readings use the rules in force when the order was created (no automatic re-interpretation of history).
 //  GET  ?view=knowledge                     → the accumulated knowledge registry + catalogue aliases, and a self-check
 //       that every alias still resolves to its product (run it on production after each change)
 //  GET  ?view=interpretations&order_id=     → interpretation memory (text → system reading → correction → rule)
@@ -25,7 +28,7 @@
 // Designed for later use by CORVEX AI through the same validated actions (propose → test → admin approval).
 import {json,round2,normalizeArabic} from './_partial-delivery.js';
 import {classifyInventoryItems,loadInventoryModels} from './_inventory.js';
-import {loadCatalogue,describeCatalogue,resolveOrderItems,ensureProductAliasTable,ensureInterpretationTable,ensureLexiconTable,LEXICON_KINDS,textHash,productRef,ENGINE_VERSION} from './_product-engine.js';
+import {loadCatalogue,describeCatalogue,resolveOrderItems,ensureProductAliasTable,ensureInterpretationTable,ensureLexiconTable,LEXICON_KINDS,textHash,ensureRuleEventsTable,logRuleEvent,catalogueAsOf,productRef,ENGINE_VERSION} from './_product-engine.js';
 import {unknownPhrases,DEFAULT_LEXICON,LEARNED_DEFAULTS,LANGUAGE_VERSION} from './_order-language.js';
 import {PRODUCT_KNOWLEDGE,QUANTITY_RULES,GUARD_RULES,NAME_SYNONYMS,KNOWLEDGE_VERSION} from './_product-knowledge.js';
 import {onRequest as cohortEngine} from './profit-shipping-cohorts.js';
@@ -45,7 +48,7 @@ async function corvexStore(env){
  return rows.find(s=>/corvex|كورفكس/i.test(String(s.name||'')))||null;
 }
 async function corvexOrders(env,storeId,from,to,limit){
- return (await env.DB.prepare(`SELECT o.id,o.order_code,o.raw_text,o.order_notes,o.delivery_status,date(o.first_printed_at,'+3 hours') ship_day
+ return (await env.DB.prepare(`SELECT o.id,o.order_code,o.raw_text,o.order_notes,o.delivery_status,o.created_at,date(o.first_printed_at,'+3 hours') ship_day
    FROM orders o WHERE o.store_id=? AND o.first_printed_at IS NOT NULL AND date(o.first_printed_at,'+3 hours') BETWEEN ? AND ?
    ORDER BY o.id DESC LIMIT ?`).bind(storeId,from,to,limit).all()).results||[];
 }
@@ -93,7 +96,7 @@ export async function onRequest({request,env}){
    if(!DAY.test(from)||!DAY.test(to)||from>to)return json({error:'تاريخ غير صالح'},400);
    const orders=await corvexOrders(env,store.id,from,to,limit);
    const cat=await loadCatalogue(env,{storeId:store.id});
-   const baseCat=await loadCatalogue(env,{storeId:store.id,knowledge:false});
+   const baseCat=await loadCatalogue(env,{storeId:store.id,knowledge:false}),asOfCat=await catalogueAsOf(env,store.id);
    const invModels=await loadInventoryModels(env);
    const alloc=await allocations(env,orders.map(o=>Number(o.id)));
    // shipment-day engine (unchanged, active) per day, for proof of equivalence on real data
@@ -104,7 +107,8 @@ export async function onRequest({request,env}){
    }
    const rows=[];const counts={orders:orders.length,central_vs_profit_engine:0,baseline_vs_profit_engine:0,knowledge_changes:0,central_vs_print_engine:0,central_vs_print_allocation:0,central_unrecognised:0,central_cost_unknown:0};
    for(const o of orders){
-    const central=await resolveOrderItems(env,o,cat,alloc.get(Number(o.id))||null);
+    // read with the rules in force when the order was created (no automatic re-interpretation of history)
+    const central=await resolveOrderItems(env,o,await asOfCat(o.created_at),alloc.get(Number(o.id))||null);
     // baseline = central engine without the knowledge registry; must equal the active profit engine.
     const baseline=await resolveOrderItems(env,o,baseCat,alloc.get(Number(o.id))||null);
     const knowledgeDiff=diffKinds(shape(central.items),shape(baseline.items));if(knowledgeDiff.length)counts.knowledge_changes++;
@@ -142,14 +146,22 @@ export async function onRequest({request,env}){
    }
    return json({store,from,to,read_only:true,orders:orders.length,candidates:[...groups.values()].sort((a,b)=>b.orders-a.orders).slice(0,200)});
   }
+  if(view==='versions'){
+   await ensureRuleEventsTable(env);
+   const rows=(await env.DB.prepare('SELECT * FROM knowledge_rule_events WHERE store_id=? ORDER BY id DESC LIMIT 500').bind(store.id).all()).results||[];
+   const decided=rows.find(r=>['approved','rejected','disabled','rolled_back'].includes(r.action));
+   return json({store,current_version:decided?decided.id:0,events:rows});
+  }
   if(view==='knowledge'){
    const cat=await loadCatalogue(env,{storeId:store.id}),failures=[];
-   for(const k of PRODUCT_KNOWLEDGE)for(const a of [...k.aliases,...(k.review||[])]){
-    const r=await resolveOrderItems(env,{order_notes:'',raw_text:a},cat);
+   // T-11: a single general word needs product evidence, so each name is checked with a quantity («… عدد 2»).
+   const probe=a=>/\s/.test(key(a).trim())?a:a+' عدد 2';
+   for(const k of PRODUCT_KNOWLEDGE.filter(x=>x.status!=='superseded'&&x.status!=='disabled'))for(const a of [...k.aliases,...(k.review||[])]){
+    const r=await resolveOrderItems(env,{order_notes:'',raw_text:probe(a)},cat);
     if(r.items.length!==1)failures.push({id:k.id,alias:a,got:r.items.map(i=>i.name)});
    }
    for(const m of cat.models)for(const a of m.aliases||[]){
-    const r=await resolveOrderItems(env,{order_notes:'',raw_text:a},cat);
+    const r=await resolveOrderItems(env,{order_notes:'',raw_text:probe(a)},cat);
     if(!r.items.some(i=>Number(i.model_id)===Number(m.id)))failures.push({product:m.name,alias:a,got:r.items.map(i=>i.name)});
    }
    return json({engine:ENGINE_VERSION,knowledge_version:KNOWLEDGE_VERSION,store,read_only:true,
@@ -181,7 +193,23 @@ export async function onRequest({request,env}){
    const r=await env.DB.prepare("INSERT INTO product_aliases(store_id,product_ref,alias,alias_raw,status,proposed_by,proposed_via,note) VALUES(?,?,?,?,'pending',?,?,?)")
     .bind(store.id,ref,key(alias),alias,me.id,String(b.via||'admin').slice(0,20),String(b.note||'').slice(0,300)).run().catch(()=>null);
    if(!r)return json({error:'يوجد اقتراح مفتوح بنفس الاسم'},409);
+   await logRuleEvent(env,{storeId:store.id,table:'product_aliases',ruleId:r.meta.last_row_id,action:'proposed',to:'pending',actor:me.id,note:String(b.via||'admin')});
    return json({ok:true,id:r.meta.last_row_id,status:'pending'});
+  }
+  if(action==='rules_rollback'){
+   // Undo learning: every rule approved after `to_version` is disabled (kept, never deleted) and logged.
+   if(String(b.confirm||'').trim()!=='تراجع عن القواعد')return json({error:'اكتب «تراجع عن القواعد» للتأكيد'},400);
+   const to=Number(b.to_version);if(!Number.isInteger(to)||to<0)return json({error:'رقم إصدار غير صالح'},400);
+   await ensureRuleEventsTable(env);await ensureLexiconTable(env);await ensureProductAliasTable(env);
+   const later=(await env.DB.prepare("SELECT rule_table,rule_id FROM knowledge_rule_events WHERE store_id=? AND action='approved' AND id>? ORDER BY id DESC").bind(store.id,to).all()).results||[];
+   const done=[],skipped=[];
+   for(const e of later){
+    if(!['product_aliases','store_lexicon'].includes(e.rule_table))continue;
+    const r=await env.DB.prepare(`UPDATE ${e.rule_table} SET status='disabled',decided_by=?,decided_at=datetime('now') WHERE id=? AND store_id=? AND status='approved'`).bind(me.id,e.rule_id,store.id).run().catch(()=>null);
+    if(r&&r.meta.changes===1){await logRuleEvent(env,{storeId:store.id,table:e.rule_table,ruleId:e.rule_id,action:'rolled_back',from:'approved',to:'disabled',actor:me.id,note:'to_version '+to});done.push(e)}
+    else skipped.push(e);
+   }
+   return json({ok:true,to_version:to,disabled:done,skipped,note:'القواعد المعطلة محفوظة ويمكن اقتراحها من جديد؛ لم يتغير أي طلب'});
   }
   if(action.startsWith('lexicon_')){
    await ensureLexiconTable(env);
@@ -199,6 +227,7 @@ export async function onRequest({request,env}){
     const r=await env.DB.prepare("INSERT INTO store_lexicon(store_id,kind,value,value_raw,data_json,status,proposed_by,proposed_via,note) VALUES(?,?,?,?,?,'pending',?,?,?)")
      .bind(store.id,kind,value,raw,JSON.stringify(data),me.id,String(b.via||'admin').slice(0,20),String(b.note||'').slice(0,300)).run().catch(()=>null);
     if(!r)return json({error:'يوجد اقتراح مفتوح بنفس الكلمة'},409);
+    await logRuleEvent(env,{storeId:store.id,table:'store_lexicon',ruleId:r.meta.last_row_id,action:'proposed',to:'pending',actor:me.id,note:String(b.via||'admin')});
     return json({ok:true,id:r.meta.last_row_id,status:'pending'});
    }
    const row=await env.DB.prepare('SELECT * FROM store_lexicon WHERE id=? AND store_id=?').bind(Number(b.id||0),store.id).first();
@@ -218,20 +247,22 @@ export async function onRequest({request,env}){
     if(!row.test_json)return json({error:'شغّل الاختبار التجريبي قبل الاعتماد'},409);
     if(String(b.confirm||'').trim()!=='اعتماد القاعدة')return json({error:'اكتب «اعتماد القاعدة» للتأكيد'},400);
     const r=await env.DB.prepare("UPDATE store_lexicon SET status='approved',decided_by=?,decided_at=datetime('now') WHERE id=? AND status='pending'").bind(me.id,row.id).run();
+    if(r.meta.changes===1)await logRuleEvent(env,{storeId:store.id,table:'store_lexicon',ruleId:row.id,action:'approved',from:'pending',to:'approved',actor:me.id});
     return json({ok:r.meta.changes===1,status:'approved',note:'تُستخدم في المحرك المركزي (وضع المقارنة) فقط حتى تفعيله'});
    }
    if(action==='lexicon_reject'||action==='lexicon_disable'){
     const next=action==='lexicon_reject'?'rejected':'disabled';
     await env.DB.prepare("UPDATE store_lexicon SET status=?,decided_by=?,decided_at=datetime('now') WHERE id=?").bind(next,me.id,row.id).run();
+    await logRuleEvent(env,{storeId:store.id,table:'store_lexicon',ruleId:row.id,action:next,from:row.status,to:next,actor:me.id});
     return json({ok:true,status:next});
    }
    return json({error:'إجراء غير معروف'},400);
   }
   if(action==='interpret'||action==='correct'){
    await ensureInterpretationTable(env);
-   const o=await env.DB.prepare('SELECT id,store_id,order_notes,raw_text FROM orders WHERE id=? AND store_id=?').bind(Number(b.order_id||0),store.id).first();
+   const o=await env.DB.prepare('SELECT id,store_id,order_notes,raw_text,created_at FROM orders WHERE id=? AND store_id=?').bind(Number(b.order_id||0),store.id).first();
    if(!o)return json({error:'الطلب غير موجود في كورفكس'},404);
-   const cat=await loadCatalogue(env,{storeId:store.id});
+   const cat=await (await catalogueAsOf(env,store.id))(o.created_at);
    const r=await resolveOrderItems(env,o,cat);
    const field=r.source==='order_notes'||r.source==='raw_text'?r.source:(o.order_notes?'order_notes':'raw_text');
    const text=String(o[field]||''),hash=textHash(text),version=cat.version;
@@ -275,12 +306,14 @@ export async function onRequest({request,env}){
    if(!row.test_json)return json({error:'شغّل الاختبار التجريبي قبل الاعتماد'},409);
    if(String(b.confirm||'').trim()!=='اعتماد الاسم')return json({error:'اكتب «اعتماد الاسم» للتأكيد'},400);
    const r=await env.DB.prepare("UPDATE product_aliases SET status='approved',decided_by=?,decided_at=datetime('now') WHERE id=? AND status='pending'").bind(me.id,row.id).run();
+   if(r.meta.changes===1)await logRuleEvent(env,{storeId:store.id,table:'product_aliases',ruleId:row.id,action:'approved',from:'pending',to:'approved',actor:me.id});
    if(r.meta.changes===1){await ensureInterpretationTable(env);await env.DB.prepare("UPDATE order_interpretations SET rule_status='approved',rule_approved_by=?,rule_approved_at=datetime('now') WHERE store_id=? AND rule_ref=?").bind(me.id,store.id,'alias:'+row.id).run()}
    return json({ok:r.meta.changes===1,status:'approved',note:'يُستخدم في المحرك المركزي (وضع المقارنة) فقط حتى تفعيله'});
   }
   if(action==='reject'||action==='disable'){
    const next=action==='reject'?'rejected':'disabled';
    await env.DB.prepare("UPDATE product_aliases SET status=?,decided_by=?,decided_at=datetime('now') WHERE id=?").bind(next,me.id,row.id).run();
+   await logRuleEvent(env,{storeId:store.id,table:'product_aliases',ruleId:row.id,action:next,from:row.status,to:next,actor:me.id});
    await ensureInterpretationTable(env);await env.DB.prepare('UPDATE order_interpretations SET rule_status=? WHERE store_id=? AND rule_ref=?').bind(next,store.id,'alias:'+row.id).run();
    return json({ok:true,status:next});
   }
