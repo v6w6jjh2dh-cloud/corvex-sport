@@ -2919,17 +2919,23 @@ async function dailyProfitsView(){
   const stores=await getActiveStores();
   const today=new Date().toISOString().slice(0,10);
   c.innerHTML=`
-    <div class="page-title"><div><h1>الأرباح اليومية</h1><div class="sub">الطلب الجزئي لا يدخل الإجمالي قبل مراجعة كوست القطع المستلمة</div></div><button type="button" id="profitModelsBtn" class="btn btn-soft">إدارة الموديلات والكوست</button></div>
-    <div class="card">
-      <div class="toolbar">
+    <div class="page-title"><div><h1>الأرباح اليومية</h1><div class="sub">القسم الأول حسب تاريخ كشف شركة التوصيل • القسم الثاني حسب يوم خروج الشحنات من المستودع</div></div><button type="button" id="profitModelsBtn" class="btn btn-soft">إدارة الموديلات والكوست</button></div>
+    <div class="card" id="statementProfitCard">
+      <h3 style="margin:0 0 4px">أرباح كشوف شركة التوصيل حسب تاريخ الكشف</h3>
+      <div class="sub">كل الطلبات المسوّاة داخل كشوف هذا التاريخ مهما كان يوم خروجها من المستودع. التصحيحات تُحتسب بفرقها فقط، ولا يُحتسب طلب مرتين.</div>
+      <div class="toolbar" style="margin-top:12px">
         <input id="profitDate" type="date" class="input" value="${today}">
         <select id="profitStore" class="select"><option value="">كل المتاجر</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
         <button id="loadProfits" class="btn btn-primary">عرض</button>
       </div>
+      <div id="statementProfitResult">اختر تاريخ الكشف واضغط عرض.</div>
+    </div>
+    <div class="card">
       <div id="shippingCohort" class="card" style="margin:14px 0;padding:16px;border:1px solid #dbe4ed">
         <h3>الأرباح المتراكمة حسب يوم خروج الشحنة</h3>
         <div class="sub">يُحسب الطلب حسب تاريخ خروجه من المستودع (أول طباعة)، مهما كان تاريخ كشف شركة التوصيل. الرفض هنا يشمل فقط «رفض مع دفع أجور» و«لا رد بعد الوصول» من الكشوف المسكّرة، أما المرتجعات والإلغاءات الأخرى فتظهر منفصلة.</div>
         <div class="toolbar" style="margin:12px 0;flex-wrap:wrap">
+          <label>المتجر <select id="cohortStore" class="select" style="min-width:140px;max-width:200px"><option value="">كل المتاجر</option>${stores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
           <label>تاريخ خروج الشحنات من المستودع <input id="cohortDate" type="date" class="input" value="${today}" style="min-width:160px;max-width:220px"></label>
           <label>إعلانات هذا اليوم (د.أ) <input id="cohortAdSpend" type="number" min="0" step="0.01" class="input" inputmode="decimal" style="max-width:150px"></label>
           <button id="saveCohortAds" type="button" class="btn btn-soft">حفظ الإعلانات</button>
@@ -2937,14 +2943,43 @@ async function dailyProfitsView(){
         </div>
         <div id="shippingCohortResult">اختر التاريخ واضغط عرض.</div>
       </div>
+    </div>
+    <div class="card"><details id="legacyProfitReview"><summary style="cursor:pointer;font-weight:700;color:#34465d">مراجعة يدوية لطلبات الكشف (الطريقة السابقة — لا تدخل في مجاميع القسمين)</summary>
       <div id="profitSummary"></div>
       <div id="profitOrders"></div>
-    </div>`;
+    </details></div>`;
+
+  // ---------- upper section: whole statements by statement date (separate logic and filters) ----------
+  const loadStatementProfit=async()=>{
+    const target=$('#statementProfitResult');if(!target)return;
+    const date=$('#profitDate').value,store=$('#profitStore').value||'0';
+    target.textContent='جاري حساب أرباح الكشوف...';
+    try{
+      const d=await api('/profit-statements?date='+encodeURIComponent(date)+'&store_id='+encodeURIComponent(store));
+      if(d.date!==$('#profitDate').value)return;
+      const T=d.totals||{};
+      const kindLabel={final:'',as_settled:'كما سُوّي (صُحّح لاحقًا)',correction:'تصحيح',superseded:'سُوّي في كشف آخر'};
+      const st=x=>({pending:'قيد التوصيل',delivered:'تم التسليم',partial:'تسليم جزئي',delivered_adjusted:'تسليم جزئي',returned:'مرتجع',refused_fee_paid:'رفض ودفع أجور',refused_no_fee:'رفض دون أجور',canceled_before_arrival:'ملغي قبل الوصول'})[x]||x||'—';
+      const fig=(l,v)=>'<div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid #eef1f4"><span style="color:#5b6878">'+l+'</span><b style="direction:ltr">'+(v===null||v===undefined?'—':money(v)+' د.أ')+'</b></div>';
+      if(!d.statements.length){target.innerHTML='<div class="empty">لا توجد كشوف شركة توصيل بتاريخ '+esc(d.date)+'</div>';return}
+      const unknown=d.statements.flatMap(s=>s.orders.filter(o=>o.kind!=='superseded'&&!o.cost_known).map(o=>({...o,code:s.settlement_code})));
+      const mismatch=d.statements.filter(s=>!s.net_matches_statement);
+      target.innerHTML='<div class="sub" style="font-size:11px;margin:8px 0">محرك: '+esc(d.engine)+' • '+d.statements.length+' كشف بتاريخ '+esc(d.date)+'</div>'+
+        '<section style="display:grid;gap:12px">'+
+        '<div style="background:linear-gradient(125deg,#152b4c,#263b60);border-radius:18px;color:#fff;padding:20px 18px"><div style="font-size:13px;opacity:.82">صافي ربح كشوف هذا التاريخ</div><div style="font-size:clamp(28px,7vw,40px);font-weight:800;direction:ltr;text-align:right">'+(T.profit===null?'—':money(T.profit)+' د.أ')+'</div><div style="font-size:12px;opacity:.8;margin-top:8px">'+T.orders+' طلب • '+T.delivered+' مستلم • '+T.returned+' مرتجع'+(T.unknown_cost?' • '+T.unknown_cost+' بكوست ناقص':'')+'</div></div>'+
+        '<div style="background:#fff;border:1px solid #e5ebf2;border-radius:16px;padding:6px 16px 10px"><div style="font-weight:800;color:#19324f;padding:8px 0">الملخص المالي للكشوف</div>'+fig('إجمالي المبيعات',T.sales)+fig('صافي الكاش من شركة التوصيل',T.cash)+fig('كوست البضاعة',T.costs)+fig('أجور التوصيل',T.fees)+fig('نتيجة المرتجعات',T.returns)+fig('صافي الربح',T.profit)+'</div>'+
+        (unknown.length?'<div class="partial-summary-warning">⚠ '+unknown.length+' طلب كوستها ناقصة — صافي الربح لا يُعرض حتى تكتمل (ربح المكتمل فقط: '+money(T.known_profit)+' د.أ):<ul style="margin:6px 0 0">'+unknown.map(o=>'<li><button type="button" class="rc-link" data-rc-order="'+Number(o.order_id)+'">#'+esc(o.order_code)+'</button> ('+esc(o.code)+'): '+esc(o.reason)+'</li>').join('')+'</ul></div>':'')+
+        (mismatch.length?'<div class="partial-summary-warning">⚠ صافي الكاش المحسوب لا يساوي صافي الكشف المحفوظ في: '+mismatch.map(s=>esc(s.settlement_code)+' (محفوظ '+money(s.stored_net_due)+' • محسوب '+money(s.totals.cash)+')').join('، ')+'</div>':'')+
+        d.statements.map(s=>'<details style="border:1px solid #e5ebf2;border-radius:14px;padding:10px 14px;background:#fff"><summary style="cursor:pointer;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><span><button type="button" class="rc-link" data-rc-settlement="'+Number(s.id)+'">'+esc(s.settlement_code)+'</button>'+(s.is_correction?' <span class="badge badge-warn">تصحيح</span>':'')+' <span class="sub">'+esc(s.store_name||'')+' • '+s.totals.orders+' طلب</span></span><b style="direction:ltr">'+(s.totals.profit===null?'—':money(s.totals.profit)+' د.أ')+'</b></summary>'+
+          '<div style="margin-top:8px">'+s.orders.map(o=>'<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #eef1f4;font-size:13px'+(o.kind==='superseded'?';opacity:.55':'')+'"><div><button type="button" class="rc-link" data-rc-order="'+Number(o.order_id)+'">#'+esc(o.order_code)+'</button> • '+esc(st(o.status))+(o.from_status?' <span class="sub">(كان '+esc(st(o.from_status))+')</span>':'')+(kindLabel[o.kind]?' <span class="sub">'+kindLabel[o.kind]+'</span>':'')+'<div class="sub">خرج '+esc(o.ship_day||'—')+(o.kind==='superseded'?' • '+esc(o.note||''):' • كاش '+money(o.cash)+' • كوست '+(o.cost===null?'؟':money(o.cost))+' • أجور '+money(o.fees))+'</div></div><b style="direction:ltr;white-space:nowrap">'+(o.kind==='superseded'?'—':o.profit===null?'؟':money(o.profit))+'</b></div>').join('')+'</div></details>').join('')+
+        '</section>';
+    }catch(e){target.innerHTML='<div class="empty">'+esc(e.message||'تعذر حساب أرباح الكشوف')+'</div>'}
+  };
 
   const loadShippingCohort=async()=>{
     const target=$('#shippingCohortResult');if(!target)return;
     const date=$('#cohortDate').value;
-    const store=$('#profitStore').value||'0';
+    const store=$('#cohortStore').value||'0';
     target.textContent='جاري حساب نتائج الشحنات...';
     try{
       const d=await api('/profit-shipping-cohorts?date='+encodeURIComponent(date)+'&store_id='+encodeURIComponent(store));
@@ -3011,11 +3046,13 @@ async function dailyProfitsView(){
     const button=$('#saveCohortAds'),amount=Number($('#cohortAdSpend').value);
     if(!Number.isFinite(amount)||amount<0)return toast('أدخل مبلغ إعلانات صحيح');
     button.disabled=true;
-    try{await api('/profit-shipping-cohorts',{method:'POST',body:JSON.stringify({date:$('#cohortDate').value,store_id:Number($('#profitStore').value||0),ad_spend:amount})});await loadShippingCohort();toast('تم حفظ إعلانات اليوم')}
+    try{await api('/profit-shipping-cohorts',{method:'POST',body:JSON.stringify({date:$('#cohortDate').value,store_id:Number($('#cohortStore').value||0),ad_spend:amount})});await loadShippingCohort();toast('تم حفظ إعلانات اليوم')}
     catch(e){toast(e.message)}finally{button.disabled=false}
   };
-  $('#profitDate').addEventListener('change',()=>{$('#cohortDate').value=$('#profitDate').value;loadShippingCohort()});
-  $('#profitStore').addEventListener('change',loadShippingCohort);
+  $('#cohortStore').addEventListener('change',loadShippingCohort);
+  // upper section has its own date/store; it never reloads or changes the lower section
+  $('#profitDate').addEventListener('change',loadStatementProfit);$('#profitStore').addEventListener('change',loadStatementProfit);$('#loadProfits').addEventListener('click',loadStatementProfit);
+  loadStatementProfit();
   loadShippingCohort();
 
   const recalc=()=>{
