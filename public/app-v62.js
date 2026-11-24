@@ -1653,13 +1653,14 @@ async function ordersView(){
         <div class="filter-group wide"><label>بحث سريع</label><input id="q" class="input" placeholder="كود / هاتف / اسم / عنوان"></div>
         <div class="filter-group"><label>من كود</label><input id="fc" class="input" inputmode="numeric"></div>
         <div class="filter-group"><label>إلى كود</label><input id="tc" class="input" inputmode="numeric"></div>
-        <div class="filter-actions"><button id="searchBtn" class="btn btn-primary">بحث</button><button id="resetSearch" class="btn btn-soft">مسح الفلاتر</button></div>
+        <div class="filter-actions"><button type="button" id="searchBtn" class="btn btn-primary">بحث</button><button id="resetSearch" class="btn btn-soft">مسح الفلاتر</button></div>
       </div>
       <div id="ordersTable"></div>
     </div>`;
   state.ordersOffset=0;
   $('#datePreset').onchange=()=>setDatePreset($('#datePreset').value,$('#fdSearch'),$('#tdSearch'));
-  $('#searchBtn').onclick=()=>{state.ordersOffset=0;loadOrders()};
+  $('#searchBtn').onclick=e=>{e.preventDefault();state.ordersOffset=0;loadOrders()};
+  $('#q').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();state.ordersOffset=0;loadOrders()}};
   $('#resetSearch').onclick=()=>{
     ['os','statusFilter','ps','q','fc','tc','fdSearch','tdSearch'].forEach(id=>{const e=$('#'+id);if(e)e.value=''});
     $('#datePreset').value='all';
@@ -1669,9 +1670,13 @@ async function ordersView(){
   await loadOrders();
 }
 async function loadOrders(){
+  const target=$('#ordersTable');if(!target)return;
+  const button=$('#searchBtn');if(button){button.disabled=true;button.textContent='جاري البحث…'}
+  target.textContent='جاري تحميل الطلبات…';
+  try{
   const p=new URLSearchParams();
   const pageSize=200;
-  if($('#q')?.value)p.set('q',$('#q').value);
+  if($('#q')?.value.trim())p.set('q',$('#q').value.trim());
   if($('#fc')?.value)p.set('from_code',$('#fc').value);
   if($('#tc')?.value)p.set('to_code',$('#tc').value);
   if($('#ps')?.value!=='')p.set('printed',$('#ps').value);
@@ -1682,13 +1687,17 @@ async function loadOrders(){
   p.set('limit',String(pageSize));
   p.set('offset',String(Math.max(0,Number(state.ordersOffset||0))));
   const d=await api('/orders?'+p.toString());
-  state.orders=d.orders;
+  if($('#ordersTable')!==target)return;
+  state.orders=Array.isArray(d.orders)?d.orders:[];
   renderOrdersTable('#ordersTable',state.orders,false);
   const table=$('#ordersTable');
+  if(!state.orders.length)table.textContent='لا توجد طلبات مطابقة للبحث.';
   const page=Math.floor(Number(d.offset||0)/pageSize)+1;
   table.insertAdjacentHTML('beforeend',`<div class="actions orders-pagination" style="justify-content:center;margin-top:16px"><button id="ordersPrevPage" class="btn btn-soft" ${Number(d.offset||0)<=0?'disabled':''}>السابق</button><span class="pill">صفحة ${page}</span><button id="ordersNextPage" class="btn btn-soft" ${d.has_more?'':'disabled'}>التالي</button></div>`);
   $('#ordersPrevPage').onclick=()=>{state.ordersOffset=Math.max(0,Number(state.ordersOffset||0)-pageSize);loadOrders()};
   $('#ordersNextPage').onclick=()=>{state.ordersOffset=Number(state.ordersOffset||0)+pageSize;loadOrders()};
+  }catch(e){if($('#ordersTable')===target)target.textContent='تعذر البحث: '+(e?.message||'خطأ غير معروف');}
+  finally{if(button){button.disabled=false;button.textContent='بحث'}}
 }
 const DELIVERY_STATUS_LABELS={
   pending:'قيد التوصيل',
