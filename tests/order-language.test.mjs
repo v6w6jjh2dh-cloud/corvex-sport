@@ -117,3 +117,10 @@ test('whole-order context: this order\'s name, area, address and phone are perso
  const r=analyzeOrder(o,CAT);assert.deepEqual(r.candidates.map(c=>c.phrase),['بيسك']);assert.deepEqual(r.unclear,[]);
  assert.deepEqual(analyzeOrder({order_notes:'ام تركي\nبيسك 2 قطع'},CAT).candidates.map(c=>c.phrase),['بيسك']);
 });
+
+ test('form headings and external order references are not product candidates',()=>{
+ for(const label of ['القطعة الأولى','اختر العرض المطلوب','litesale ord e','رقم ord d e','LiteSale ORD-123ABC']){
+ const r=A(label+'\n2 أسود');assert.deepEqual(r.candidates,[],label);assert.deepEqual(r.unclear,[],label);
+ }
+ assert.deepEqual(A('القطعة الأولى\nشنطة جلد\n2 أسود').candidates.map(c=>c.phrase),['شنطه جلد']);
+ });
