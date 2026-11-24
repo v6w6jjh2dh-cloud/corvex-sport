@@ -1,7 +1,7 @@
 (()=>{
  let products=[
   {id:'prada_tee',name:'تيشيرت برادا',cost:2.4,aliases:[/تيش(?:رت|يرت)\s*برادا/i,/بلوز[هة]?\s*برادا/i,/(?:^|\s)برادا(?:\s|$)/i],offers:{},deliveryIncluded:false},
-  {id:'fur_jacket',name:'جاكيت فرو',cost:4,aliases:[/جاكيت\s*فرو/i,/جكيت\s*فرو/i,/فرو\s*جاكيت/i],offers:{},deliveryIncluded:false},
+  {id:'fur_jacket',name:'جاكيت فرو',cost:4,aliases:[/جاكيت\s*(?:ال)?فرو/i,/جكيت\s*(?:ال)?فرو/i,/فرو\s*جاكيت/i,/(?<![؀-ۿ])(?:(?:جاكيت|جكيت|جاكت)\s*(?:ال)?فرو(?:ه|ة)?|فرو\s*(?:جاكيت|جكيت)|(?<!(?:مبطن|مبطنه|مبطّن|بطانه|بطانة|بطانته|ياقه|ياقة|كبوس|كابيشن|قبعه|قبعة|مع|فيه|فيها|داخل|داخله|داخلي)\s*)(?:ال)?فرو(?:ه|ة)?)(?![؀-ۿ])/i],offers:{},deliveryIncluded:false},
   {id:'trend_jacket',name:'جاكيت ترند',cost:4,aliases:[/جاكيت\s*ترند/i,/جكيت\s*ترند/i,/ترند\s*جاكيت/i],offers:{},deliveryIncluded:false},
   {id:'plain_kom',name:'بلوزة سادة كوم',cost:3.5,aliases:[/بلوز[هة]?\s*ساد[هة]\s*كوم/i,/ساد[هة]\s*كوم/i],offers:{},deliveryIncluded:false},
   {id:'n_tee',name:'تيشيرت N',cost:3,aliases:[/(?:تيشرت|تيشيرت|بلوز[هة]?)\s*(?:حرف\s*)?n(?=\s|\d|$)/i,/(?:^|\s)حرف\s*n(?=\s|\d|$)/i],offers:{},deliveryIncluded:false},
@@ -163,7 +163,7 @@
 
  let remoteLoaded=false,remotePromise=null;
  const engine={
-  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-08-31-v13',
+  get products(){return products},get ignoredPhrases(){return [...ignoredPhrases]},normalize,matches,findAll,findOne,findMatches,quantityFor,itemCost,calculateCost,unknownCandidates,version:'2026-11-24-fur-v14',
   async loadRemote(force=false){
    if(remoteLoaded&&!force)return products;if(remotePromise)return remotePromise;
    remotePromise=(async()=>{try{if(typeof api!=='function')return products;const data=await api('/profit-models');ignoredPhrases=(data.ignored_phrases||[]).map(normalize).filter(Boolean);if(Array.isArray(data.models)&&data.models.length){const baseById=new Map(builtInProducts.map(product=>[product.id,product])),remoteIds=new Set(data.models.map(model=>model.key||String(model.id)));products=data.models.filter(model=>model.active!==false).map(model=>{const id=model.key||String(model.id),base=baseById.get(id),remoteAliases=Array.isArray(model.aliases)?model.aliases:[model.name];return{id,databaseId:Number(model.id),name:model.name,cost:Number(model.cost||0),aliases:cleanAliases(id,[...(base?.aliases||[]),...remoteAliases]),offers:Object.keys(model.offers||{}).length?model.offers:(base?.offers||{}),deliveryIncluded:model.deliveryIncluded==null?Boolean(base?.deliveryIncluded):Boolean(model.deliveryIncluded)}});for(const base of builtInProducts)if(!remoteIds.has(base.id))products.push({...base,aliases:[...base.aliases],offers:{...(base.offers||{})}});engine.version=`db:${data.version||Date.now()}`;remoteLoaded=true}return products}catch{return products}finally{remotePromise=null}})();

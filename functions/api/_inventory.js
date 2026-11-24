@@ -16,6 +16,13 @@ const OPERATION_CONTEXT=/(?:^|\s)و?(?:استرجاع|ارجاع|مرتجع|اس
 const QUANTITY_LABEL=/(?:عدد|العدد|كميه|الكميه|تفصيل)\s*[:=\-]?\s*(\d{1,3})(?=\s|$)/i;
 const QUANTITY_UNIT=/(?:^|\s)(\d{1,3})\s*(?:قطعه|قطع|حبه|حبات|لون|الوان)(?=\s|$)/i;
 const COLOR_QUANTITY=/(?:^|\s)(\d{1,3})\s*(?:اسود|ابيض|بني|زيتي|سكني|رمادي|سماوي|ازرق|كحلي|برتقالي|احمر|اخضر|بيج|رصاصي|نهدي|زهري|وردي|موف|بنفسجي)(?=\s|$)/gi;
+// Merchant-approved spellings of the single model «جاكيت فرو» (2026-11-24). One list for
+// inventory, cost, profit, returns and model performance (public/app-v73 mirrors it).
+export const FUR_ALIASES=['جاكيت فرو','جكيت فرو','جاكيت الفرو','جكيت الفرو','جاكت فرو','فرو جاكيت','جاكيت فروه','فرو','الفرو'];
+const BARE_FUR=new Set(['فرو','الفرو']);
+// "مبطن فرو" / "بطانة فرو" / "ياقة فرو" describe another garment's lining, not a fur jacket.
+const FUR_LINING_BEFORE=/(?:مبطن|مبطنه|بطانه|بطانته|ياقه|كبوس|كابيشن|قبعه|مع|فيه|فيها|داخل|داخله|داخلي)\s*$/;
+const isFurModel=row=>String(row.model_key||'')==='fur_jacket'||/^(?:جاكيت|جكيت|جاكت)\s*(?:ال)?فرو$/.test(normalize(row.name));
 const WORD_NUMBERS={واحد:1,واحده:1,اثنين:2,اتنين:2,ثنتين:2,ثلاث:3,ثلاثه:3,اربع:4,اربعه:4,خمس:5,خمسه:5,ست:6,سته:6,سبع:7,سبعه:7,ثمان:8,ثمانيه:8,تسع:9,تسعه:9,عشر:10,عشره:10};
 
 let schemaPromise=null;
@@ -74,6 +81,7 @@ function parseAliases(row){
  // "ايبوكسي" and "سي ايبوكسي" are the same merchandise model.
  // Resolve both spellings to the existing model id and stored unit cost.
  if(names.some(name=>/^(?:سي\s+)?(?:ايبوكسي|ايوبكسي)$/.test(normalize(name))))names.push('ايبوكسي','سي ايبوكسي','ايوبكسي');
+ if(isFurModel(row))names.push(...FUR_ALIASES);
  return [...new Set(names.map(normalize).filter(x=>x.length>1))].sort((a,b)=>b.length-a.length);
 }
 
@@ -91,7 +99,11 @@ function matchesInLine(models,line){
  const value=normalize(line),candidates=[];
  for(const model of models){
   let best=null;
-  for(const alias of model.aliases){const index=boundaryMatch(value,alias);if(index!==-1&&(!best||alias.length>best.length))best={model,index,length:alias.length}}
+  for(const alias of model.aliases){
+   let index=boundaryMatch(value,alias);
+   if(BARE_FUR.has(alias))while(index!==-1&&FUR_LINING_BEFORE.test(value.slice(0,index)))index=boundaryMatch(value,alias,index+1);
+   if(index!==-1&&(!best||alias.length>best.length))best={model,index,length:alias.length}
+  }
   if(best)candidates.push(best);
  }
  candidates.sort((a,b)=>b.length-a.length||a.index-b.index);

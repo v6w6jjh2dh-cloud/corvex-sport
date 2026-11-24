@@ -2,7 +2,7 @@
 // Used by /api/delivery-reconcile/preview, /api/delivery-reconcile/commit and
 // /api/partial-delivery-items so the browser and the server always agree on
 // which order a statement line belongs to and how partial-delivery cost is built.
-import {classifyInventoryItems,loadInventoryModels} from './_inventory.js';
+import {classifyInventoryItems,loadInventoryModels,FUR_ALIASES} from './_inventory.js';
 import {runSchemaMigrationOnce} from './_schema-migrations.js';
 
 export const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
@@ -90,7 +90,7 @@ export function approvedCost(model){
  return hit?hit.cost:null;
 }
 export const FILLER_ALIASES=['مالئ الفراغات','مالئ فراغات','ايبوكسي','إيبوكسي','أيبوكسي','سي ايبوكسي','سي إيبوكسي','سى ايبوكسي','ايوبكسي','أيوبكسي','إيوبكسي','سي ايوبكسي','C epoxy','epoxy'];
-const FUR_ALIASES=['جاكيت فرو','جكيت فرو','جاكيت الفرو','جاكيت فروه','جاكيت فروة','فرو جاكيت'];
+
 
 // One-time catalogue alignment: approved costs, filler spellings, fur jacket.
 // Orders already settled keep their stored cost_of_goods; nothing historical is rewritten.

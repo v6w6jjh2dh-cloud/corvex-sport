@@ -5,7 +5,7 @@
 //  - partial: only the pieces the customer received (partial_received_items)
 //  - profit = actual cash from the delivery company − cost (the delivery fee is
 //    already deducted inside the cash, so it is never subtracted a second time)
-import {classifyInventoryItems,loadInventoryModels} from './_inventory.js';
+import {classifyInventoryItems,loadInventoryModels,FUR_ALIASES} from './_inventory.js';
 import {loadCostedModels,approvedCost,canonicalModelName,normalizeArabic,STATI_ALIASES,FILLER_ALIASES,round2} from './_partial-delivery.js';
 
 const json=(x,status=200)=>new Response(JSON.stringify(x),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
@@ -22,7 +22,7 @@ const listCost=name=>MODEL_COSTS.find(m=>key(m.name)===key(name))?.cost??null;
 const unitCostFor=(name,catalogueCost)=>approvedCost({name})??listCost(name)??(Number(catalogueCost)>0?Number(catalogueCost):null);
 
 const FALLBACK_MODELS=[
- {id:-1,name:'جاكيت فرو',aliases:['جاكيت فرو','جكيت فرو','جاكيت الفرو','جاكيت فروه']},
+ {id:-1,name:'جاكيت فرو',aliases:[...FUR_ALIASES]},
  {id:-2,name:'جاكيت جوخ كاجوال',aliases:['جاكيت جوخ كاجوال','جكيت جوخ كاجوال','جاكيت جوخ كاجول','جوخ كاجوال','جاكيت الجوخ الكاجوال']},
  {id:-3,name:'جاكيت جوخ سكايفو',aliases:['جاكيت جوخ سكايفو','جكيت جوخ سكايفو','جاكيت جوخ سكارفو','جاكيت الجوخ سكارفو','جوخ سكايفو','جوخ سكارفو','جاكيت سكايفو','جاكيت سكارفو','جاكيت نسائي','جكيت نسائي','جاكيت نساءي','جكيت نساءي','جوخ شتائي',...STATI_ALIASES]},
  {id:-4,name:'مالئ الفراغات',aliases:['مالئ الفراغات','مالى الفراغات','ملي الفراغات','مالئ فراغات',...FILLER_ALIASES]},
