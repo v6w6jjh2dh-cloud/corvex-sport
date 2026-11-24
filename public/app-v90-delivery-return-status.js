@@ -19,7 +19,12 @@
    const encoded=String(sel.dataset.rawStatus||''),rawText=encoded?decodeURIComponent(encoded):String(row?.raw_status||'');
    const raw=normalizeArabic(rawText).toLowerCase();
    if(!raw.includes('مرتجع'))return;
-   const target=net<-.001||amount<.001?'refused_no_fee':Math.abs(net)<.001||amount<=fee+.001?'refused_fee_paid':'partial';
+   // Same rule as the statement reader (deliveryStatusFromStatement in app-v62): a 2 JOD refusal
+   // charge with a real fee of 1.75 (net +0.25) is a paid refusal, not a partial delivery.
+   // Using a different rule here made this observer and app-v93 flip the status back and forth.
+   const hasNet=Boolean(row?.has_net)||document.querySelector(`.delivery-net-choice[data-i="${i}"]`)?.value!=='';
+   const target=typeof deliveryStatusFromStatement==='function'?deliveryStatusFromStatement(rawText,'partial',amount,fee,net,hasNet):(net<-.001||amount<.001?'refused_no_fee':Math.abs(net)<.001||amount<=fee+.001?'refused_fee_paid':'partial');
+   if(!target)return;
    if(sel.value!==target){sel.value=target;sel.dispatchEvent(new Event('change',{bubbles:true}));}
   });
  }

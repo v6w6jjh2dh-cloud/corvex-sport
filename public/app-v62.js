@@ -2111,7 +2111,7 @@ function deliveryRowsFromPdfPages(pages){
       else if(fee>0&&price>0&&price<=DELIVERY_REFUSAL_CHARGE+.001&&cash>=-.001&&Math.abs(cash-(price-fee))<.011)status='refused_fee_paid';
       else if(price>=0)status='delivered';
     }
-    return {__row:i+1,'رقم الهاتف':r.phone,'تاريخ الشحنة':r.shipment_date,'الحالة':statusText,'السعر':price,'أجور التوصيل':fee,'الصافي':cash,'ملاحظة':r.note,__mapped_status:status,__cash:cash,__page:r.page};
+    return {__row:i+1,'رقم الهاتف':r.phone,'تاريخ الشحنة':r.shipment_date,'الحالة':statusText,'السعر':price,'أجور التوصيل':fee,'الصافي':cash,'ملاحظة':r.note,__display_code:r.code||'',__mapped_status:status,__cash:cash,__page:r.page};
   });
   if(!rows.length)throw new Error('لم أجد أرقام هواتف قابلة للقراءة داخل ملف PDF');
   return {headers:['رقم الهاتف','تاريخ الشحنة','الحالة','السعر','أجور التوصيل','الصافي','ملاحظة'],rows,
@@ -2234,6 +2234,7 @@ async function deliveryReconcileView(){
   const stores=await getActiveStores();
   let parsed={headers:[],rows:[]};
   let previewRows=[];
+  let deliveryFilter='all';const drOpenWhy=new Set();
 
   c.innerHTML=`
     <div class="page-title">
@@ -2385,7 +2386,8 @@ async function deliveryReconcileView(){
         net_amount:netAmount,
         has_net:hasNet,
         note:noteCol?r[noteCol]||'':'',
-        shipment_code:codeCol?String(r[codeCol]||''):''
+        shipment_code:codeCol?String(r[codeCol]||''):'',
+        display_code:r.__display_code||(codeCol?String(r[codeCol]||''):'')
       };
     });
 
@@ -2395,7 +2397,7 @@ async function deliveryReconcileView(){
         body:JSON.stringify({store_id:storeId,rows})
       });
 
-      previewRows=(d.rows||[]).map((x,i)=>({...x,raw_status:rows[i]?.raw_status||'',raw_date:rows[i]?.shipment_date||'',status:rows[i]?.status||x.status||'',delivery_fee:Number(x.delivery_fee??rows[i]?.delivery_fee??0),net_amount:x.has_net?Number(x.net_amount??0):Number(x.amount||0)-Number(x.delivery_fee||0),has_net:Boolean(x.has_net),
+      previewRows=(d.rows||[]).map((x,i)=>({...x,display_code:rows[i]?.display_code||x.shipment_code||'',raw_status:rows[i]?.raw_status||'',raw_date:rows[i]?.shipment_date||'',status:rows[i]?.status||x.status||'',delivery_fee:Number(x.delivery_fee??rows[i]?.delivery_fee??0),net_amount:x.has_net?Number(x.net_amount??0):Number(x.amount||0)-Number(x.delivery_fee||0),has_net:Boolean(x.has_net),
         selected_order_id:['matched','matched_partial'].includes(x.match_type)?Number(x.order_id||0):0,
         auto:['matched','matched_partial'].includes(x.match_type),items:null,items_order_id:0,piece:{},confirm_higher:false,confirm_outside:false,confirm_discount:false}));
       const settlementRank=row=>{
@@ -2469,7 +2471,10 @@ async function deliveryReconcileView(){
   function renderReconcileStatus(i){
     const r=previewRows[i],cell=document.querySelector(`.reconcile-state[data-i="${i}"]`);if(!cell)return;
     const c=reconcileCheck(r);
-    cell.innerHTML=c.ok?'<span class="match-badge match-ok">✓ جاهز للاعتماد</span>':`<span class="match-badge ${c.skip?'match-ok':'match-bad'}">${c.skip?'لن يُعاد احتسابه':'⛔ موقوف'}</span><div class="sub reconcile-reason">${esc(c.reason||'')}</div>`;
+    cell.innerHTML=c.ok?'<span class="dr-state ok">✓ جاهز للاعتماد</span>':c.skip?'<span class="dr-state muted">لن يُعاد احتسابه</span>':`<span class="dr-state hold">موقوف</span>`;
+    cell.title=c.ok?'':String(c.reason||'');
+    const card=cell.closest('.dr-card');if(card){card.dataset.ready=c.ok?'1':'0'}
+    drRefreshCounts();
     const bar=$('#reconcileCounters');
     if(bar){const ready=previewRows.filter(x=>reconcileCheck(x).ok).length,held=previewRows.filter(x=>{const k=reconcileCheck(x);return !k.ok&&!k.skip}).length;bar.innerHTML=`جاهز للاعتماد: <b>${ready}</b> • موقوف بانتظار القرار: <b>${held}</b>`}
   }
@@ -2478,7 +2483,10 @@ async function deliveryReconcileView(){
     const o=reconcileOrder(r),showChooser=!r.auto&&(r.candidates||[]).length&&r.match_type!=='already_settled';
     const tag=(t,cls='')=>`<span class="reconcile-tag ${cls}">${t}</span>`;
     let html='';
-    if(r.reason&&!r.auto)html+=`<div class="reconcile-why">${esc(r.reason)}</div>`;
+    if(r.reason&&!r.auto){
+      const full=String(r.reason),short=drShortReason(full);
+      html+=short===full?`<div class="reconcile-why">${esc(full)}</div>`:`<details class="reconcile-why dr-why" data-i="${i}" ${drOpenWhy.has(i)?'open':''}><summary>${esc(short)}</summary><div>${esc(full)}</div></details>`;
+    }
     if(r.match_type==='already_settled')html+=(r.candidates||[]).map(c=>`<div class="reconcile-prev">إثبات: ${esc(r.settled_evidence||'—')} • الطلب <button type="button" class="rc-link" data-rc-order="${Number(c.id)}">#${esc(c.order_code)}</button> • الكشف السابق ${c.settlement_id?`<button type="button" class="rc-link" data-rc-settlement="${Number(c.settlement_id)}">${esc(c.settlement_code||'كشف سابق')}</button>`:esc(c.settlement_code||'كشف سابق')} • ${esc(c.settlement_date||'—')} • ${c.settlement_imported_amount==null?'—':money(c.settlement_imported_amount)+' د.أ'} • ${esc(c.settlement_imported_status||c.delivery_status||'—')}</div>`).join('');
     if(r.auto&&r.match_evidence)html+=`<div class="sub">طريقة المطابقة: ${esc(r.match_evidence)}</div>`;
     if(showChooser){
@@ -2499,10 +2507,10 @@ async function deliveryReconcileView(){
         const p=reconcilePieces(r),fee=Number(r.delivery_fee||0),profit=Number(r.amount||0)-p.cost-fee;
         html+=`<div class="reconcile-items"><b>موديلات الطلب #${esc(o.order_code)} — حدّد المستلم والمرتجع:</b>
           <table class="table reconcile-items-table"><thead><tr><th>الموديل</th><th>المشحون</th><th>استلم العميل</th><th>مرتجع</th><th>كوست القطعة</th><th>كوست المستلم</th></tr></thead><tbody>
-          ${p.items.map((it,j)=>`<tr><td>${esc(it.model_name)}</td><td>${it.quantity}</td>
-            <td><input class="input reconcile-qty" data-i="${i}" data-j="${j}" data-kind="received" type="number" inputmode="numeric" min="0" max="${it.quantity}" step="1" value="${it.received}"></td>
-            <td><input class="input reconcile-qty" data-i="${i}" data-j="${j}" data-kind="returned" type="number" inputmode="numeric" min="0" max="${it.quantity}" step="1" value="${it.returned}"></td>
-            <td>${money(it.unit_cost)}</td><td class="reconcile-line-cost" data-i="${i}" data-j="${j}">${money(it.cost)}</td></tr>`).join('')}
+          ${p.items.map((it,j)=>`<tr><td data-label="الموديل">${esc(it.model_name)}</td><td data-label="المشحون">${it.quantity}</td>
+            <td data-label="استلم العميل"><input class="input reconcile-qty" data-i="${i}" data-j="${j}" data-kind="received" type="number" inputmode="numeric" min="0" max="${it.quantity}" step="1" value="${it.received}"></td>
+            <td data-label="مرتجع"><input class="input reconcile-qty" data-i="${i}" data-j="${j}" data-kind="returned" type="number" inputmode="numeric" min="0" max="${it.quantity}" step="1" value="${it.returned}"></td>
+            <td data-label="كوست القطعة">${money(it.unit_cost)}</td><td data-label="كوست المستلم" class="reconcile-line-cost" data-i="${i}" data-j="${j}">${money(it.cost)}</td></tr>`).join('')}
           </tbody></table>
           <div class="reconcile-totals" data-i="${i}">القطع المستلمة: <b>${p.received}</b> • المرتجعة: <b>${p.returned}</b> • كوست المستلم: <b>${money(p.cost)}</b> • الكاش الوارد من الشركة: <b>${money(r.net_amount)}</b> • الربح: <b>${money(profit)}</b></div>
           ${r.status==='delivered'&&p.returned===0?`<label class="reconcile-confirm"><input type="checkbox" class="reconcile-confirm-discount" data-i="${i}" ${r.confirm_discount?'checked':''}> كل القطع سُلّمت والمبلغ الأقل خصم متفق عليه</label>`:''}
@@ -2510,7 +2518,8 @@ async function deliveryReconcileView(){
       }
     }
     panel.innerHTML=html;
-    panel.closest('tr').style.display=html?'':'none';
+    panel.style.display=html?'':'none';
+    drRenderFacts(i);
     renderReconcileStatus(i);
   }
   function refreshReconcileTotals(i){
@@ -2522,50 +2531,174 @@ async function deliveryReconcileView(){
     renderReconcileStatus(i);
   }
 
+  // ---------- statement view: one card per shipment (mobile), clean grid table (desktop) ----------
+  const DR_LABEL={matched:['مطابق','ok'],matched_partial:['مطابق — قيمة مختلفة','ok'],duplicate:['أكثر من طلب محتمل','warn'],review_amount:['يحتاج اختيار','warn'],review_amount_higher:['قيمة الكشف أكبر','warn'],review_date:['تاريخ شحنة مختلف','warn'],review_code:['رقم شحنة مختلف','warn'],review_settled:['تحتاج مراجعة','warn'],already_settled:['مسوّى سابقًا','muted'],other_store:['موجود بمتجر آخر','warn'],unmatched:['غير موجود','bad']};
+  const drGroup=r=>['matched','matched_partial'].includes(r.match_type)?'matched':r.match_type==='already_settled'?'settled':r.match_type==='unmatched'?'unmatched':'review';
+  function drShortReason(text){
+    const t=String(text||'').trim();if(t.length<=70)return t;
+    const body=t.replace(/^تحتاج مراجعة\s*:\s*/,'');
+    for(const sep of [' — ','؛','. ',' (']){const cut=body.split(sep)[0].trim();if(cut.length>=12&&cut.length<=90)return cut+'…'}
+    return body.slice(0,80).replace(/\s+\S*$/,'')+'…';
+  }
+  function drRenderFacts(i){
+    const r=previewRows[i],box=document.querySelector(`.dr-facts[data-i="${i}"]`);if(!box)return;
+    const o=reconcileOrder(r)||(r.match_type==='already_settled'?(r.candidates||[])[0]:null);
+    const link=o?`<button type="button" class="rc-link" data-rc-order="${Number(o.id)}">#${esc(o.order_code)}</button>`:'<span class="dr-dim">لم يُحدد</span>';
+    const prev=r.match_type==='already_settled'&&o?(o.settlement_id?`<button type="button" class="rc-link" data-rc-settlement="${Number(o.settlement_id)}">${esc(o.settlement_code||'كشف سابق')}</button>`:esc(o.settlement_code||'كشف سابق')):'';
+    const f=(k,v,cls='')=>`<div class="dr-f ${cls}"><span>${k}</span><b>${v}</b></div>`;
+    box.innerHTML=f('الطلب',link,'dr-f-order')+(prev?f('الكشف السابق',prev):'')+f('كود الشحنة',esc(r.display_code||r.shipment_code||'—'))+f('الهاتف',`<bdi>${esc(r.phone||'—')}</bdi>`)+f('العميل',esc(o?.recipient_name||'—'))+f('تاريخ الطباعة',esc(o?.first_print_date||'—'))+f('تاريخ الشحنة',esc(r.raw_date||r.shipment_date||'—'))+f('قيمة الطلب',o?money(o.amount)+' د.أ':'—')+f('حالة الكشف',esc(r.raw_status||'—'));
+  }
+  function drRefreshCounts(){
+    const bar=document.querySelector('.dr-filters');if(!bar)return;
+    const n={all:previewRows.length,matched:0,review:0,settled:0,unmatched:0};
+    previewRows.forEach(r=>n[drGroup(r)]++);
+    bar.querySelectorAll('[data-filter]').forEach(b=>{const c=b.querySelector('i');if(c)c.textContent=n[b.dataset.filter]||0});
+  }
+  function drApplyFilter(){
+    const list=document.querySelector('.dr-list');if(!list)return;
+    list.dataset.filter=deliveryFilter;
+    document.querySelectorAll('.dr-filters [data-filter]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.filter===deliveryFilter?'true':'false'));
+    const shown=[...list.querySelectorAll('.dr-card')].filter(c=>deliveryFilter==='all'||c.dataset.group===deliveryFilter).length;
+    const empty=document.querySelector('.dr-empty');if(empty)empty.hidden=shown>0;
+  }
+  function drInjectStyles(){
+    if(document.getElementById('drStyles'))return;
+    const st=document.createElement('style');st.id='drStyles';
+    st.textContent=`
+#deliveryPreview{min-width:0;max-width:100%}
+.dr-wrap{--navy:#1f3a5f;--ink:#24364d;--mut:#6b7889;--line:#e3e8ef;--soft:#f4f6f9;min-width:0;max-width:100%;color:var(--ink)}
+.dr-wrap *{box-sizing:border-box}
+.dr-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:14px 0 10px}
+.dr-summary>div{background:var(--soft);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.dr-summary span{font-size:12px;color:var(--mut)}.dr-summary b{font-size:20px;color:var(--navy)}
+.dr-summary .ok b{color:#2f7d5b}.dr-summary .warn b{color:#b05a00}.dr-summary .muted b{color:#6b7889}.dr-summary .bad b{color:#b42318}
+.dr-filters{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}
+.dr-filters button{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:999px;padding:7px 12px;font:inherit;font-size:13px;display:inline-flex;gap:6px;align-items:center;cursor:pointer;min-height:36px}
+.dr-filters button i{font-style:normal;font-size:12px;color:var(--mut);background:var(--soft);border-radius:999px;padding:0 7px;min-width:22px;text-align:center}
+.dr-filters button[aria-pressed="true"]{background:var(--navy);border-color:var(--navy);color:#fff}.dr-filters button[aria-pressed="true"] i{background:rgba(255,255,255,.18);color:#fff}
+.dr-rules{font-size:12px;color:var(--mut);margin:0 0 10px}.dr-rules summary{cursor:pointer;color:var(--navy);font-weight:600}.dr-rules div{margin-top:4px;line-height:1.7}
+.dr-head{display:none}
+.dr-list{display:grid;gap:10px;min-width:0}
+.dr-list[data-filter="matched"] .dr-card:not([data-group="matched"]),.dr-list[data-filter="review"] .dr-card:not([data-group="review"]),.dr-list[data-filter="settled"] .dr-card:not([data-group="settled"]),.dr-list[data-filter="unmatched"] .dr-card:not([data-group="unmatched"]){display:none}
+.dr-empty{padding:24px;text-align:center;color:var(--mut);background:var(--soft);border-radius:14px}
+.dr-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:12px 14px;min-width:0;max-width:100%;box-shadow:0 1px 2px rgba(16,42,67,.04)}
+.dr-card[data-group="settled"]{background:#fafbfc}
+.dr-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.dr-idx{font-size:12px;color:var(--mut);background:var(--soft);border-radius:8px;padding:2px 8px}
+.dr-badge{font-size:12px;font-weight:700;border-radius:999px;padding:3px 10px}
+.dr-badge.ok{background:#eaf5ef;color:#2f7d5b}.dr-badge.warn{background:#ffedd9;color:#9a4d00}.dr-badge.muted{background:#eef0f3;color:#5b6878}.dr-badge.bad{background:#fdecec;color:#b42318}
+.reconcile-state{margin-inline-start:auto}
+.dr-state{font-size:12px;font-weight:600;border-radius:999px;padding:3px 10px;white-space:nowrap}
+.dr-state.ok{color:#2f7d5b;background:#eaf5ef}.dr-state.hold{color:#5b6878;background:var(--soft)}.dr-state.muted{color:#5b6878;background:#eef0f3}
+.dr-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px;margin-bottom:10px}
+.dr-f{display:flex;flex-direction:column;min-width:0}.dr-f span{font-size:11px;color:var(--mut)}.dr-f b{font-size:13px;font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+.dr-f-order b{font-size:15px}.dr-dim{color:var(--mut);font-weight:400}
+.dr-edit{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;background:var(--soft);border-radius:12px;padding:10px}
+.dr-field{display:flex;flex-direction:column;gap:3px;min-width:0}.dr-field span{font-size:11px;color:var(--mut)}
+.dr-field-status,.dr-field-note{grid-column:1/-1}
+.dr-wrap .dr-field .input,.dr-wrap .dr-field .select{width:100%;min-width:0!important;max-width:100%;font-size:16px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:#fff;height:auto}
+.dr-wrap .reconcile-panel{margin-top:10px;min-width:0;max-width:100%;overflow-wrap:anywhere}
+.dr-wrap .reconcile-panel:empty{display:none}
+.dr-wrap .rc-link{color:var(--navy)}
+.dr-bar.delivery-commit-bar{position:fixed;bottom:calc(8px + env(safe-area-inset-bottom));left:8px;right:8px;z-index:40;margin:0;padding:10px 12px;display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.97);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);box-shadow:0 6px 20px rgba(16,42,67,.10)}
+.dr-bar-text{display:flex;flex-direction:column;gap:2px;min-width:0}.dr-bar-text b{font-size:13px;font-weight:600;color:var(--navy)}.dr-bar-text small{font-size:11px;color:var(--mut);line-height:1.5}
+.dr-bar .btn{flex:none;border-radius:12px;background:var(--navy)!important;color:#fff!important;border:0;padding:11px 16px;font-weight:700;white-space:nowrap}
+body.dr-typing .dr-bar.delivery-commit-bar{display:none}
+@media(max-width:899px){
+  .dr-summary{display:none}
+  .dr-bar-note{display:none}
+  .reconcile-items-table,.reconcile-items-table tbody,.reconcile-items-table tr,.reconcile-items-table td{display:block;width:100%}
+  .reconcile-items-table thead{display:none}
+  .reconcile-items-table tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin-bottom:6px}
+  .reconcile-items-table td{border:0!important;padding:0!important;font-size:13px}
+  .reconcile-items-table td::before{content:attr(data-label);display:block;font-size:11px;color:var(--mut)}
+  .reconcile-items-table td:first-child{grid-column:1/-1;font-weight:700}
+  .reconcile-items-table input{max-width:100%!important;width:100%;font-size:16px}
+}
+@media(max-width:420px){.dr-bar.delivery-commit-bar{flex-direction:column;align-items:stretch;gap:8px}.dr-bar .btn{width:100%}}
+@media(min-width:900px){
+  .dr-head{display:grid;grid-template-columns:150px minmax(0,1.4fr) minmax(0,1fr);gap:16px;padding:8px 14px;font-size:12px;color:var(--mut);background:var(--soft);border-radius:12px 12px 0 0;border:1px solid var(--line);border-bottom:0}
+  .dr-list{gap:0;border:1px solid var(--line);border-radius:0 0 12px 12px;overflow:hidden}
+  .dr-card{display:grid;grid-template-columns:150px minmax(0,1.4fr) minmax(0,1fr);gap:16px;border:0;border-bottom:1px solid var(--line);border-radius:0;box-shadow:none;padding:12px 14px}
+  .dr-card:last-of-type{border-bottom:0}
+  .dr-top{flex-direction:column;align-items:flex-start;margin:0}
+  .reconcile-state{margin:0}
+  .dr-facts{grid-template-columns:repeat(3,minmax(0,1fr));margin:0;align-content:start;gap:8px 14px}
+  .dr-edit{grid-template-columns:repeat(3,minmax(0,1fr));align-self:start}
+  .dr-field .input,.dr-field .select{font-size:14px!important}
+  .dr-wrap .reconcile-panel{grid-column:2/-1;margin:0}
+  .reconcile-items-table{min-width:0!important}
+}`;
+    document.head.appendChild(st);
+  }
+  // The summary/commit bar is fixed to the bottom of the screen (sticky does not work inside the
+  // app's overflow-hidden content area). It is aligned to the statement column and the list gets
+  // bottom padding of the bar's height, so it never covers the last shipment.
+  function drPlaceBar(){
+    const bar=document.querySelector('.dr-bar'),wrap=document.querySelector('.dr-wrap'),host=$('#deliveryPreview');
+    if(!bar||!wrap||!host||!document.body.contains(bar))return;
+    const r=host.getBoundingClientRect(),mobile=window.innerWidth<900;
+    bar.style.left=(mobile?8:Math.max(8,r.left))+'px';
+    bar.style.right=(mobile?8:Math.max(8,window.innerWidth-r.right))+'px';
+    wrap.style.paddingBottom=(bar.offsetHeight+20)+'px';
+  }
+  if(!window.__drBarBound){
+    window.__drBarBound=true;
+    window.addEventListener('resize',()=>drPlaceBar(),{passive:true});
+    window.visualViewport?.addEventListener('resize',()=>drPlaceBar());
+    // Hide the bar while typing on a phone so it never sits over the field or the keyboard.
+    document.addEventListener('focusin',e=>{if(window.innerWidth<900&&e.target.closest?.('.dr-card')&&e.target.matches?.('input:not([type=radio]):not([type=checkbox]),textarea'))document.body.classList.add('dr-typing')});
+    document.addEventListener('focusout',()=>document.body.classList.remove('dr-typing'));
+  }
   function renderDeliveryPreview(summary){
-    const label={matched:['مطابق','match-ok'],matched_partial:['مطابق — قيمة مختلفة','match-ok'],duplicate:['أكثر من طلب محتمل','match-warn'],review_amount:['بحاجة اختيار','match-warn'],review_amount_higher:['قيمة الكشف أكبر','match-warn'],review_date:['تاريخ شحنة مختلف','match-warn'],review_code:['رقم شحنة مختلف','match-warn'],review_settled:['تحتاج مراجعة','match-warn'],already_settled:['مسوّى سابقًا','match-ok'],other_store:['موجود بمتجر آخر','match-warn'],unmatched:['غير موجود','match-bad']};
+    const g={matched:0,review:0,settled:0,unmatched:0};previewRows.forEach(r=>g[drGroup(r)]++);
+    const filters=[['all','الكل',previewRows.length],['matched','مطابق',g.matched],['review','يحتاج مراجعة',g.review],['settled','مسوّى سابقًا',g.settled],['unmatched','غير مطابق',g.unmatched]];
+    if(!filters.some(([k])=>k===deliveryFilter))deliveryFilter='all';
     $('#deliveryPreview').innerHTML=`
-      <div class="delivery-summary">
-        <div><span>إجمالي الكشف</span><b>${summary.total||0}</b></div>
-        <div class="ok"><span>مطابق تلقائيًا</span><b>${summary.matched||0}</b></div>
-        <div class="warn"><span>بحاجة قرار</span><b>${(summary.review||0)+(summary.duplicate||0)+(summary.other_store||0)}</b></div>
-        <div><span>مسوّى سابقًا</span><b>${summary.already_settled||0}</b></div>
-        <div class="bad"><span>غير موجود</span><b>${summary.unmatched||0}</b></div>
-      </div>
-      <div class="sub delivery-review-note">المطابقة: رقم الشحنة أولًا، ثم الهاتف + تاريخ خروج الشحنة + المتجر + القيمة. لا يُربط أي سطر بطلب قديم لمجرد تطابق الهاتف، والسطر غير المحسوم يُوقف ولا يُعتمد.</div>
-      <div class="table-wrap">
-        <table class="table delivery-preview-table">
-          <thead><tr><th>#</th><th>الهاتف</th><th>تاريخ الشحنة</th><th>المطابقة</th><th>الطلب</th><th>حالة الكشف</th><th>الحالة المعتمدة</th><th>السعر</th><th>أجور التوصيل</th><th>الصافي</th><th>ملاحظة</th><th>القرار</th></tr></thead>
-          <tbody>
-            ${previewRows.map((r,i)=>{
-              const [text,cls]=label[r.match_type]||['غير معروف','match-bad'];
-              const o=r.auto?r.order:null;
-              const orderCell=o?`<button type="button" class="rc-link" data-rc-order="${Number(o.id)}">#${esc(o.order_code)}</button> • ${esc(o.recipient_name||'لا يوجد')}<div class="sub">${esc(o.store_name||'—')} • ${money(o.amount)} د.أ</div>`
-                :r.match_type==='already_settled'?(r.candidates||[]).map(c=>`<button type="button" class="rc-link" data-rc-order="${Number(c.id)}">#${esc(c.order_code)}</button><div class="sub">${c.settlement_id?`<button type="button" class="rc-link" data-rc-settlement="${Number(c.settlement_id)}">${esc(c.settlement_code||'كشف سابق')}</button>`:esc(c.settlement_code||'كشف سابق')}${c.settlement_date?' • '+esc(c.settlement_date):''}</div>`).join('')
-                :(r.candidates||[]).length?'<span class="sub">اختر من الأسفل ↓</span>':'—';
-              return `<tr class="reconcile-row">
-                <td>${r.row_index}</td><td>${esc(r.phone||'')}</td><td>${esc(r.raw_date||r.shipment_date||'—')}</td>
-                <td><span class="match-badge ${cls}">${text}</span></td><td>${orderCell}</td><td>${esc(r.raw_status||'')}</td>
-                <td><select class="select delivery-status-choice" data-i="${i}" data-raw-status="${encodeURIComponent(r.raw_status||'')}">${deliveryStatusOptions(r.status||'')}</select></td>
-                <td><input class="input delivery-amount-choice" data-i="${i}" inputmode="decimal" value="${Number(r.amount||0)}"></td>
-                <td><input class="input delivery-fee-choice" data-i="${i}" inputmode="decimal" value="${Number(r.delivery_fee||0)}"></td>
-                <td><input class="input delivery-net-choice" data-i="${i}" inputmode="decimal" value="${Number(r.net_amount||0)}"></td>
-                <td><input class="input delivery-note-choice" data-i="${i}" value="${esc(r.note||'')}"></td>
-                <td class="reconcile-state" data-i="${i}"></td>
-              </tr><tr class="reconcile-panel-row"><td colspan="12"><div class="reconcile-panel" data-i="${i}"></div></td></tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-      <div class="delivery-commit-bar">
-        <div><b id="reconcileCounters"></b><div class="sub">الأسطر الموقوفة لا تتغير وتبقى مفتوحة لكشف لاحق. الكاش المعتمد هو صافي شركة التوصيل وليس سعر الطلب.</div></div>
-        <button id="commitDeliveryReport" class="btn btn-accent">اعتماد وتسكير الكشف</button>
+      <div class="dr-wrap">
+        <div class="dr-summary">
+          <div><span>شحنات الكشف</span><b>${summary.total||previewRows.length}</b></div>
+          <div class="ok"><span>مطابق</span><b>${g.matched}</b></div>
+          <div class="warn"><span>يحتاج مراجعة</span><b>${g.review}</b></div>
+          <div class="muted"><span>مسوّى سابقًا</span><b>${g.settled}</b></div>
+          <div class="bad"><span>غير مطابق</span><b>${g.unmatched}</b></div>
+        </div>
+        <div class="dr-filters" role="group" aria-label="تصفية الشحنات">${filters.map(([k,l,n])=>`<button type="button" data-filter="${k}" aria-pressed="${k===deliveryFilter}">${l}<i>${n}</i></button>`).join('')}</div>
+        <details class="dr-rules"><summary>طريقة المطابقة</summary><div>رقم الشحنة أولًا، ثم الهاتف + تاريخ خروج الشحنة + المتجر + القيمة. لا يُربط أي سطر بطلب قديم لمجرد تطابق الهاتف، والسطر غير المحسوم يُوقف ولا يُعتمد.</div></details>
+        <div class="dr-head" aria-hidden="true"><span>الشحنة</span><span>الطلب والعميل وبيانات الكشف</span><span>القرار والمبالغ</span></div>
+        <div class="dr-list" data-filter="${deliveryFilter}">
+          ${previewRows.map((r,i)=>{
+            const [text,cls]=DR_LABEL[r.match_type]||['غير معروف','bad'];
+            return `<article class="dr-card" data-i="${i}" data-group="${drGroup(r)}">
+              <header class="dr-top"><span class="dr-idx">${r.row_index}</span><span class="dr-badge ${cls}">${text}</span><span class="reconcile-state" data-i="${i}"></span></header>
+              <div class="dr-facts" data-i="${i}"></div>
+              <div class="dr-edit">
+                <label class="dr-field dr-field-status"><span>الحالة المعتمدة</span><select class="select delivery-status-choice" data-i="${i}" data-raw-status="${encodeURIComponent(r.raw_status||'')}">${deliveryStatusOptions(r.status||'')}</select></label>
+                <label class="dr-field"><span>القيمة</span><input class="input delivery-amount-choice" data-i="${i}" inputmode="decimal" value="${Number(r.amount||0)}"></label>
+                <label class="dr-field"><span>أجور التوصيل</span><input class="input delivery-fee-choice" data-i="${i}" inputmode="decimal" value="${Number(r.delivery_fee||0)}"></label>
+                <label class="dr-field"><span>صافي الكاش</span><input class="input delivery-net-choice" data-i="${i}" inputmode="decimal" value="${Number(r.net_amount||0)}"></label>
+                <label class="dr-field dr-field-note"><span>ملاحظة</span><input class="input delivery-note-choice" data-i="${i}" value="${esc(r.note||'')}"></label>
+              </div>
+              <div class="reconcile-panel" data-i="${i}"></div>
+            </article>`;
+          }).join('')}
+          <div class="dr-empty" hidden>لا توجد شحنات في هذا التصنيف</div>
+        </div>
+        <div class="delivery-commit-bar dr-bar">
+          <div class="dr-bar-text"><b id="reconcileCounters"></b><small class="dr-bar-sum">${previewRows.length} شحنة • ${g.matched} مطابق • ${g.review} مراجعة • ${g.settled} مسوّى سابقًا • ${g.unmatched} غير مطابق</small><small class="dr-bar-note">الأسطر الموقوفة لا تتغير وتبقى مفتوحة لكشف لاحق • الكاش المعتمد هو صافي شركة التوصيل</small></div>
+          <button id="commitDeliveryReport" class="btn btn-accent">اعتماد وتسكير الكشف</button>
+        </div>
       </div>`;
+    drInjectStyles();
     if(!document.getElementById('reconcileStyles')){
       const st=document.createElement('style');st.id='reconcileStyles';
-      st.textContent=`.reconcile-panel-row td{background:#f8fafc;padding:8px 12px}.reconcile-why{background:#fff7e6;border:1px solid #f5c26b;border-radius:10px;padding:8px 10px;margin:4px 0 8px}.reconcile-choices{display:grid;gap:6px;margin:6px 0}.reconcile-choice{display:flex;gap:8px;align-items:flex-start;border:1px solid #d9e2ec;border-radius:10px;padding:8px;background:#fff;cursor:pointer}.reconcile-choice.disabled{opacity:.5;cursor:not-allowed}.reconcile-tag{display:inline-block;font-size:12px;border-radius:999px;padding:1px 8px;margin:3px 0 0 4px;background:#e6f4ea;color:#1e6b34}.reconcile-tag.warn{background:#fff4d6;color:#8a5a00}.reconcile-tag.bad{background:#fde8e8;color:#9b1c1c}.reconcile-confirm{display:block;margin:6px 0;font-weight:600}.reconcile-items{margin-top:8px}.reconcile-items-table{min-width:520px;margin:6px 0}.reconcile-items-table input{max-width:80px}.reconcile-totals{background:#eef6ff;border-radius:10px;padding:8px}.reconcile-reason{max-width:240px;white-space:normal}@media(max-width:760px){.reconcile-panel{position:sticky;right:0;width:calc(100vw - 64px);max-width:calc(100vw - 64px);white-space:normal}}.reconcile-prev{font-size:12px;color:#475467;background:#f2f4f7;border-radius:8px;padding:5px 8px;margin-top:5px;line-height:1.7}`;
+      st.textContent=`.reconcile-why{background:#f4f6f9;border:0;border-radius:10px;padding:8px 10px;margin:0 0 8px;color:#3d4b5c;font-size:13px;line-height:1.7}.dr-why summary{cursor:pointer;list-style:none;display:flex;gap:6px;align-items:flex-start}.dr-why summary::-webkit-details-marker{display:none}.dr-why summary::before{content:'مراجعة';flex:none;font-size:11px;font-weight:700;color:#9a4d00;background:#ffedd9;border-radius:999px;padding:1px 8px;margin-top:2px}.dr-why summary::after{content:'التفاصيل ▾';flex:none;margin-inline-start:auto;font-size:11px;color:#1f3a5f;padding-top:2px}.dr-why[open] summary::after{content:'إخفاء ▴'}.dr-why>div{margin-top:6px;color:#5b6878}.reconcile-choices{display:grid;gap:6px;margin:6px 0}.reconcile-choices>b{font-size:13px;color:#1f3a5f}.reconcile-choice{display:flex;gap:10px;align-items:flex-start;border:1px solid #e3e8ef;border-radius:12px;padding:10px;background:#fff;cursor:pointer;min-width:0}.reconcile-choice>span{min-width:0;overflow-wrap:anywhere}.reconcile-choice:has(input:checked){border-color:#1f3a5f;box-shadow:0 0 0 1px #1f3a5f inset}.reconcile-choice.disabled{background:#f7f8fa;cursor:not-allowed}.reconcile-choice input{margin-top:3px;flex:none;width:18px;height:18px;accent-color:#1f3a5f}.reconcile-tag{display:inline-block;font-size:11px;border-radius:999px;padding:1px 8px;margin:4px 0 0 4px;background:#eaf5ef;color:#256b48}.reconcile-tag.warn{background:#fff1e3;color:#9a4d00}.reconcile-tag.bad{background:#eef0f3;color:#55606e}.reconcile-confirm{display:flex;gap:8px;align-items:flex-start;margin:8px 0;font-weight:600;font-size:13px;color:#24364d}.reconcile-confirm input{margin-top:3px;flex:none}.reconcile-items{margin-top:8px}.reconcile-items>b{font-size:13px;color:#1f3a5f}.reconcile-items-table{min-width:0!important;width:100%;margin:6px 0}.reconcile-items-table input{max-width:80px}.reconcile-totals{background:#f1f5fa;border-radius:10px;padding:8px 10px;font-size:13px;line-height:1.8}.reconcile-prev{font-size:12px;color:#55606e;background:#f2f4f7;border-radius:8px;padding:5px 8px;margin-top:6px;line-height:1.7;overflow-wrap:anywhere}`;
       document.head.appendChild(st);
     }
+    drApplyFilter();drPlaceBar();
+    if(window.ResizeObserver){const bar=document.querySelector('.dr-bar');if(bar)new ResizeObserver(()=>drPlaceBar()).observe(bar)}
+    $('.dr-filters').onclick=e=>{const b=e.target.closest('[data-filter]');if(!b)return;deliveryFilter=b.dataset.filter;drApplyFilter()};
+    if(!$('#deliveryPreview').dataset.drToggle)$('#deliveryPreview').dataset.drToggle='1',$('#deliveryPreview').addEventListener('toggle',e=>{const d=e.target;if(!d.classList?.contains('dr-why'))return;const i=Number(d.dataset.i);if(d.open)drOpenWhy.add(i);else drOpenWhy.delete(i)},true);
     previewRows.forEach((r,i)=>renderReconcilePanel(i));
 
     $('#commitDeliveryReport').onclick=commitReport;

@@ -67,7 +67,9 @@
         const band=items.filter(it=>it.y<=a.y+4&&it.y>bottom);
         const t=k=>textOf(band,width,COLS[k][0],COLS[k][1]);
         return {page:pageNumber,y:a.y,phone:purePhone(a.text),shipment_date:dateOf(t('date')),status_text:t('status'),note:t('note'),
-          cash:numberOf(t('cash')),fee:numberOf(t('fee')),price:numberOf(t('price')),__anchor:a,__bottom:bottom};
+          cash:numberOf(t('cash')),fee:numberOf(t('fee')),price:numberOf(t('price')),
+          // Shipment code (e.g. BS05AUTOOUT) for display only; matching does not use it.
+          code:(band.map(it=>digits(it.text).trim()).find(x=>/^[A-Za-z]{2,}[A-Za-z0-9]*\d[A-Za-z0-9]*$/.test(x)&&x.length>=6)||''),__anchor:a,__bottom:bottom};
       });
       return rows;
     };
