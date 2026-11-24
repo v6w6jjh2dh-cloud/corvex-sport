@@ -7,7 +7,8 @@
 import {classifyInventoryItems,loadInventoryModels,FUR_ALIASES} from './_inventory.js';
 import {loadCostedModels,approvedCost,canonicalModelName,normalizeArabic,STATI_ALIASES,FILLER_ALIASES,round2} from './_partial-delivery.js';
 
-export const ENGINE_VERSION='product-engine-1-shadow';
+import {PRODUCT_KNOWLEDGE,NAME_SYNONYMS,KNOWLEDGE_VERSION,knowledgeQuantity} from './_product-knowledge.js';
+export const ENGINE_VERSION='product-engine-2-shadow';
 const key=x=>normalizeArabic(x);
 // ---- copied verbatim from profit-shipping-cohorts.js (kept identical; equivalence is tested)
 const MODEL_COSTS=[
@@ -115,10 +116,45 @@ export async function ensureProductAliasTable(env){
   decided_by INTEGER,decided_at TEXT,created_at TEXT NOT NULL DEFAULT (datetime('now')),UNIQUE(store_id,alias,status))`).run();
 }
 
+// Interpretation memory (future CORVEX AI memory; nothing reads it for calculations):
+// original text → system interpretation → user correction → approved rule + approval date.
+// ai_training_allowed stays 0: customer data is never sent to train external models without owner approval.
+export async function ensureInterpretationTable(env){
+ await env.DB.prepare(`CREATE TABLE IF NOT EXISTS order_interpretations(id INTEGER PRIMARY KEY AUTOINCREMENT,store_id INTEGER NOT NULL,
+  order_id INTEGER NOT NULL,source_field TEXT NOT NULL DEFAULT '',source_text TEXT NOT NULL DEFAULT '',source_hash TEXT NOT NULL,
+  engine_version TEXT NOT NULL,system_json TEXT NOT NULL DEFAULT '[]',status TEXT NOT NULL DEFAULT 'recorded',
+  corrected_json TEXT,correction_note TEXT NOT NULL DEFAULT '',corrected_by INTEGER,corrected_at TEXT,
+  rule_kind TEXT,rule_ref TEXT,rule_status TEXT,rule_approved_by INTEGER,rule_approved_at TEXT,
+  ai_training_allowed INTEGER NOT NULL DEFAULT 0,created_by INTEGER,created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(store_id,order_id,engine_version,source_hash))`).run();
+ await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_order_interpretations_order ON order_interpretations(store_id,order_id)').run();
+}
+export function textHash(text){let h=2166136261;for(const c of String(text||'')){h^=c.codePointAt(0);h=Math.imul(h,16777619)>>>0}return h.toString(16)}
+
 // storeId: aliases approved for that store are added to their product (Corvex only for now).
 // extraAliases: [{product_ref, alias}] — used by the dry-run test of a proposed alias.
-export async function loadCatalogue(env,{storeId=0,extraAliases=[]}={}){
- const {models,catalogueError}=await cohortModels(env);
+// Accumulated knowledge (_product-knowledge.js): its aliases are added to the catalogue product with
+// the same canonical name (older engines' names via NAME_SYNONYMS); products only the older engines
+// know become knowledge products (ids -101…). An alias already owned by another product is never moved.
+const canonicalFor=name=>{const n=canonicalModelName(name);const syn=Object.entries(NAME_SYNONYMS).find(([a])=>key(a)===key(n));return key(syn?syn[1]:n)};
+export function withKnowledge(models){
+ const owner=new Map();for(const m of models)for(const a of m.aliases||[])if(!owner.has(a))owner.set(a,m.id);
+ const out=models.map(m=>({...m,aliases:[...(m.aliases||[])]}));
+ PRODUCT_KNOWLEDGE.forEach((k,i)=>{
+  if(k.status==='disabled')return;
+  let target=out.find(m=>canonicalFor(m.name)===key(k.product));
+  if(!target){target={id:-101-i,name:k.product,unit_cost:k.cost??null,aliases:[],knowledge_id:k.id};out.push(target)}
+  for(const a of [...k.aliases,...(k.review||[])].map(key).filter(a=>a.length>1)){
+   if(owner.has(a)&&owner.get(a)!==target.id)continue;
+   if(!target.aliases.includes(a))target.aliases.push(a);owner.set(a,target.id);
+  }
+  target.aliases.sort((a,b)=>b.length-a.length);
+ });
+ return out;
+}
+export async function loadCatalogue(env,{storeId=0,extraAliases=[],knowledge=true}={}){
+ const base=await cohortModels(env),catalogueError=base.catalogueError;
+ const models=knowledge?withKnowledge(base.models):base.models;
  let approved=[];
  if(storeId){try{await ensureProductAliasTable(env);approved=(await env.DB.prepare("SELECT product_ref,alias FROM product_aliases WHERE store_id=? AND status='approved'").bind(storeId).all()).results||[]}catch{}}
  const add=[...approved,...extraAliases];
@@ -126,7 +162,7 @@ export async function loadCatalogue(env,{storeId=0,extraAliases=[]}={}){
   const ref=productRef(m),extra=add.filter(a=>a.product_ref===ref).map(a=>key(a.alias)).filter(a=>a.length>1);
   return extra.length?{...m,aliases:[...new Set([...(m.aliases||[]),...extra])].sort((a,b)=>b.length-a.length)}:m;
  });
- return {models:out,catalogueError,storeId,version:ENGINE_VERSION};
+ return {models:out,catalogueError,storeId,knowledge,version:ENGINE_VERSION+(knowledge?'+'+KNOWLEDGE_VERSION:'')};
 }
 
 export function describeCatalogue(cat){
@@ -170,6 +206,16 @@ export async function resolveOrderItems(env,o,cat,allocation=null){
     const q=probe.reduce((n,x)=>n+x.quantity,0);
     trace.push({source:source+'_bare_jokh',quantity:q,other_quantity:otherQ});
     if(probe.length===1&&q===1&&otherQ<=1){items=mergeItems([{model_id:scarfo.id,name:scarfo.name,quantity:1}],models);itemSource=source+'_bare_jokh_single'}
+    break;
+   }
+  }
+  // Knowledge quantity conventions (Q-* rules): single-product orders read as 1 piece only.
+  if(cat.knowledge&&items.length===1&&items[0].quantity===1&&(itemSource==='order_notes'||itemSource==='raw_text')){
+   const text=sources.find(([name])=>name===itemSource)[1],model=models.find(m=>m.id===Number(items[0].model_id))||{};
+   for(const line of text.split(/\n+/)){
+    if(!line.trim()||!(await classifyInventoryItems(env,line,models)).length)continue;
+    const kq=knowledgeQuantity(key(line),{productName:key(model.name||items[0].name)});
+    if(kq){items=mergeItems([{model_id:items[0].model_id,name:model.name||items[0].name,quantity:kq.quantity}],models);trace.push({source:'knowledge',rule:kq.rule,quantity:kq.quantity})}
     break;
    }
   }

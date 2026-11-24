@@ -16,6 +16,13 @@
 
 ## السجل
 
+### 2026-11-24 — حفظ المعرفة التراكمية في المحرك المركزي + ذاكرة التفسير + فلسفة التصميم
+- `functions/api/_product-knowledge.js` (جديد): 31 منتجًا، 227 اسمًا بديلًا، 6 قواعد كمية، 13 حماية، منقولة من كل المحركات مع المصدر والأمثلة.
+- `_product-engine.js`: المعرفة تُضاف للمحرك المركزي (وضع الظل)؛ `knowledge:false` = محرك الأرباح الحالي حرفيًا. جدول `order_interpretations`.
+- `/api/product-engine`: `view=knowledge` (مع فحص ذاتي)، `view=interpretations`، `interpret`، `correct`؛ المقارنة تعرض `baseline` و`knowledge_changes`.
+- اختبارات: `tests/product-knowledge.test.mjs` (7) + اختبار جديد في `product-engine`. توثيق: `CLAUDE.md` §0 و§4.1، `AGENTS.md`، `FUTURE_ROADMAP.md` §2.0، T-10…T-12، R-KNOW-1.
+- لا تغيير في المحركات النشطة أو الطلبات أو المخزون أو الأرباح أو الواجهة. التحقق محلي فقط.
+
 ### 2026-11-24 — المحرك المركزي للمنتجات (وضع الظل) + ركيزة CORVEX COMMERCE (توثيق)
 - `functions/api/_product-engine.js` (جديد): محرك مركزي بمعرف ثابت لكل منتج وكتالوج وأسماء بديلة لكل متجر؛ مطابق لمحرك
   الأرباح. **غير مستخدم في أي حساب.**

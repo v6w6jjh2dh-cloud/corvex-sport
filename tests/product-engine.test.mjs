@@ -43,9 +43,9 @@ function seedCorpus(db){
 }
 const call=(env,fn,url,body,tok='t')=>fn({request:new Request('https://x/api'+url,{method:body?'POST':'GET',headers:{authorization:'Bearer '+tok,'content-type':'application/json'},body:body?JSON.stringify(body):undefined}),env}).then(async r=>({status:r.status,body:await r.json()}));
 
-test('central engine = active shipment-day engine, order by order (same products, quantities, costs)',async()=>{
+test('central engine baseline (knowledge off) = active shipment-day engine, order by order (same products, quantities, costs)',async()=>{
  const {db,env}=setup();const ids=seedCorpus(db);
- const cat=await loadCatalogue(env,{storeId:2});
+ const cat=await loadCatalogue(env,{storeId:2,knowledge:false});
  const report=(await call(env,cohorts,'/profit-shipping-cohorts?date='+day+'&store_id=0')).body;
  for(const c of corpus){
   const o=db.prepare('SELECT * FROM orders WHERE id=?').get(ids.get(c.id));
@@ -144,5 +144,32 @@ test('compare endpoint is read-only and reports differences per order',async()=>
  assert.equal(r.status,200,JSON.stringify(r.body));
  assert.equal(r.body.read_only,true);assert.equal(r.body.counts.orders,corpus.length);
  assert.equal(r.body.counts.central_vs_profit_engine,0,'central = active profit engine on every order');
+ assert.equal(r.body.counts.baseline_vs_profit_engine,0,'baseline = active profit engine on every order');
  assert.equal(dump(),before);
+});
+
+test('knowledge view: self-check passes, read-only; interpretation memory: interpret → correct → rule approval date, orders untouched',async()=>{
+ const {db,env}=setup();const ids=seedCorpus(db);
+ const dump=()=>JSON.stringify(db.prepare('SELECT * FROM orders').all())+JSON.stringify(db.prepare('SELECT * FROM inventory_movements').all())+JSON.stringify(db.prepare('SELECT * FROM profit_models').all());
+ const before=dump();
+ const k=await call(env,engineApi,'/product-engine?view=knowledge');
+ assert.equal(k.status,200);assert.equal(k.body.read_only,true);
+ assert.deepEqual(k.body.self_check.failures,[]);assert.ok(k.body.products.length>=30);
+ assert.equal((await call(env,engineApi,'/product-engine',{action:'interpret',order_id:ids.get('10389')},'e')).status,403,'staff');
+ const id=ids.get('10389');
+ const i1=await call(env,engineApi,'/product-engine',{action:'interpret',order_id:id});
+ assert.equal(i1.status,200);assert.equal(i1.body.interpretation.system[0].quantity,2);
+ const i2=await call(env,engineApi,'/product-engine',{action:'interpret',order_id:id});
+ assert.equal(i2.body.interpretation.id,i1.body.interpretation.id,'idempotent per order/text/engine version');
+ assert.equal((await call(env,engineApi,'/product-engine',{action:'correct',order_id:id,items:[{product_ref:'nope',quantity:1}]})).status,400);
+ const p=await call(env,engineApi,'/product-engine',{action:'propose',product_ref:'fur_jacket',alias:'جاكيت بومبر'});
+ const c=await call(env,engineApi,'/product-engine',{action:'correct',order_id:id,items:[{product_ref:'fur_jacket',quantity:3}],note:'اختبار',alias_id:p.body.id});
+ assert.equal(c.status,200,JSON.stringify(c.body));
+ await call(env,engineApi,'/product-engine',{action:'test',id:p.body.id});
+ await call(env,engineApi,'/product-engine',{action:'approve',id:p.body.id,confirm:'اعتماد الاسم'});
+ const m=(await call(env,engineApi,'/product-engine?view=interpretations&order_id='+id)).body.interpretations[0];
+ assert.equal(m.status,'corrected');assert.equal(m.corrected[0].quantity,3);assert.equal(m.rule_ref,'alias:'+p.body.id);
+ assert.equal(m.rule_status,'approved');assert.ok(m.rule_approved_at);assert.equal(m.ai_training_allowed,0);
+ assert.ok(m.source_text.length>0);
+ assert.equal(dump(),before,'orders, stock and catalogue unchanged');
 });
