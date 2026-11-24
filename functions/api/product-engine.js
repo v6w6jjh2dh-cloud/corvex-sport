@@ -10,6 +10,12 @@
 //  POST {action:'approve', id, confirm:'اعتماد الاسم'}   → approved for Corvex; used by the central engine only
 //                                             (the active engines are unchanged until the engine is activated)
 //  POST {action:'reject'|'disable', id}
+//  GET  ?view=lexicon                       → the store's order language: generic defaults + learned + approved entries
+//  GET  ?view=unknown&from=&to=             → product-like phrases in recent orders that match no product (new products /
+//       new aliases to teach), grouped with counts — generic, no product word list
+//  POST {action:'lexicon_propose', kind, value, quantity?, fix?, product?} → pending language rule (no effect)
+//  POST {action:'lexicon_test', id}         → dry run on recent orders (which readings would change)
+//  POST {action:'lexicon_approve', id, confirm:'اعتماد القاعدة'} | {action:'lexicon_reject'|'lexicon_disable', id}
 //  GET  ?view=knowledge                     → the accumulated knowledge registry + catalogue aliases, and a self-check
 //       that every alias still resolves to its product (run it on production after each change)
 //  GET  ?view=interpretations&order_id=     → interpretation memory (text → system reading → correction → rule)
@@ -19,7 +25,8 @@
 // Designed for later use by CORVEX AI through the same validated actions (propose → test → admin approval).
 import {json,round2,normalizeArabic} from './_partial-delivery.js';
 import {classifyInventoryItems,loadInventoryModels} from './_inventory.js';
-import {loadCatalogue,describeCatalogue,resolveOrderItems,ensureProductAliasTable,ensureInterpretationTable,textHash,productRef,ENGINE_VERSION} from './_product-engine.js';
+import {loadCatalogue,describeCatalogue,resolveOrderItems,ensureProductAliasTable,ensureInterpretationTable,ensureLexiconTable,LEXICON_KINDS,textHash,productRef,ENGINE_VERSION} from './_product-engine.js';
+import {unknownPhrases,DEFAULT_LEXICON,LEARNED_DEFAULTS,LANGUAGE_VERSION} from './_order-language.js';
 import {PRODUCT_KNOWLEDGE,QUANTITY_RULES,GUARD_RULES,NAME_SYNONYMS,KNOWLEDGE_VERSION} from './_product-knowledge.js';
 import {onRequest as cohortEngine} from './profit-shipping-cohorts.js';
 
@@ -119,6 +126,22 @@ export async function onRequest({request,env}){
    }
    return json({engine:ENGINE_VERSION,read_only:true,store,from,to,counts,rows});
   }
+  if(view==='lexicon'){
+   await ensureLexiconTable(env);
+   const cat=await loadCatalogue(env,{storeId:store.id});
+   const rows=(await env.DB.prepare('SELECT * FROM store_lexicon WHERE store_id=? ORDER BY id DESC LIMIT 300').bind(store.id).all()).results||[];
+   return json({store,language_version:LANGUAGE_VERSION,kinds:LEXICON_KINDS,defaults:DEFAULT_LEXICON,learned_defaults:LEARNED_DEFAULTS,
+    effective:{lexicon:cat.lexicon,learned:cat.learned},entries:rows.map(r=>({...r,data:JSON.parse(r.data_json||'{}'),test:r.test_json?JSON.parse(r.test_json):null,data_json:undefined,test_json:undefined}))});
+  }
+  if(view==='unknown'){
+   const to=url.searchParams.get('to')||todayAmman(),from=url.searchParams.get('from')||shift(to,-29);
+   if(!DAY.test(from)||!DAY.test(to)||from>to)return json({error:'تاريخ غير صالح'},400);
+   const orders=await corvexOrders(env,store.id,from,to,1000),cat=await loadCatalogue(env,{storeId:store.id}),groups=new Map();
+   for(const o of orders)for(const p of unknownPhrases(String(o.order_notes||'')+'\n'+String(o.raw_text||''),cat.models,cat.lexicon)){
+    const g=groups.get(p)||{phrase:p,orders:0,examples:[]};g.orders++;if(g.examples.length<5)g.examples.push({id:o.id,order_code:o.order_code});groups.set(p,g);
+   }
+   return json({store,from,to,read_only:true,orders:orders.length,candidates:[...groups.values()].sort((a,b)=>b.orders-a.orders).slice(0,200)});
+  }
   if(view==='knowledge'){
    const cat=await loadCatalogue(env,{storeId:store.id}),failures=[];
    for(const k of PRODUCT_KNOWLEDGE)for(const a of [...k.aliases,...(k.review||[])]){
@@ -160,6 +183,50 @@ export async function onRequest({request,env}){
    if(!r)return json({error:'يوجد اقتراح مفتوح بنفس الاسم'},409);
    return json({ok:true,id:r.meta.last_row_id,status:'pending'});
   }
+  if(action.startsWith('lexicon_')){
+   await ensureLexiconTable(env);
+   if(action==='lexicon_propose'){
+    const kind=String(b.kind||''),k=LEXICON_KINDS[kind];if(!k)return json({error:'نوع قاعدة غير معروف',kinds:Object.keys(LEXICON_KINDS)},400);
+    const raw=String(b.value||'').trim().slice(0,60),value=key(raw);if(value.length<2)return json({error:'الكلمة قصيرة جدًا'},400);
+    const data={};
+    if(/quantity/.test(k.needs||'')){const q=Number(b.quantity);if(!Number.isInteger(q)||q<1||q>50)return json({error:'الكمية يجب أن تكون 1–50'},400);data.quantity=q}
+    if(k.needs==='fix'){data.fix=String(b.fix||'').trim().slice(0,60);if(key(data.fix).length<2)return json({error:'اكتب التصحيح'},400)}
+    if(/product/.test(k.needs||'')){data.product=String(b.product||'').trim().slice(0,60);if(key(data.product).length<2)return json({error:'اكتب كلمة من اسم المنتج'},400)}
+    const cat=await loadCatalogue(env,{storeId:store.id});
+    if(cat.models.some(m=>(m.aliases||[]).includes(value)))return json({error:'الكلمة اسم منتج في الكتالوج'},409);
+    const cur=k.field?cat.lexicon[k.field]:cat.learned[k.learned];
+    if(k.field&&(Array.isArray(cur)?cur.includes(value):value in cur))return json({error:'الكلمة معروفة مسبقًا'},409);
+    const r=await env.DB.prepare("INSERT INTO store_lexicon(store_id,kind,value,value_raw,data_json,status,proposed_by,proposed_via,note) VALUES(?,?,?,?,?,'pending',?,?,?)")
+     .bind(store.id,kind,value,raw,JSON.stringify(data),me.id,String(b.via||'admin').slice(0,20),String(b.note||'').slice(0,300)).run().catch(()=>null);
+    if(!r)return json({error:'يوجد اقتراح مفتوح بنفس الكلمة'},409);
+    return json({ok:true,id:r.meta.last_row_id,status:'pending'});
+   }
+   const row=await env.DB.prepare('SELECT * FROM store_lexicon WHERE id=? AND store_id=?').bind(Number(b.id||0),store.id).first();
+   if(!row)return json({error:'القاعدة غير موجودة'},404);
+   if(action==='lexicon_test'){
+    const to=todayAmman(),from=shift(to,-60),orders=await corvexOrders(env,store.id,from,to,1000);
+    const before=await loadCatalogue(env,{storeId:store.id}),after=await loadCatalogue(env,{storeId:store.id,extraLexicon:row.status==='approved'?[]:[row]});
+    const changed=[];
+    for(const o of orders){const a=shape((await resolveOrderItems(env,o,before)).items),c=shape((await resolveOrderItems(env,o,after)).items);
+     if(!same(a,c))changed.push({id:o.id,order_code:o.order_code,before:a,after:c,text:String(o.order_notes||o.raw_text||'').slice(0,200)})}
+    const summary={tested_at:new Date().toISOString(),orders:orders.length,changed:changed.length,examples:changed.slice(0,30)};
+    await env.DB.prepare('UPDATE store_lexicon SET test_json=? WHERE id=?').bind(JSON.stringify(summary),row.id).run();
+    return json({ok:true,read_only_for_orders:true,...summary});
+   }
+   if(action==='lexicon_approve'){
+    if(row.status!=='pending')return json({error:'القاعدة ليست بانتظار الاعتماد'},409);
+    if(!row.test_json)return json({error:'شغّل الاختبار التجريبي قبل الاعتماد'},409);
+    if(String(b.confirm||'').trim()!=='اعتماد القاعدة')return json({error:'اكتب «اعتماد القاعدة» للتأكيد'},400);
+    const r=await env.DB.prepare("UPDATE store_lexicon SET status='approved',decided_by=?,decided_at=datetime('now') WHERE id=? AND status='pending'").bind(me.id,row.id).run();
+    return json({ok:r.meta.changes===1,status:'approved',note:'تُستخدم في المحرك المركزي (وضع المقارنة) فقط حتى تفعيله'});
+   }
+   if(action==='lexicon_reject'||action==='lexicon_disable'){
+    const next=action==='lexicon_reject'?'rejected':'disabled';
+    await env.DB.prepare("UPDATE store_lexicon SET status=?,decided_by=?,decided_at=datetime('now') WHERE id=?").bind(next,me.id,row.id).run();
+    return json({ok:true,status:next});
+   }
+   return json({error:'إجراء غير معروف'},400);
+  }
   if(action==='interpret'||action==='correct'){
    await ensureInterpretationTable(env);
    const o=await env.DB.prepare('SELECT id,store_id,order_notes,raw_text FROM orders WHERE id=? AND store_id=?').bind(Number(b.order_id||0),store.id).first();
@@ -181,7 +248,11 @@ export async function onRequest({request,env}){
    await env.DB.prepare(`UPDATE order_interpretations SET status='corrected',corrected_json=?,correction_note=?,corrected_by=?,corrected_at=datetime('now'),
      rule_kind=?,rule_ref=?,rule_status=?,rule_approved_by=?,rule_approved_at=? WHERE id=?`)
     .bind(JSON.stringify(items),String(b.note||'').slice(0,300),me.id,alias?'alias':null,alias?'alias:'+alias.id:null,alias?alias.status:null,alias?.status==='approved'?alias.decided_by:null,alias?.status==='approved'?alias.decided_at:null,rec.id).run();
-   return json({ok:true,read_only_for_orders:true,id:rec.id,status:'corrected',note:'سُجّل التصحيح في ذاكرة التفسير فقط؛ لم يتغير الطلب أو المخزون أو الأرباح'});
+   // Learning suggestion (never applied automatically): one corrected product + one unknown phrase in the text
+   // → propose that phrase as an alias of that product (manager runs propose → test → approve).
+   const unknown=unknownPhrases(text,cat.models,cat.lexicon);
+   const suggestions=items.length===1&&unknown.length===1?[{action:'propose',product_ref:items[0].product_ref,alias:unknown[0]}]:[];
+   return json({ok:true,read_only_for_orders:true,id:rec.id,status:'corrected',unknown_phrases:unknown,suggestions,note:'سُجّل التصحيح في ذاكرة التفسير فقط؛ لم يتغير الطلب أو المخزون أو الأرباح'});
   }
   const row=await env.DB.prepare('SELECT * FROM product_aliases WHERE id=? AND store_id=?').bind(Number(b.id||0),store.id).first();
   if(!row)return json({error:'الاقتراح غير موجود'},404);
