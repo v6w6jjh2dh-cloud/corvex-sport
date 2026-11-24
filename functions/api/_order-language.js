@@ -37,6 +37,8 @@ export const DEFAULT_LEXICON={
  // a short name preceded by one of these words describes another item («مبطن فرو» is a lining)
  descriptorGuards:[{names:['فرو','الفرو'],before:['مبطن','مبطنه','بطانه','بطانته','ياقه','كبوس','كابيشن','قبعه','مع','فيه','فيها','داخل','داخله','داخلي']}],
  maxQuantityDigits:3,
+ // the definite article: staff write the same name with or without it («مالاء فراغات» = «مالاء الفراغات»)
+ definiteArticle:'ال',
  // ---- context (T-11): used only when requireContext is on (central engine). A single general word is not
  // enough to name a product: it needs product evidence on its line, and never counts on a personal line.
  personalMarkers:['الاسم','اسم','ام','ابو','السيد','السيده','الاخ','الاخت','المستلم','الزبون','العميل'],
@@ -363,4 +365,17 @@ export function groupPhrases(list){
  }
  return groups.map(g=>{const variants=[...g.variants].sort((a,b)=>b[1]-a[1]);return {label:variants[0][0],key:g.key,orders:g.orders.size,
   variants:variants.map(([phrase,n])=>({phrase,n})),examples:g.examples,near:g.near,order_ids:[...g.orders]}}).sort((a,b)=>b.orders-a.orders);
+}
+
+// Spelling variants of a multi-word name that differ only by the definite article on a word
+// («مالئ الفراغات» → «مالئ فراغات», «جاكيت فرو» → «جاكيت الفرو»). Generic language rule, no product names.
+export function articleVariants(alias,lexicon=DEFAULT_LEXICON){
+ const art=lexicon.definiteArticle;if(!art)return [];
+ const words=String(alias||'').split(' ');if(words.length<2||words.length>4)return [];
+ const forms=words.map(w=>{const out=[w];
+  if(w.startsWith(art)&&w.length-art.length>=3)out.push(w.slice(art.length));
+  else if(!w.startsWith(art)&&w.length>=3&&!/\d/.test(w)&&/^\p{Script=Arabic}+$/u.test(w))out.push(art+w);
+  return out});
+ let all=[''];for(const f of forms)all=all.flatMap(p=>f.map(x=>p?p+' '+x:x));
+ return all.filter(v=>v!==alias);
 }

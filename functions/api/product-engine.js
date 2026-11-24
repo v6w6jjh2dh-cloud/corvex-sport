@@ -28,6 +28,7 @@
 // Designed for later use by CORVEX AI through the same validated actions (propose → test → admin approval).
 import {json,round2,normalizeArabic} from './_partial-delivery.js';
 import {corvexStore} from './_corvex-store.js';
+import {redactForAI} from './_ai-privacy.js';
 import {classifyInventoryItems,loadInventoryModels} from './_inventory.js';
 import {loadCatalogue,describeCatalogue,resolveOrderItems,ensureProductAliasTable,ensureInterpretationTable,ensureLexiconTable,LEXICON_KINDS,textHash,ensureRuleEventsTable,logRuleEvent,catalogueAsOf,classifyCompleteness,productRef,ENGINE_VERSION} from './_product-engine.js';
 import {unknownPhrases,analyzeOrder,groupPhrases,parseOrderText,DEFAULT_LEXICON,LEARNED_DEFAULTS,LANGUAGE_VERSION} from './_order-language.js';
@@ -55,6 +56,15 @@ async function countOrders(env,storeId,from,to){
  return Number((await env.DB.prepare(`SELECT COUNT(*) n FROM orders o WHERE o.store_id=? AND o.first_printed_at IS NOT NULL AND date(o.first_printed_at,'+3 hours') BETWEEN ? AND ?`).bind(storeId,from,to).first())?.n||0);
 }
 // fetch limit+1 rows: the extra row only tells whether another batch exists
+// Export for review outside the system: phones/e-mails/links, labelled personal lines and THIS order's own name,
+// area and address are removed. Product text stays.
+function redactOrder(o){
+ const strip=t=>{let x=redactForAI(t,{purpose:'products'}).text;
+  for(const v of [o.recipient_name,o.detailed_address,o.area].map(z=>String(z||'').trim()).filter(z=>z.length>=3))x=x.split(v).join('[بيانات شخصية]');
+  for(const w of String(o.recipient_name||'').split(/\s+/).filter(w=>w.length>=3))x=x.replace(new RegExp('(^|\\s)'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?=\\s|$)','g'),'$1[اسم]');
+  return x};
+ return {order_notes:strip(o.order_notes||''),raw_text:strip(o.raw_text||'')};
+}
 const page=(rows,limit)=>({rows:rows.slice(0,limit),next:rows.length>limit?Number(rows[limit-1].id):null});
 async function allocations(env,ids){
  const map=new Map();if(!ids.length)return map;
@@ -113,8 +123,9 @@ export async function onRequest({request,env}){
    // source data of imported orders (LiteSale review queue): the product field as the customer chose it
    const sourceOf=new Map();
    if(orders.length){try{for(const r of (await env.DB.prepare(`SELECT corvex_order_id id,payload FROM litesale_review_queue WHERE corvex_order_id IN (${orders.map(()=>'?').join(',')})`).bind(...orders.map(o=>Number(o.id))).all()).results||[]){
-    let p={};try{p=JSON.parse(r.payload||'{}')}catch{}sourceOf.set(Number(r.id),{system:'LiteSale',product:String(p.product||'').trim()})}}catch{}}
-   const classes={known:[],missing:[],learn:[],failure:[],unclear:[]};
+    let p={};try{p=JSON.parse(r.payload||'{}')}catch{}sourceOf.set(Number(r.id),{system:'LiteSale',product:String(p.product||'').trim(),color:String(p.color||'').trim(),size:String(p.size||'').trim(),quantity:p.quantity??null})}}catch{}}
+   const classes={known:[],missing:[],learn:[],failure:[],unclear:[]},beforeAfter={};
+   const catBefore=await loadCatalogue(env,{storeId:store.id,variants:false}),exportMode=url.searchParams.get('export')==='1';
    const rows=[];const counts={orders:orders.length,central_vs_profit_engine:0,baseline_vs_profit_engine:0,knowledge_changes:0,central_vs_print_engine:0,central_vs_print_allocation:0,central_unrecognised:0,central_cost_unknown:0,profit_cost_unknown:0,central_needs_review:0,cost_differences:0};
    // every order carries the counters it adds, so the page can merge batches by order id (never twice)
    const checked=[];
@@ -161,18 +172,37 @@ export async function onRequest({request,env}){
     const srcProduct=src&&src.product?src.product:null;
     const srcKnown=!!(srcProduct&&parseOrderText(srcProduct,cat.models,cat.lexicon).items.length);
     const cls=classifyCompleteness({central,analysis,others:{profit:h,print:p,allocation:a},sourceProduct:srcProduct,sourceKnown:srcKnown});
-    classes[cls.cls].push({id:o.id,order_code:o.order_code,reason:cls.reason,text:String(o.order_notes||o.raw_text||'').slice(0,160),
-     names:analysis.candidates.map(c=>c.phrase).slice(0,3),source:src?src.system+(srcProduct?': '+srcProduct:''):null});
+    // the same order read by the engine BEFORE this version's language changes (before/after on identical orders)
+    const centralBefore=await resolveOrderItems(env,o,catBefore,alloc.get(Number(o.id))||null);
+    const clsBefore=classifyCompleteness({central:centralBefore,analysis:analyzeOrder(o,catBefore.models,catBefore.lexicon),others:{profit:h,print:p,allocation:a},sourceProduct:srcProduct,
+     sourceKnown:!!(srcProduct&&parseOrderText(srcProduct,catBefore.models,catBefore.lexicon).items.length)});
+    beforeAfter[clsBefore.cls+'>'+cls.cls]=(beforeAfter[clsBefore.cls+'>'+cls.cls]||0)+1;
+    // diagnosis: WHY this order is not green — evidence only, nothing guessed
+    const diag={
+     names:analysis.candidates.filter(c=>!c.near).map(c=>c.phrase).slice(0,5),
+     near:analysis.candidates.filter(c=>c.near).map(c=>({phrase:c.phrase,product:c.near.name})).slice(0,5),
+     uncertain:(central.uncertain||[]).map(u=>({word:u.alias,reason:u.reason})),
+     unclear:analysis.unclear.map(u=>u.phrase).slice(0,3),
+     others:{profit:h&&Object.keys(h).length?h:null,print:Object.keys(p).length?p:null,allocation:Object.keys(a).length?a:null},
+     source:src?{system:src.system,product:src.product||null,color:src.color||null,size:src.size||null,quantity:src.quantity}:null,
+     read:central.items.map(i=>({name:i.name,quantity:i.quantity}))
+    };
+    const entry={id:o.id,order_code:o.order_code,reason:cls.reason,before:clsBefore.cls,text:String(o.order_notes||o.raw_text||'').slice(0,160),
+     names:analysis.candidates.map(c=>c.phrase).slice(0,3),source:src?src.system+(srcProduct?': '+srcProduct:''):null,diag};
+    if(exportMode&&cls.cls!=='known')entry.full_text=redactOrder(o);
+    classes[cls.cls].push(entry);
     const differs=costDiff||central.needs_review||knowledgeDiff.length||d.vs_print_engine.length||(h&&d.vs_profit_engine.length)||(alloc.has(Number(o.id))&&d.vs_print_allocation.length)||!central.items.length;
     if(differs||url.searchParams.get('all')==='1')rows.push({id:o.id,order_code:o.order_code,ship_day:o.ship_day,text:String(o.order_notes||o.raw_text||'').slice(0,400),
      central:{items:central.items.map(i=>({ref:i.ref,name:i.name,quantity:i.quantity,unit_cost:i.unit_cost})),source:central.source,cost:central.cost,knowledge:central.trace.filter(t=>t.source==='knowledge')},
      baseline:{items:baseline.items.map(i=>({name:i.name,quantity:i.quantity})),source:baseline.source},
      profit_engine:h,profit_engine_detail:ho?{items:(ho.items||[]).map(i=>({name:i.name,quantity:i.quantity,unit_cost:i.unit_cost})),cost:hCost,source:ho.item_source}:null,
      needs_review:central.needs_review,uncertain:(central.uncertain||[]).map(u=>({alias:u.alias,reason:u.reason})),
-     print_engine:p,print_allocation:a,stock_reasons:invReasons,differences:d,class:cls});
+     print_engine:p,print_allocation:a,stock_reasons:invReasons,differences:d,class:cls,...(exportMode&&d.vs_print_engine.length?{full_text:redactOrder(o)}:{})});
    }
    return json({engine:ENGINE_VERSION,read_only:true,store,from,to,total,checked,batch:{size:limit,before,checked:orders.length,next_cursor:pg.next},counts,rows,
-    completeness:Object.fromEntries(Object.entries(classes).map(([k,v])=>[k,{count:v.length,orders:v}]))});
+    completeness:Object.fromEntries(Object.entries(classes).map(([k,v])=>[k,{count:v.length,orders:v}])),
+    // per order: class with the previous engine version > class now (same orders, same data)
+    before_after:{engine_before:'variants:off',engine_now:ENGINE_VERSION,transitions:beforeAfter}});
   }
   if(view==='lexicon'){
    await ensureLexiconTable(env);
