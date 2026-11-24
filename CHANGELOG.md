@@ -16,6 +16,11 @@
 
 ## السجل
 
+### 2026-11-24 — توثيق رؤية التطوير المستقبلية
+- `FUTURE_ROADMAP.md` (جديد): المنظومة (CORE/AI/AUTOMATION/SHIELD)، المبادئ الهندسية E/N/AI، الأحداث ونقاط نشوئها، ترتيب
+  المراحل، تقييم الجاهزية ونقاط الضعف W-1…W-12، التحسينات التدريجية. روابط من `CLAUDE.md` (§6.1)، `AGENTS.md`، `ARCHITECTURE.md` (§9).
+- توثيق فقط — لا تغيير وظيفي.
+
 ### 2026-11-24 — تفعيل حماية الإنتاج والتحقق منها
 - صاحب المستودع فعّل Ruleset ‏«CORVEX Production Protection» (id 27970952): `main`، Active، بدون Bypass؛ Pull Request إلزامي،
   الفحص `checks` إلزامي (strict)، منع force push والحذف (مقروءة من `GET /repos/.../rules/branches/main`).
