@@ -10,6 +10,8 @@ import {loadCatalogue,resolveOrderItems,describeCatalogue,productRef} from '../f
 import {classifyInventoryItems,loadInventoryModels,resetInventorySchemaCache} from '../functions/api/_inventory.js';
 import {onRequest as cohorts} from '../functions/api/profit-shipping-cohorts.js';
 import {onRequest as engineApi} from '../functions/api/product-engine.js';
+import {onRequestPost as productCheck} from '../functions/api/order-product-check.js';
+import {onRequest as draftsApi} from '../functions/api/order-drafts.js';
 import {normalizeArabic} from '../functions/api/_partial-delivery.js';
 
 const corpus=JSON.parse(readFileSync(new URL('./fixtures/product-corpus.json',import.meta.url),'utf8')).cases;
@@ -250,4 +252,43 @@ test('large ranges in batches: total in scope, cursor walks every order exactly 
  // unknown view batches the same way
  let ub=null,uc=0;do{const u=(await call(env,engineApi,`/product-engine?view=unknown&from=${day}&to=${day}&limit=10${ub?'&before='+ub:''}`)).body;uc+=u.batch.checked;ub=u.batch.next_cursor}while(ub);
  assert.equal(uc,total);
+});
+
+test('compare: completeness classes per order (clickable lists), source data read, orange orders not counted as engine errors',async()=>{
+ const {db,env}=setup();seedCorpus(db);
+ const add=(notes)=>Number(db.prepare(`INSERT INTO orders(order_code,recipient_name,phone,amount,order_notes,raw_text,created_by,created_at,printed,first_printed_at,store_id,delivery_status) VALUES(?,?,?,?,?,'',1,datetime('now'),1,datetime('now'),2,'delivered')`).run('C'+Math.random(),'ع','0790000000',10,notes).lastInsertRowid);
+ const miss=add('2 أسود\n1 بيج'),src=add('2 أسود'),lite=add('بيسك | اللون: أسود | الكمية: 2\nLiteSale: ORD-5F2K9');
+ db.exec("CREATE TABLE IF NOT EXISTS litesale_review_queue(source_id TEXT PRIMARY KEY,payload TEXT NOT NULL,state TEXT,corvex_order_id INTEGER)");
+ db.prepare("INSERT INTO litesale_review_queue(source_id,payload,state,corvex_order_id) VALUES('ORD-1',?, 'approved',?)").run(JSON.stringify({product:'جاكيت فرو'}),src);
+ const dump=()=>JSON.stringify(db.prepare('SELECT * FROM orders').all())+JSON.stringify(db.prepare('SELECT * FROM inventory_movements').all());const before=dump();
+ const r=(await call(env,engineApi,`/product-engine?view=compare&from=${day}&to=${new Date(Date.now()+3*3600e3+86400e3).toISOString().slice(0,10)}&limit=500`)).body;
+ const C=r.completeness,ids=k=>C[k].orders.map(o=>o.id);
+ assert.ok(ids('missing').includes(miss));assert.ok(ids('failure').includes(src),'source names a known product the text lacks');
+ assert.ok(ids('learn').includes(lite));assert.deepEqual(C.learn.orders.find(o=>o.id===lite).names,['بيسك'],'no «litesale ord» candidate');
+ const sum=Object.values(C).reduce((n,x)=>n+x.count,0);assert.equal(sum,r.batch.checked);
+ assert.equal(dump(),before);
+});
+
+test('new manual order check (any signed-in user, Corvex only) and drafts (not orders): nothing guessed, no order written',async()=>{
+ const {db,env}=setup();
+ const before=db.prepare('SELECT COUNT(*) n FROM orders').get().n;
+ const chk=async(b,tok='e')=>(await call(env,productCheck,'/order-product-check',b,tok));
+ assert.equal((await chk({store_id:2,order_notes:'2 أسود'},'nobody')).status,401);
+ assert.equal((await chk({store_id:1,order_notes:'2 أسود'})).body.status,'not_applicable','other stores untouched');
+ const miss=(await chk({store_id:2,order_notes:'2 أسود\n1 بيج'})).body;assert.equal(miss.status,'missing_product');assert.ok(miss.catalogue.some(p=>p.name==='جاكيت فرو'));
+ assert.equal((await chk({store_id:2,order_notes:'جاكيت فرو اسود'})).body.status,'known');
+ assert.equal((await chk({store_id:2,order_notes:'شنطه جلد عدد 2'})).body.status,'new_name','a new name never blocks the employee');
+ assert.equal((await chk({store_id:2,order_notes:'2 أسود',product_ref:'fur_jacket'})).body.status,'known','landing-page product id needs no typing');
+ assert.equal((await chk({store_id:2,order_notes:'',raw_text:'محمد\n0791234567\nعمان'})).body.status,'missing_product');
+ // drafts
+ const payload={store_id:2,recipient_name:'محمد',phone:'0791234567',amount:'17',order_notes:'2 أسود',raw_text:''};
+ const d1=await call(env,draftsApi,'/order-drafts',{action:'save',payload},'e'),d2=await call(env,draftsApi,'/order-drafts',{action:'save',payload},'e');
+ assert.equal(d1.status,200);assert.equal(d1.body.id,d2.body.id,'same draft stored once');
+ assert.equal((await call(env,draftsApi,'/order-drafts',{action:'save',payload:{...payload,store_id:1}},'e')).status,400);
+ assert.equal((await call(env,draftsApi,'/order-drafts',undefined,'e')).status,403,'list is admin only');
+ const list=(await call(env,draftsApi,'/order-drafts')).body.drafts;assert.equal(list.length,1);assert.equal(list[0].payload.order_notes,'2 أسود');
+ assert.equal((await call(env,draftsApi,'/order-drafts',{action:'close',id:list[0].id})).body.ok,true);
+ assert.equal((await call(env,draftsApi,'/order-drafts')).body.drafts.length,0);
+ assert.equal(db.prepare("SELECT status FROM order_drafts").get().status,'closed','kept, never deleted');
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM orders').get().n,before,'no order created');
 });

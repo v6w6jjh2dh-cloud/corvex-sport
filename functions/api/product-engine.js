@@ -27,9 +27,10 @@
 //                                             (memory only: orders, stock and profits are not changed)
 // Designed for later use by CORVEX AI through the same validated actions (propose → test → admin approval).
 import {json,round2,normalizeArabic} from './_partial-delivery.js';
+import {corvexStore} from './_corvex-store.js';
 import {classifyInventoryItems,loadInventoryModels} from './_inventory.js';
-import {loadCatalogue,describeCatalogue,resolveOrderItems,ensureProductAliasTable,ensureInterpretationTable,ensureLexiconTable,LEXICON_KINDS,textHash,ensureRuleEventsTable,logRuleEvent,catalogueAsOf,productRef,ENGINE_VERSION} from './_product-engine.js';
-import {unknownPhrases,analyzeOrder,groupPhrases,DEFAULT_LEXICON,LEARNED_DEFAULTS,LANGUAGE_VERSION} from './_order-language.js';
+import {loadCatalogue,describeCatalogue,resolveOrderItems,ensureProductAliasTable,ensureInterpretationTable,ensureLexiconTable,LEXICON_KINDS,textHash,ensureRuleEventsTable,logRuleEvent,catalogueAsOf,classifyCompleteness,productRef,ENGINE_VERSION} from './_product-engine.js';
+import {unknownPhrases,analyzeOrder,groupPhrases,parseOrderText,DEFAULT_LEXICON,LEARNED_DEFAULTS,LANGUAGE_VERSION} from './_order-language.js';
 import {PRODUCT_KNOWLEDGE,QUANTITY_RULES,GUARD_RULES,NAME_SYNONYMS,KNOWLEDGE_VERSION} from './_product-knowledge.js';
 import {onRequest as cohortEngine} from './profit-shipping-cohorts.js';
 
@@ -42,10 +43,6 @@ async function admin(request,env){
  const h=request.headers.get('authorization')||'',t=h.startsWith('Bearer ')?h.slice(7):'';
  if(!t)return null;
  return env.DB.prepare("SELECT u.id,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>datetime('now') AND u.is_active=1").bind(t).first();
-}
-async function corvexStore(env){
- const rows=(await env.DB.prepare('SELECT id,name FROM stores ORDER BY id').all()).results||[];
- return rows.find(s=>/corvex|كورفكس/i.test(String(s.name||'')))||null;
 }
 // Scope of every check: Corvex orders that were printed (shipped) in [from,to] by first print day (Amman).
 // Batches walk the range newest → oldest with a cursor (order id), so no order is read twice.
@@ -113,6 +110,11 @@ export async function onRequest({request,env}){
     try{const r=await cohortEngine({request:new Request(`${url.origin}/api/profit-shipping-cohorts?date=${d}&store_id=${store.id}`,{headers:{authorization:auth}}),env});
      if(r.ok)for(const o of (await r.json()).orders||[])cohort.set(Number(o.id),o)}catch{}
    }
+   // source data of imported orders (LiteSale review queue): the product field as the customer chose it
+   const sourceOf=new Map();
+   if(orders.length){try{for(const r of (await env.DB.prepare(`SELECT corvex_order_id id,payload FROM litesale_review_queue WHERE corvex_order_id IN (${orders.map(()=>'?').join(',')})`).bind(...orders.map(o=>Number(o.id))).all()).results||[]){
+    let p={};try{p=JSON.parse(r.payload||'{}')}catch{}sourceOf.set(Number(r.id),{system:'LiteSale',product:String(p.product||'').trim()})}}catch{}}
+   const classes={known:[],missing:[],learn:[],failure:[],unclear:[]};
    const rows=[];const counts={orders:orders.length,central_vs_profit_engine:0,baseline_vs_profit_engine:0,knowledge_changes:0,central_vs_print_engine:0,central_vs_print_allocation:0,central_unrecognised:0,central_cost_unknown:0,profit_cost_unknown:0,central_needs_review:0,cost_differences:0};
    for(const o of orders){
     // read with the rules in force when the order was created (no automatic re-interpretation of history)
@@ -151,15 +153,23 @@ export async function onRequest({request,env}){
     if(central.needs_review)counts.central_needs_review++;
     if(!central.items.length)counts.central_unrecognised++;
     if(central.items.length&&central.cost===null)counts.central_cost_unknown++;
+    // completeness class: the whole order (notes, original text, source data, stored stock deduction)
+    const analysis=analyzeOrder(o,cat.models,cat.lexicon),src=sourceOf.get(Number(o.id))||null;
+    const srcProduct=src&&src.product?src.product:null;
+    const srcKnown=!!(srcProduct&&parseOrderText(srcProduct,cat.models,cat.lexicon).items.length);
+    const cls=classifyCompleteness({central,analysis,others:{profit:h,print:p,allocation:a},sourceProduct:srcProduct,sourceKnown:srcKnown});
+    classes[cls.cls].push({id:o.id,order_code:o.order_code,reason:cls.reason,text:String(o.order_notes||o.raw_text||'').slice(0,160),
+     names:analysis.candidates.map(c=>c.phrase).slice(0,3),source:src?src.system+(srcProduct?': '+srcProduct:''):null});
     const differs=costDiff||central.needs_review||knowledgeDiff.length||d.vs_print_engine.length||(h&&d.vs_profit_engine.length)||(alloc.has(Number(o.id))&&d.vs_print_allocation.length)||!central.items.length;
     if(differs||url.searchParams.get('all')==='1')rows.push({id:o.id,order_code:o.order_code,ship_day:o.ship_day,text:String(o.order_notes||o.raw_text||'').slice(0,400),
      central:{items:central.items.map(i=>({ref:i.ref,name:i.name,quantity:i.quantity,unit_cost:i.unit_cost})),source:central.source,cost:central.cost,knowledge:central.trace.filter(t=>t.source==='knowledge')},
      baseline:{items:baseline.items.map(i=>({name:i.name,quantity:i.quantity})),source:baseline.source},
      profit_engine:h,profit_engine_detail:ho?{items:(ho.items||[]).map(i=>({name:i.name,quantity:i.quantity,unit_cost:i.unit_cost})),cost:hCost,source:ho.item_source}:null,
      needs_review:central.needs_review,uncertain:(central.uncertain||[]).map(u=>({alias:u.alias,reason:u.reason})),
-     print_engine:p,print_allocation:a,stock_reasons:invReasons,differences:d});
+     print_engine:p,print_allocation:a,stock_reasons:invReasons,differences:d,class:cls});
    }
-   return json({engine:ENGINE_VERSION,read_only:true,store,from,to,total,batch:{size:limit,before,checked:orders.length,next_cursor:pg.next},counts,rows});
+   return json({engine:ENGINE_VERSION,read_only:true,store,from,to,total,batch:{size:limit,before,checked:orders.length,next_cursor:pg.next},counts,rows,
+    completeness:Object.fromEntries(Object.entries(classes).map(([k,v])=>[k,{count:v.length,orders:v}]))});
   }
   if(view==='lexicon'){
    await ensureLexiconTable(env);
