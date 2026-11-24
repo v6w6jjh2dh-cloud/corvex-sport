@@ -1,5 +1,7 @@
 // CORVEX accumulated product knowledge — ONE registry of every product name, spelling, abbreviation,
 // quantity convention and exception that the older engines learned from real orders.
+// ROLE: legacy SEED for Corvex (seasonal product names). The generic engine does not depend on it:
+// language = _order-language.js lexicon, products = catalogue data, learning = store_lexicon/product_aliases.
 // Sources (all still active and NOT modified): functions/api/_inventory.js, _partial-delivery.js,
 // profit-shipping-cohorts.js, [[path]].js (/ai-parse-order prompt), public/product-rules.js,
 // public/app-v62.js (PRODUCT_COST_RULES), app-v68-order-rules.js, app-v73-model-performance.js,
@@ -142,31 +144,10 @@ export const GUARD_RULES=[
  {id:'G-RETURN-ONCE',where:'_inventory.js restockStatements',test:'inventory-returns tests',description:'إرجاع القطعة للمخزون مرة واحدة ضمن حد المخصوم'}
 ];
 
-const WORD_NUMBERS={واحد:1,واحده:1,اثنين:2,اتنين:2,ثنتين:2,ثلاث:3,ثلاثه:3,اربع:4,اربعه:4,خمس:5,خمسه:5,ست:6,سته:6,سبع:7,سبعه:7,ثمان:8,ثمانيه:8,تسع:9,تسعه:9,عشر:10,عشره:10};
-const WORDS=Object.keys(WORD_NUMBERS).join('|');
-
-// Text is already normalised (normalizeArabic). Phones, weights, sizes and prices are removed first.
-export function stripMeta(text){
- return String(text||'')
-  .replace(/(?:^|\s)0?7\d{8}(?=\s|$)/g,' ')
-  .replace(/(?:وزن\S*|الوزن|طول\S*|الطول|قياس|مقاس|السعر|سعر)\s*[:=\-]?\s*\d+(?:[.,]\d+)?/g,' ')
-  .replace(/\d+(?:[.,]\d+)?\s*(?:د(?:ينار)?|دنانير|jd|jod)?\s*(?:شامل|مع|و)\s*(?:ال)?توصيل/g,' ')
-  .replace(/\d+(?:[.,]\d+)?\s*(?:دينار|دنانير|jd|jod)(?=\s|$)/g,' ')
-  .replace(/\s+/g,' ').trim();
-}
-
-// Quantity written with a convention the shared matcher does not read on the product line.
-// Returns {quantity, rule} or null. productLine = the normalised line that contains the product.
+// Quantity conventions are now data in the generic parser (_order-language.js LEARNED_DEFAULTS);
+// kept as a thin wrapper so the registry stays readable on its own.
+import {inlineQuantity} from './_order-language.js';
 export function knowledgeQuantity(productLine,{productName=''}={}){
- const line=stripMeta(productLine);
- let m=line.match(/(?:^|\s)الغدد\s*[:=\-]?\s*(\d{1,2})(?!\d)/);
- if(m&&+m[1]>=1&&+m[1]<=50)return{quantity:+m[1],rule:'Q-TYPO-ADAD'};
- if(/(?:^|\s)(?:ثلاث|ثلاثه)\s*(?:ال)?(?:الوان|الالوان)(?=\s|$)/.test(line))return{quantity:3,rule:'Q-THREE-COLOURS'};
- if(/ليكرا/.test(productName+' '+line)&&/(?:^|\s)العرض(?=\s|$)/.test(line))return{quantity:3,rule:'Q-LYCRA-OFFER'};
- if(/(?:^|\s)(?:قطعتين|قطعتان|لونين|حبتين|ثنتين)(?=\s|$)/.test(line))return{quantity:2,rule:'Q-TWO-WORDS'};
- m=line.match(new RegExp('(?:^|\\s)('+WORDS+')\\s*(?:قطعه|قطع|حبه|حبات|لون|الوان)(?=\\s|$)'));
- if(m&&WORD_NUMBERS[m[1]]>1)return{quantity:WORD_NUMBERS[m[1]],rule:'Q-WORD-NUMBER'};
- m=line.match(/^(\d{1,2})\s+(?=\S)(?!(?:دينار|دنانير|د|jd|شامل|مع|توصيل)(?:\s|$))/);
- if(m&&+m[1]>=2&&+m[1]<=20)return{quantity:+m[1],rule:'Q-LEADING-NUMBER'};
- return null;
+ const r=inlineQuantity(productLine,{productName});
+ return r?{quantity:r.quantity,rule:{typo:'Q-TYPO-ADAD',phrase:'Q-THREE-COLOURS',product_word:'Q-LYCRA-OFFER',pair_word:'Q-TWO-WORDS',number_word:'Q-WORD-NUMBER',leading_number:'Q-LEADING-NUMBER'}[r.rule]}:null;
 }

@@ -4,11 +4,14 @@
 // item logic (profit-shipping-cohorts.js, which stays unchanged and active), plus store-scoped
 // approved aliases. Nothing here writes to the database; no section uses it yet except the
 // read-only comparison endpoint (/api/product-engine). Activation needs the owner's approval.
-import {classifyInventoryItems,loadInventoryModels,FUR_ALIASES} from './_inventory.js';
+import {loadInventoryModels,FUR_ALIASES} from './_inventory.js';
 import {loadCostedModels,approvedCost,canonicalModelName,normalizeArabic,STATI_ALIASES,FILLER_ALIASES,round2} from './_partial-delivery.js';
 
-import {PRODUCT_KNOWLEDGE,NAME_SYNONYMS,KNOWLEDGE_VERSION,knowledgeQuantity} from './_product-knowledge.js';
-export const ENGINE_VERSION='product-engine-2-shadow';
+import {PRODUCT_KNOWLEDGE,NAME_SYNONYMS,KNOWLEDGE_VERSION} from './_product-knowledge.js';
+import {parseOrderText,inlineQuantity,DEFAULT_LEXICON,LEARNED_DEFAULTS,LANGUAGE_VERSION} from './_order-language.js';
+// The generic order-language parser replaces the matcher here (identical with DEFAULT_LEXICON — tested).
+const parse=(text,models,lexicon=DEFAULT_LEXICON)=>parseOrderText(text,models,lexicon).items;
+export const ENGINE_VERSION='product-engine-3-shadow';
 const key=x=>normalizeArabic(x);
 // ---- copied verbatim from profit-shipping-cohorts.js (kept identical; equivalence is tested)
 const MODEL_COSTS=[
@@ -101,7 +104,7 @@ export async function receivedItems(env,order,models){
   if(list.some(x=>!Number.isFinite(x.received)||x.received<0))return null;
   return mergeItems(list,models);
  }
- const matches=await classifyInventoryItems(env,raw,models);
+ const matches=parse(raw,models);
  return matches.length?mergeItems(matches.map(x=>({...x,received:x.quantity})),models):null;
 }
 
@@ -131,6 +134,43 @@ export async function ensureInterpretationTable(env){
 }
 export function textHash(text){let h=2166136261;for(const c of String(text||'')){h^=c.codePointAt(0);h=Math.imul(h,16777619)>>>0}return h.toString(16)}
 
+// Store language (how this store's staff write orders), learned with approval: propose → test → approve.
+// Each approved entry extends the generic lexicon for that store only — no code change.
+export const LEXICON_KINDS={
+ colour:{field:'colours',label:'لون'},unit:{field:'unitWords',label:'وحدة/عبوة'},quantity_label:{field:'quantityLabels',label:'كلمة كمية'},
+ meta_word:{field:'metaWords',label:'كلمة ليست منتجًا (سعر/عنوان/وزن…)'},operation_word:{field:'operationWords',label:'كلمة إرجاع/تبديل'},
+ number_word:{field:'numberWords',label:'رقم بالكلمات',needs:'quantity'},pair_word:{learned:'inlinePairWords',label:'كلمة تعني كمية',needs:'quantity'},
+ typo:{learned:'typos',label:'خطأ إملائي',needs:'fix'},phrase_quantity:{learned:'phraseQuantities',label:'عبارة تعني كمية',needs:'quantity'},
+ product_word:{learned:'productWords',label:'كلمة عرض لمنتج',needs:'product+quantity'}
+};
+export async function ensureLexiconTable(env){
+ await env.DB.prepare(`CREATE TABLE IF NOT EXISTS store_lexicon(id INTEGER PRIMARY KEY AUTOINCREMENT,store_id INTEGER NOT NULL,kind TEXT NOT NULL,
+  value TEXT NOT NULL,value_raw TEXT NOT NULL,data_json TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'pending',proposed_by INTEGER,
+  proposed_via TEXT NOT NULL DEFAULT 'admin',note TEXT NOT NULL DEFAULT '',test_json TEXT NOT NULL DEFAULT '',decided_by INTEGER,decided_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),UNIQUE(store_id,kind,value,status))`).run();
+}
+export function buildLexicon(entries=[]){
+ const lex={...DEFAULT_LEXICON,colours:[...DEFAULT_LEXICON.colours],unitWords:[...DEFAULT_LEXICON.unitWords],quantityLabels:[...DEFAULT_LEXICON.quantityLabels],
+  metaWords:[...DEFAULT_LEXICON.metaWords],operationWords:[...DEFAULT_LEXICON.operationWords],numberWords:{...DEFAULT_LEXICON.numberWords}};
+ const learned={...LEARNED_DEFAULTS,typos:{...LEARNED_DEFAULTS.typos},inlinePairWords:{...LEARNED_DEFAULTS.inlinePairWords},
+  phraseQuantities:[...LEARNED_DEFAULTS.phraseQuantities],productWords:[...LEARNED_DEFAULTS.productWords]};
+ for(const e of entries){
+  const k=LEXICON_KINDS[e.kind];if(!k)continue;let d={};try{d=JSON.parse(e.data_json||'{}')}catch{}
+  const v=key(e.value);if(!v)continue;
+  if(k.field==='numberWords')lex.numberWords[v]=Number(d.quantity)||0;
+  else if(k.field){if(!lex[k.field].includes(v))lex[k.field].push(v)}
+  else if(k.learned==='inlinePairWords')learned.inlinePairWords[v]=Number(d.quantity)||0;
+  else if(k.learned==='typos')learned.typos[v]=key(d.fix||'');
+  else if(k.learned==='phraseQuantities')learned.phraseQuantities.push({phrase:v,quantity:Number(d.quantity)||0});
+  else if(k.learned==='productWords')learned.productWords.push({product:key(d.product||''),word:v,quantity:Number(d.quantity)||0});
+ }
+ return {lexicon:lex,learned};
+}
+async function storeLexicon(env,storeId){
+ if(!storeId)return [];
+ try{await ensureLexiconTable(env);return (await env.DB.prepare("SELECT kind,value,data_json FROM store_lexicon WHERE store_id=? AND status='approved'").bind(storeId).all()).results||[]}catch{return []}
+}
+
 // storeId: aliases approved for that store are added to their product (Corvex only for now).
 // extraAliases: [{product_ref, alias}] — used by the dry-run test of a proposed alias.
 // Accumulated knowledge (_product-knowledge.js): its aliases are added to the catalogue product with
@@ -152,7 +192,7 @@ export function withKnowledge(models){
  });
  return out;
 }
-export async function loadCatalogue(env,{storeId=0,extraAliases=[],knowledge=true}={}){
+export async function loadCatalogue(env,{storeId=0,extraAliases=[],knowledge=true,extraLexicon=[]}={}){
  const base=await cohortModels(env),catalogueError=base.catalogueError;
  const models=knowledge?withKnowledge(base.models):base.models;
  let approved=[];
@@ -162,7 +202,10 @@ export async function loadCatalogue(env,{storeId=0,extraAliases=[],knowledge=tru
   const ref=productRef(m),extra=add.filter(a=>a.product_ref===ref).map(a=>key(a.alias)).filter(a=>a.length>1);
   return extra.length?{...m,aliases:[...new Set([...(m.aliases||[]),...extra])].sort((a,b)=>b.length-a.length)}:m;
  });
- return {models:out,catalogueError,storeId,knowledge,version:ENGINE_VERSION+(knowledge?'+'+KNOWLEDGE_VERSION:'')};
+ // knowledge:false = exactly the active engine (default lexicon, no learned conventions, no store language)
+ const lang=knowledge?buildLexicon([...(await storeLexicon(env,storeId)),...extraLexicon]):{lexicon:DEFAULT_LEXICON,learned:null};
+ return {models:out,catalogueError,storeId,knowledge,lexicon:lang.lexicon,learned:lang.learned,
+  version:ENGINE_VERSION+'+'+LANGUAGE_VERSION+(knowledge?'+'+KNOWLEDGE_VERSION:'')};
 }
 
 export function describeCatalogue(cat){
@@ -182,7 +225,7 @@ export async function resolveOrderItems(env,o,cat,allocation=null){
   const sources=[['order_notes',String(o.order_notes||'')],['raw_text',String(o.raw_text||'')]];
   for(const [source,text] of sources){
    if(!text.trim()){trace.push({source,empty:true});continue}
-   const parsed=await classifyInventoryItems(env,text,models);
+   const parsed=parse(text,models,cat.lexicon);
    trace.push({source,found:parsed.map(x=>({name:(models.find(m=>m.id===Number(x.model_id))||{}).name||String(x.model_id),quantity:x.quantity}))});
    if(!parsed.length)continue;
    let list=parsed;
@@ -190,7 +233,7 @@ export async function resolveOrderItems(env,o,cat,allocation=null){
    // use it for a single-model order whose own text carries no quantity at all.
    // The sources are never added together, so the same piece is not counted twice.
    const other=sources.find(([name])=>name!==source)[1];
-   if(parsed.length===1&&parsed[0].quantity===1&&!hasQuantityMarker(text)&&other.trim()&&!(await classifyInventoryItems(env,other,models)).length){
+   if(parsed.length===1&&parsed[0].quantity===1&&!hasQuantityMarker(text)&&other.trim()&&!parse(other,models,cat.lexicon).length){
     const q=explicitQuantity(other);if(q>1){list=[{...parsed[0],quantity:q}];trace.push({source:'quantity_from_'+sources.find(([name])=>name!==source)[0],quantity:q})}
    }
    items=mergeItems(list,models);itemSource=source;break;
@@ -200,7 +243,7 @@ export async function resolveOrderItems(env,o,cat,allocation=null){
    const scarfo=models.find(m=>key(canonicalModelName(m.name))===key('جاكيت جوخ سكايفو'));
    for(const [source,text] of sources){
     if(!scarfo||!text.trim()||!BARE_JOKH.test(key(text)))continue;
-    const probe=await classifyInventoryItems(env,text,[{id:scarfo.id,name:scarfo.name,aliases:['جاكيت جوخ','جكيت جوخ','جاكت جوخ']}]);
+    const probe=parse(text,[{id:scarfo.id,name:scarfo.name,aliases:['جاكيت جوخ','جكيت جوخ','جاكت جوخ']}],cat.lexicon);
     const other=sources.find(([name])=>name!==source)[1];
     const otherQ=explicitQuantity(other);
     const q=probe.reduce((n,x)=>n+x.quantity,0);
@@ -213,8 +256,8 @@ export async function resolveOrderItems(env,o,cat,allocation=null){
   if(cat.knowledge&&items.length===1&&items[0].quantity===1&&(itemSource==='order_notes'||itemSource==='raw_text')){
    const text=sources.find(([name])=>name===itemSource)[1],model=models.find(m=>m.id===Number(items[0].model_id))||{};
    for(const line of text.split(/\n+/)){
-    if(!line.trim()||!(await classifyInventoryItems(env,line,models)).length)continue;
-    const kq=knowledgeQuantity(key(line),{productName:key(model.name||items[0].name)});
+    if(!line.trim()||!parse(line,models,cat.lexicon).length)continue;
+    const kq=inlineQuantity(line,{productName:model.name||items[0].name,lexicon:cat.lexicon,learned:cat.learned});
     if(kq){items=mergeItems([{model_id:items[0].model_id,name:model.name||items[0].name,quantity:kq.quantity}],models);trace.push({source:'knowledge',rule:kq.rule,quantity:kq.quantity})}
     break;
    }

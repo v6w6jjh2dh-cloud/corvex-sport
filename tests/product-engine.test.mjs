@@ -173,3 +173,32 @@ test('knowledge view: self-check passes, read-only; interpretation memory: inter
  assert.ok(m.source_text.length>0);
  assert.equal(dump(),before,'orders, stock and catalogue unchanged');
 });
+
+test('learning loop: unknown phrases → alias for a NEW product; store language rule (new unit) via propose → test → approve; nothing else changes',async()=>{
+ const {db,env}=setup();seedCorpus(db);
+ const add=(notes)=>Number(db.prepare(`INSERT INTO orders(order_code,recipient_name,phone,amount,order_notes,raw_text,created_by,created_at,printed,first_printed_at,store_id,delivery_status) VALUES(?,?,?,?,?,'',1,datetime('now'),1,datetime('now'),2,'delivered')`).run('N'+Math.random(),'ع','0790000000',10,notes).lastInsertRowid);
+ const o1=add('شنطه جلد عدد 2\nعمان - طبربور'),o2=add('شنطه جلد 3 قطع'),o3=add('جاكيت جوخ كاجوال\n4 كراتين');
+ const dump=()=>JSON.stringify(db.prepare('SELECT * FROM orders').all())+JSON.stringify(db.prepare('SELECT * FROM inventory_movements').all())+JSON.stringify(db.prepare('SELECT * FROM profit_models').all());
+ const before=dump();
+ // 1) the engine finds the new product phrase on its own (no product word list)
+ const u=(await call(env,engineApi,'/product-engine?view=unknown')).body;
+ const bag=u.candidates.find(c=>c.phrase==='شنطه جلد');assert.ok(bag,JSON.stringify(u.candidates));assert.equal(bag.orders,2);
+ // 2) a manager correction suggests the alias; nothing is applied automatically
+ const c=(await call(env,engineApi,'/product-engine',{action:'correct',order_id:o1,items:[{product_ref:'gap_filler',quantity:2}]})).body;
+ assert.deepEqual(c.suggestions,[{action:'propose',product_ref:'gap_filler',alias:'شنطه جلد'}]);
+ // 3) a new unit word for this store: «كراتين» — learned with approval, used by the central engine only
+ const cat0=(await call(env,engineApi,'/product-engine?view=lexicon')).body;assert.ok(cat0.defaults.unitWords.includes('قطع'));
+ assert.equal((await call(env,engineApi,'/product-engine',{action:'lexicon_propose',kind:'unit',value:'قطع'})).status,409,'already known');
+ assert.equal((await call(env,engineApi,'/product-engine',{action:'lexicon_propose',kind:'number_word',value:'دزينه'})).status,400,'quantity required');
+ assert.equal((await call(env,engineApi,'/product-engine',{action:'lexicon_propose',kind:'unit',value:'كراتين'},'e')).status,403,'staff');
+ const p=(await call(env,engineApi,'/product-engine',{action:'lexicon_propose',kind:'unit',value:'كراتين'})).body;
+ assert.equal((await call(env,engineApi,'/product-engine',{action:'lexicon_approve',id:p.id,confirm:'اعتماد القاعدة'})).status,409,'test first');
+ const t=(await call(env,engineApi,'/product-engine',{action:'lexicon_test',id:p.id})).body;
+ assert.equal(t.changed,1);assert.equal(t.examples[0].id,o3);assert.deepEqual(Object.values(t.examples[0].after),[4]);
+ assert.equal((await call(env,engineApi,'/product-engine',{action:'lexicon_approve',id:p.id,confirm:'خطأ'})).status,400);
+ assert.equal((await call(env,engineApi,'/product-engine',{action:'lexicon_approve',id:p.id,confirm:'اعتماد القاعدة'})).body.status,'approved');
+ const corvex=await loadCatalogue(env,{storeId:2}),other=await loadCatalogue(env,{storeId:1}),base=await loadCatalogue(env,{storeId:2,knowledge:false});
+ assert.ok(corvex.lexicon.unitWords.includes('كراتين'));assert.ok(!other.lexicon.unitWords.includes('كراتين'),'other store untouched');
+ assert.ok(!base.lexicon.unitWords.includes('كراتين'),'baseline = active engine untouched');
+ assert.equal(dump(),before,'orders, stock and catalogue unchanged');
+});
