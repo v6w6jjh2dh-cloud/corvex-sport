@@ -1,0 +1,155 @@
+{
+ "10375": {
+  "central": {
+   "جاكيت جوخ سكايفو": 2
+  },
+  "print_inventory": {},
+  "product_rules_js": {},
+  "model_performance_js": {
+   "جاكيت جوخ سكايفو": 1
+  }
+ },
+ "10376": {
+  "central": {
+   "جاكيت جوخ سكايفو": 1
+  },
+  "print_inventory": {},
+  "product_rules_js": {},
+  "model_performance_js": {}
+ },
+ "10400": {
+  "central": {
+   "جاكيت جوخ كاجوال": 2
+  },
+  "product_rules_js": {}
+ },
+ "price-not-qty": {
+  "central": {
+   "جاكيت جوخ كاجوال": 1
+  },
+  "product_rules_js": {},
+  "model_performance_js": {
+   "جاكيت جوخ كاجوال": 20
+  }
+ },
+ "stati": {
+  "central": {
+   "جاكيت جوخ سكايفو": 1
+  },
+  "print_inventory": {},
+  "product_rules_js": {}
+ },
+ "stati-2": {
+  "central": {
+   "جاكيت جوخ سكايفو": 1
+  },
+  "print_inventory": {},
+  "product_rules_js": {}
+ },
+ "epoxy": {
+  "central": {
+   "مالي الفراغات": 3
+  },
+  "product_rules_js": {}
+ },
+ "epoxy-2": {
+  "central": {
+   "مالي الفراغات": 2
+  },
+  "product_rules_js": {}
+ },
+ "fur+casual": {
+  "central": {
+   "جاكيت جوخ كاجوال": 1,
+   "جاكيت فرو": 2
+  },
+  "product_rules_js": {
+   "جاكيت فرو": 2
+  },
+  "model_performance_js": {
+   "جاكيت جوخ كاجوال": 2,
+   "جاكيت فرو": 2
+  }
+ },
+ "fur-lining": {
+  "central": {
+   "جاكيت جوخ كاجوال": 1
+  },
+  "product_rules_js": {}
+ },
+ "fur-word": {
+  "central": {
+   "جاكيت جوخ كاجوال": 1
+  },
+  "product_rules_js": {}
+ },
+ "fur+epoxy": {
+  "central": {
+   "جاكيت فرو": 2,
+   "مالي الفراغات": 1
+  },
+  "product_rules_js": {
+   "جاكيت فرو": 2
+  }
+ },
+ "sahab-pants": {
+  "central": {
+   "بنطلون جيوب سحاب": 2
+  },
+  "product_rules_js": {
+   "جيوب سحاب": 2
+  },
+  "model_performance_js": {
+   "جيوب سحاب": 2
+  }
+ },
+ "prada": {
+  "central": {
+   "تيشيرت برادا": 2
+  },
+  "print_inventory": {}
+ },
+ "jakar": {
+  "central": {
+   "بجامه جاكار": 1
+  },
+  "print_inventory": {},
+  "product_rules_js": {
+   "جاكار": 1
+  },
+  "model_performance_js": {
+   "جاكار": 1
+  }
+ },
+ "polo": {
+  "central": {
+   "تيشيرت بولو": 1
+  },
+  "print_inventory": {},
+  "product_rules_js": {
+   "بولو تريكو": 1
+  },
+  "model_performance_js": {
+   "بولو تريكو": 1
+  }
+ },
+ "trend": {
+  "central": {
+   "جاكيت ترند": 1
+  },
+  "print_inventory": {}
+ },
+ "nike": {
+  "central": {
+   "جاكيت نايك": 1
+  },
+  "print_inventory": {}
+ },
+ "women-short": {
+  "central": {
+   "جاكيت جوخ سكايفو": 1
+  },
+  "print_inventory": {},
+  "product_rules_js": {}
+ }
+}
