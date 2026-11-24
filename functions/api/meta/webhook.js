@@ -1,3 +1,4 @@
+import { redactForAI, privateAIRequest } from '../_ai-privacy.js';
 // Meta Messenger webhook endpoint for Corvex.
 // GET: Meta webhook verification handshake.
 // POST: Receives Messenger messages, asks OpenAI for a concise sales reply,
@@ -66,12 +67,13 @@ async function makeReply(env, text) {
       authorization: `Bearer ${apiKey}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
+    // T-12: not stored by the provider; phones/e-mails/links removed (the sales reply does not need them).
+    body: JSON.stringify(privateAIRequest({
       model: OPENAI_MODEL,
       instructions: SALES_INSTRUCTIONS,
-      input: text,
+      input: redactForAI(text, { purpose: 'order' }).text,
       max_output_tokens: 120,
-    }),
+    })),
   });
 
   if (!response.ok) throw new Error(`OpenAI ${response.status}: ${await response.text()}`);

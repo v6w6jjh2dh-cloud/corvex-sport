@@ -1,3 +1,4 @@
+import {redactForAI,privateAIRequest} from './_ai-privacy.js';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8'}});
 
 async function auth(request,env){
@@ -62,7 +63,7 @@ export async function onRequestPost({request,env}){
 قائمة الموديلات المركزية:
 ${catalog}`;
  let response;
- try{response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{authorization:`Bearer ${env.OPENAI_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({model:env.OPENAI_MODEL||'gpt-5-nano',instructions,input:text,reasoning:{effort:'minimal'},text:{format:{type:'json_schema',name:'corvex_profit_interpretation',strict:true,schema}}})})}catch{return json({error:'تعذر الاتصال بمحرك فهم الأرباح'},502)}
+ try{response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{authorization:`Bearer ${env.OPENAI_API_KEY}`,'content-type':'application/json'},body:JSON.stringify(privateAIRequest({model:env.OPENAI_MODEL||'gpt-5-nano',instructions,input:redactForAI(text,{purpose:'products'}).text,reasoning:{effort:'minimal'},text:{format:{type:'json_schema',name:'corvex_profit_interpretation',strict:true,schema}}}))})}catch{return json({error:'تعذر الاتصال بمحرك فهم الأرباح'},502)}
  const data=await response.json().catch(()=>({}));if(!response.ok)return json({error:data?.error?.message||'فشل الفهم السياقي للأرباح'},502);
  let parsed={};try{parsed=JSON.parse(outputText(data))}catch{return json({error:'نتيجة فهم الأرباح غير صالحة'},502)}
  const byKey=new Map(models.map(model=>[model.key,model])),combined=new Map(),unresolved=new Set((parsed.unresolved_models||[]).map(value=>String(value||'').trim()).filter(value=>value&&clothingLike(value)));
