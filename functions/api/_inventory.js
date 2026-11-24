@@ -19,6 +19,8 @@ const COLOR_QUANTITY=/(?:^|\s)(\d{1,3})\s*(?:اسود|ابيض|بني|زيتي|�
 const WORD_NUMBERS={واحد:1,واحده:1,اثنين:2,اتنين:2,ثنتين:2,ثلاث:3,ثلاثه:3,اربع:4,اربعه:4,خمس:5,خمسه:5,ست:6,سته:6,سبع:7,سبعه:7,ثمان:8,ثمانيه:8,تسع:9,تسعه:9,عشر:10,عشره:10};
 
 let schemaPromise=null;
+// Tests use a fresh database per case; production keeps one schema check per isolate.
+export function resetInventorySchemaCache(){schemaPromise=null}
 export async function ensureInventorySchema(env){
  if(schemaPromise)return schemaPromise;
  schemaPromise=(async()=>{
@@ -58,6 +60,10 @@ export async function ensureInventorySchema(env){
  )`).run();
  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_inventory_movements_model_date ON inventory_movements(model_id,id DESC)').run();
  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_inventory_movements_order ON inventory_movements(order_id)').run();
+ // ref: unique id of one restock movement (the balance update only runs if it exists);
+ // source_ref: which closing produced it (e.g. cargo_report:12) — proof shown in the UI.
+ for(const col of ['ref TEXT','source_ref TEXT']){try{await env.DB.prepare('ALTER TABLE inventory_movements ADD COLUMN '+col).run()}catch(e){if(!/duplicate column/i.test(String(e?.message||e)))throw e}}
+ await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_inventory_movements_ref ON inventory_movements(ref)').run();
  })();
  try{return await schemaPromise}catch(error){schemaPromise=null;throw error}
 }
@@ -215,17 +221,25 @@ export async function returnRestockPlan(env,order,loadedModels=null){
  }else if(FULL_RETURN.has(status)){
   expected=allocated.map(a=>({model_id:Number(a.model_id),quantity:Number(a.quantity)}));
  }else return {...base,ok:false,reason:'الطلب مسجل كمستلم بالكامل؛ لا يُضاف شيء للمخزون',items:[]};
- const items=expected.map(e=>({model_id:e.model_id,expected:e.quantity,already:already.get(e.model_id)||0,quantity:Math.max(0,e.quantity-(already.get(e.model_id)||0))}));
+ const items=expected.map(e=>({model_id:e.model_id,expected:e.quantity,limit:e.quantity,already:already.get(e.model_id)||0,quantity:Math.max(0,e.quantity-(already.get(e.model_id)||0))}));
  const toAdd=items.filter(i=>i.quantity>0);
  return {...base,ok:true,expected:items,items:toAdd,reason:toAdd.length?'':'تمت إضافة هذا المرتجع للمخزون سابقًا'};
 }
 
-export function restockStatements(env,orderId,items,userId,note){
+export function restockStatements(env,orderId,items,userId,note,{sourceRef=null,sourceRefSql=null}={}){
+ // Atomic and idempotent: the movement row is inserted only while the total already added
+ // back for this order/model stays within the limit (what was deducted / returned), and the
+ // balance moves only if that exact movement row exists. Run inside one D1 batch.
  const out=[];
  for(const item of items){
+  const ref='ret:'+orderId+':'+item.model_id+':'+(globalThis.crypto?.randomUUID?.()||Math.random().toString(36).slice(2)+Date.now());
+  const limit=Number.isFinite(Number(item.limit))?Number(item.limit):Number(item.quantity);
+  out.push(env.DB.prepare(`INSERT INTO inventory_movements(model_id,order_id,quantity_delta,movement_type,note,created_by,ref,source_ref)
+   SELECT ?,?,?,'cargo_return',?,?,?,${sourceRefSql||'?'}
+   WHERE (SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_movements WHERE order_id=? AND model_id=? AND movement_type='cargo_return' AND quantity_delta>0)+?<=?`)
+   .bind(...[item.model_id,orderId,item.quantity,note,userId,ref,...(sourceRefSql?[]:[sourceRef]),orderId,item.model_id,item.quantity,limit]));
   out.push(env.DB.prepare('INSERT OR IGNORE INTO inventory_balances(model_id,quantity,updated_by) VALUES(?,0,?)').bind(item.model_id,userId));
-  out.push(env.DB.prepare("UPDATE inventory_balances SET quantity=quantity+?,updated_by=?,updated_at=datetime('now') WHERE model_id=?").bind(item.quantity,userId,item.model_id));
-  out.push(env.DB.prepare("INSERT INTO inventory_movements(model_id,order_id,quantity_delta,movement_type,note,created_by) VALUES(?,?,?,'cargo_return',?,?)").bind(item.model_id,orderId,item.quantity,note,userId));
+  out.push(env.DB.prepare("UPDATE inventory_balances SET quantity=quantity+?,updated_by=?,updated_at=datetime('now') WHERE model_id=? AND EXISTS(SELECT 1 FROM inventory_movements WHERE ref=?)").bind(item.quantity,userId,item.model_id,ref));
  }
  return out;
 }

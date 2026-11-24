@@ -24,7 +24,7 @@ async function audit(env){
    rows.push({report_id:r.id,closed_on:r.closed_on,source_name:r.source_name||'',shipment_code:c.shipment_code||'',order_id:id,order_code:o.order_code,status:o.delivery_status,
     deducted:plan.allocated.map(a=>({model_name:name(a.model_id),quantity:a.quantity})),
     already_added:plan.already.map(a=>({model_name:name(a.model_id),quantity:a.quantity})),
-    missing:missing.map(m=>({model_id:m.model_id,model_name:name(m.model_id),quantity:m.quantity})),
+    missing:missing.map(m=>({model_id:m.model_id,model_name:name(m.model_id),quantity:m.quantity,limit:m.limit})),
     state:!plan.allocated.length?'no_deduction':!plan.ok?'review':missing.length?'missing':'ok',note:plan.ok?(missing.length?'':'مُضاف للمخزون'):plan.reason});
   }
  }
@@ -49,6 +49,6 @@ export async function onRequest({request,env}){
  if(!targets.length)return json({ok:true,applied_orders:0,applied_pieces:0,message:'لا توجد فروقات للتطبيق'});
  // One atomic batch per order: balance and movement are always written together, so a
  // re-run (which recomputes from movements) can never add the same pieces twice.
- for(const r of targets)await env.DB.batch(restockStatements(env,r.order_id,r.missing,user.id,'تصحيح تاريخي — مرتجع كشف المرتجعات #'+r.report_id+' شحنة '+r.shipment_code));
+ for(const r of targets)await env.DB.batch(restockStatements(env,r.order_id,r.missing,user.id,'تصحيح تاريخي — مرتجع كشف المرتجعات #'+r.report_id+' شحنة '+r.shipment_code,{sourceRef:'historical_fix:cargo_report:'+r.report_id}));
  return json({ok:true,applied_orders:targets.length,applied_pieces:targets.reduce((n,r)=>n+r.missing.reduce((m,x)=>m+x.quantity,0),0)});
 }

@@ -1,4 +1,4 @@
-import {classifyInventoryItems,loadInventoryModels,returnRestockPlan,restockStatements} from './_inventory.js';
+import {classifyInventoryItems,loadInventoryModels,returnRestockPlan,restockStatements,ensureInventorySchema} from './_inventory.js';
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 const phone=x=>{let s=String(x??'').replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g,'');if(s.startsWith('00962'))s=s.slice(2);if(s.startsWith('962'))s='0'+s.slice(3);if(s.length===9&&s.startsWith('7'))s='0'+s;return s};
 const txt=(x,n=200)=>String(x??'').trim().slice(0,n);
@@ -9,6 +9,29 @@ async function orderSnapshot(env,id,models){
  const o=id?await env.DB.prepare(ORDER_INFO).bind(id).first():null;if(!o)return null;
  let items=[];try{items=(await classifyInventoryItems(env,o.raw_text||o.order_notes||'',models)).map(i=>({model_name:(models.find(m=>m.id===i.model_id)||{}).name||'',quantity:i.quantity}))}catch{}
  return {order_id:Number(o.id),order_code:o.order_code,phone:o.phone,recipient_name:o.recipient_name||'',area:o.area||'',items,shipment_print_date:o.shipment_print_date||null,shipment_print_at:o.shipment_print_at||null,current_status:o.delivery_status};
+}
+// Stock state of one shipment, from the inventory movements actually recorded (never
+// inferred from the order status). Colours: added/added_before green, review orange,
+// no_deduction/missing red, waiting grey.
+const hasCode=(note,code)=>code&&new RegExp('(^|\\s)'+String(code).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(\\s|$)').test(String(note||''));
+async function stockStatus(env,s,reportId,models){
+ const name=id=>(models.find(m=>m.id===Number(id))||{}).name||('موديل '+id);
+ const group=list=>{const m=new Map();for(const x of list)m.set(Number(x.model_id),(m.get(Number(x.model_id))||0)+Number(x.quantity_delta));return [...m].map(([id,q])=>({model_id:id,model_name:name(id),quantity:q}))};
+ if(!s.order_id||s.outcome==='unmatched'||s.outcome==='ignored')return {state:'waiting',label:'بانتظار المطابقة والتسكير',items:[]};
+ if(s.outcome!=='closed'){
+  if(/تفصيل|الموديل|مراجعة منفصلة/.test(s.note||''))return {state:'review',label:'تحتاج مراجعة – لم يتم التعرف على الموديل أو الكمية',items:[]};
+  return {state:'waiting',label:'بانتظار المطابقة والتسكير',items:[]};
+ }
+ const moves=(await env.DB.prepare("SELECT model_id,quantity_delta,source_ref,note,strftime('%d/%m/%Y %H:%M',created_at,'+3 hours') at FROM inventory_movements WHERE order_id=? AND movement_type='cargo_return' AND quantity_delta>0 ORDER BY id").bind(s.order_id).all()).results||[];
+ const own=m=>m.source_ref==='cargo_report:'+reportId||m.source_ref==='historical_fix:cargo_report:'+reportId||(!m.source_ref&&hasCode(m.note,s.shipment_code));
+ const mine=moves.filter(own),others=moves.filter(m=>!own(m));
+ if(mine.length){const items=group(mine),q=items.reduce((n,i)=>n+i.quantity,0);return {state:'added',label:'تمت إضافة +'+q+' للمخزون',items,at:mine[mine.length-1].at,fix:mine.some(m=>String(m.source_ref||'').startsWith('historical_fix'))}}
+ const order=await env.DB.prepare('SELECT id,delivery_status,partial_received_items FROM orders WHERE id=?').bind(s.order_id).first();
+ const plan=order?await returnRestockPlan(env,order,models):{allocated:[],ok:false};
+ if(!plan.allocated.length)return {state:'no_deduction',label:'لم تتم الإضافة – لا يوجد خصم أصلي مسجل',items:[]};
+ if(others.length&&plan.ok&&!plan.items.length){const items=group(others);return {state:'added_before',label:'تمت إضافتها سابقًا، لم تتكرر الإضافة',items,at:others[others.length-1].at}}
+ if(!plan.ok)return {state:'review',label:'تحتاج مراجعة – '+plan.reason,items:[]};
+ return {state:'missing',label:'لم تُضف للمخزون بعد – تظهر في تدقيق الفروقات',items:plan.items.map(i=>({model_id:i.model_id,model_name:name(i.model_id),quantity:i.quantity}))};
 }
 // Read-only view of one saved report. Reports saved before shipment snapshots existed
 // (details without "shipments") are shown from their saved closed/skipped lists, with
@@ -22,18 +45,25 @@ async function reportDetail(env,row){
   shipments=[...(details.closed||[]).map(x=>({...x,match_status:'matched',outcome:'closed',status_at_close:x.previous_status||'pending',new_status:x.new_status||'returned',note:'تم التحويل إلى مرتجع'})),
    ...(details.skipped||[]).map(x=>({...x,match_status:x.order_id?'matched':'unknown',outcome:'pending',status_at_close:x.current_status||'',note:x.reason||''}))];
  }
+ await ensureInventorySchema(env);
  const out=[];
  for(const s of shipments){
   const live=Number(s.order_id)?await orderSnapshot(env,Number(s.order_id),models):null;
+  const stock=await stockStatus(env,s,row.id,models);
   out.push({...s,
    recipient_name:s.recipient_name||live?.recipient_name||'',area:s.area||live?.area||'',
    items:Array.isArray(s.items)&&s.items.length?s.items:(live?.items||[]),
    shipment_print_at:s.shipment_print_at||live?.shipment_print_at||null,shipment_print_date:s.shipment_print_date||live?.shipment_print_date||null,
    order_code:s.order_code||live?.order_code||null,phone:s.phone||live?.phone||'',
-   current_status:live?.current_status||null,looked_up:legacy||!s.recipient_name});
+   current_status:live?.current_status||null,looked_up:legacy||!s.recipient_name,stock,
+   proven_label:s.outcome==='closed'?(['partial','delivered_adjusted'].includes(live?.current_status)?'تسليم جزئي – مرتجع القطع':'مرتجع مثبت'):null});
  }
  const counts=details.counts||countShipments(out);if(legacy){counts.unmatched=null;counts.ignored=null}
- return {id:row.id,created_at:row.created_at,source_name:row.source_name,legacy,counts,legacy_note:legacy?'كشف قديم: محفوظ فيه الطلبات المسكّرة والمستثناة فقط؛ الاسم والمنطقة والموديل وتاريخ الطباعة معروضة من بيانات الطلب للمراجعة.':'',shipments:out};
+ const added=new Map(),before=new Map();
+ for(const x of out){const t=x.stock?.state==='added'?added:x.stock?.state==='added_before'?before:null;if(t)for(const i of x.stock.items)t.set(i.model_name,(t.get(i.model_name)||0)+i.quantity)}
+ const sum=m=>[...m.values()].reduce((a,b)=>a+b,0);
+ const stockSummary={closed:out.filter(x=>x.outcome==='closed').length,added_pieces:sum(added),added_before_pieces:sum(before),review:out.filter(x=>['review','missing','no_deduction'].includes(x.stock?.state)).length,by_model:[...added].map(([model_name,quantity])=>({model_name,quantity}))};
+ return {id:row.id,created_at:row.created_at,source_name:row.source_name,legacy,counts,stock_summary:stockSummary,legacy_note:legacy?'كشف قديم: محفوظ فيه الطلبات المسكّرة والمستثناة فقط؛ الاسم والمنطقة والموديل وتاريخ الطباعة معروضة من بيانات الطلب للمراجعة.':'',shipments:out};
 }
 export async function onRequest({request,env}){
  if(!['GET','POST'].includes(request.method))return json({error:'method_not_allowed'},405);
@@ -71,7 +101,9 @@ export async function onRequest({request,env}){
   if(o.delivery_status!=='pending'&&!RESTOCK_ONLY.has(o.delivery_status)){skipped.push({order_id:id,order_code:o.order_code,shipment_code:code,current_status:o.delivery_status,reason:'الطلب مسجل كمستلم؛ يحتاج مراجعة ولا يتغير تلقائيًا'});continue}
   // Closing the returns statement = the goods are physically back in the warehouse.
   const plan=await returnRestockPlan(env,o,invModels);
-  if(o.delivery_status!=='pending'&&(!plan.ok||!plan.items.length)){skipped.push({order_id:id,order_code:o.order_code,shipment_code:code,current_status:o.delivery_status,reason:plan.reason});continue}
+  // Already fully added back (receipt / earlier statement): still closed here, shown as
+  // «تمت إضافتها سابقًا» — the guarded movements make a second addition impossible.
+  if(o.delivery_status!=='pending'&&!plan.ok){skipped.push({order_id:id,order_code:o.order_code,shipment_code:code,current_status:o.delivery_status,reason:plan.reason});continue}
   accepted.push({id,code,phone:p,order_code:o.order_code,previous_status:o.delivery_status,changeStatus:o.delivery_status==='pending',restock:plan.ok?plan.items:[],restockNote:plan.ok?plan.reason:plan.reason});
  }
  if(!accepted.length)return json({ok:true,updated:0,restocked_pieces:0,skipped,report_id:null});
@@ -97,20 +129,23 @@ export async function onRequest({request,env}){
    items:Array.isArray(r.items)&&r.items.length?r.items.slice(0,20).map(i=>({model_name:txt(i.model_name,80),quantity:Number(i.quantity)||0})):(order?.items||[]),
    shipment_print_date:order?.shipment_print_date||null,shipment_print_at:order?.shipment_print_at||null,
    match_status:txt(r.status,20),outcome,status_at_close:order?.current_status||txt(r.order_status,30)||null,new_status:isClosed?(closed.find(c=>c.order_id===id)?.new_status||'returned'):null,
-   return_status:txt(r.return_status,120),note:txt(skip?.reason||(isClosed?(closed.find(c=>c.order_id===id)?.stock_added?.length?'أُضيف للمخزون: '+closed.find(c=>c.order_id===id).stock_added.map(i=>i.model_name+' × '+i.quantity).join('، '):(closed.find(c=>c.order_id===id)?.stock_note||'لا إضافة للمخزون')):r.reason),300)});
+   return_status:txt(r.return_status,120),note:txt(skip?.reason||(isClosed?'':r.reason),300)});
  }
  const counts=shipments.length?countShipments(shipments):null;
  const details=JSON.stringify(shipments.length?{version:2,closed,skipped,shipments,counts}:{closed,skipped});
  // Record the report in the same D1 batch as status updates.
- const statements=[];
+ // One D1 batch (one transaction): the report row, the status changes and the guarded
+ // stock movements commit together or not at all. Movements carry source_ref of this report.
+ const statements=[env.DB.prepare("INSERT INTO cargo_return_close_reports(created_by,source_name,matched_count,closed_count,skipped_count,details_json) VALUES(?,?,?,?,?,?)").bind(user.id,sourceName,accepted.length,accepted.length,skipped.length,details)];
+ const REPORT_REF="'cargo_report:'||(SELECT MAX(id) FROM cargo_return_close_reports)";
  for(const x of accepted){
   if(x.changeStatus)statements.push(env.DB.prepare("UPDATE orders SET delivery_status='returned',updated_at=datetime('now') WHERE id=? AND delivery_status='pending'").bind(x.id));
-  statements.push(...restockStatements(env,x.id,x.restock,user.id,'استلام مرتجع بتسكير كشف المرتجعات — شحنة '+x.code));
+  statements.push(...restockStatements(env,x.id,x.restock,user.id,'استلام مرتجع بتسكير كشف المرتجعات — شحنة '+x.code,{sourceRefSql:REPORT_REF}));
  }
- statements.push(env.DB.prepare("INSERT INTO cargo_return_close_reports(created_by,source_name,matched_count,closed_count,skipped_count,details_json) VALUES(?,?,?,?,?,?)").bind(user.id,sourceName,accepted.length,accepted.length,skipped.length,details));
  const result=await env.DB.batch(statements);
- const reportId=result[result.length-1]?.meta?.last_row_id||null;
+ const reportId=result[0]?.meta?.last_row_id||null;
  const updated=accepted.filter(x=>x.changeStatus).length;
- const restockedPieces=accepted.reduce((n,x)=>n+x.restock.reduce((m,i)=>m+i.quantity,0),0);
- return json({ok:true,updated,closed_count:accepted.length,restocked_pieces:restockedPieces,closed,skipped,report_id:reportId});
+ // Report only what the database actually recorded for this closing.
+ const proof=(await env.DB.prepare("SELECT COALESCE(SUM(quantity_delta),0) q FROM inventory_movements WHERE source_ref=? AND movement_type='cargo_return'").bind('cargo_report:'+reportId).first())?.q||0;
+ return json({ok:true,updated,closed_count:accepted.length,restocked_pieces:Number(proof),closed,skipped,report_id:reportId});
 }

@@ -1,4 +1,4 @@
-import {ensureInventorySchema,classifyInventoryItems,loadInventoryModels} from './_inventory.js';
+import {ensureInventorySchema,classifyInventoryItems,loadInventoryModels,restockStatements} from './_inventory.js';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 export async function onRequest({request,env}){
  const token=(request.headers.get('authorization')||'').replace(/^Bearer /,'');
@@ -40,11 +40,7 @@ export async function onRequest({request,env}){
  if(!items.length||items.some(x=>!Number.isInteger(x.model_id)||!Number.isInteger(x.quantity)||x.quantity<1)||new Set(items.map(x=>x.model_id)).size!==items.length)return json({error:'حدد كميات مرتجع صحيحة'},422);
  for(const item of items)if(!allocation.has(item.model_id)||item.quantity+(already.get(item.model_id)||0)>Math.min(allocation.get(item.model_id),partialExpected?partialExpected.get(item.model_id)||0:allocation.get(item.model_id)))return json({error:'كمية المرتجع تتجاوز الكمية المخصومة لهذا الطلب'},422);
  const statements=[env.DB.prepare('INSERT INTO cargo_return_receipts(shipment_code,order_id,received_by,items_json) VALUES(?,?,?,?)').bind(code,orderId,user.id,JSON.stringify(items))];
- for(const item of items){
-  statements.push(env.DB.prepare('INSERT OR IGNORE INTO inventory_balances(model_id,quantity,updated_by) VALUES(?,0,?)').bind(item.model_id,user.id));
-  statements.push(env.DB.prepare("UPDATE inventory_balances SET quantity=quantity+?,updated_by=?,updated_at=datetime('now') WHERE model_id=?").bind(item.quantity,user.id,item.model_id));
-  statements.push(env.DB.prepare("INSERT INTO inventory_movements(model_id,order_id,quantity_delta,movement_type,note,created_by) VALUES(?,?,?,'cargo_return',?,?)").bind(item.model_id,orderId,item.quantity,'استلام مرتجع Cargo Box '+code,user.id));
- }
+ statements.push(...restockStatements(env,orderId,items.map(i=>({...i,limit:Math.min(allocation.get(i.model_id),partialExpected?partialExpected.get(i.model_id)||0:allocation.get(i.model_id))})),user.id,'استلام مرتجع Cargo Box '+code,{sourceRef:'receipt:'+code}));
  try{await env.DB.batch(statements)}catch(error){
   if(/UNIQUE|constraint/i.test(String(error)))return json({error:'المرتجع مسجل سابقًا'},409);
   throw error;

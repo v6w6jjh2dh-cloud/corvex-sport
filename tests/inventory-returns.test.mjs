@@ -3,12 +3,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createD1} from './_d1.mjs';
-import {deductOnFirstPrint,syncOrderInventory} from '../functions/api/_inventory.js';
+import {deductOnFirstPrint,syncOrderInventory,resetInventorySchemaCache} from '../functions/api/_inventory.js';
 import {onRequest as closeReturns} from '../functions/api/cargo-returns-commit.js';
 import {onRequest as receipt} from '../functions/api/cargo-return-receipt.js';
 import {onRequest as auditApi} from '../functions/api/inventory-return-audit.js';
 
 function setup(){
+ resetInventorySchemaCache();
  const {db,env}=createD1();
  for(const [c,t] of [['store_id','INTEGER'],['delivery_status',"TEXT DEFAULT 'pending'"]])db.exec(`ALTER TABLE orders ADD COLUMN ${c} ${t}`);
  db.exec(`INSERT INTO users(id,username,display_name,password_hash,role,is_active) VALUES(1,'admin','A','x','admin',1);
@@ -102,4 +103,47 @@ test('historical audit reports missing restocks, applies once, then shows none',
  assert.equal(ap.body.applied_pieces,3);assert.equal(t.stock(t.FUR),0);assert.equal(t.stock(t.SC),0);
  const ap2=await t.call(auditApi,'POST',{action:'apply',confirm:'تطبيق التصحيح'});assert.equal(ap2.body.applied_orders,0);
  assert.equal((await t.call(auditApi,'GET')).body.summary.missing_orders,0);
+});
+
+test('guarded restock: two plans computed before either runs add the pieces only once',async()=>{
+ const {returnRestockPlan,restockStatements}=await import('../functions/api/_inventory.js');
+ const t=setup();const id=t.order('جاكيت فرو عدد 2');await t.print(id);
+ t.db.prepare("UPDATE orders SET delivery_status='returned' WHERE id=?").run(id);
+ const p1=await returnRestockPlan(t.env,t.get(id)),p2=await returnRestockPlan(t.env,t.get(id));
+ await t.env.DB.batch(restockStatements(t.env,id,p1.items,1,'a',{sourceRef:'x1'}));
+ await t.env.DB.batch(restockStatements(t.env,id,p2.items,1,'b',{sourceRef:'x2'}));
+ assert.equal(t.stock(t.FUR),0,'second identical restock is ignored by the database');
+ assert.equal(t.db.prepare("SELECT COUNT(*) c FROM inventory_movements WHERE movement_type='cargo_return'").get().c,1);
+});
+
+test('report details show stock state from recorded movements, with summary',async()=>{
+ const t=setup();
+ const a=t.order('جاكيت فرو عدد 2','0791000001');await t.print(a);                 // will be added now
+ const b=t.order('جاكيت فرو عدد 1','0791000002');await t.print(b);                 // added before by receipt
+ await t.call(receipt,'POST',{shipment_code:'R-B',order_id:b,items:[{model_id:t.FUR,quantity:1}]});
+ t.db.prepare("UPDATE orders SET delivery_status='returned' WHERE id=?").run(b);
+ const c=t.order('شي غريب','0791000003');t.db.prepare("UPDATE orders SET first_printed_at='2026-11-20 09:00:00' WHERE id=?").run(c); // no deduction
+ const d=t.order('جاكيت فرو عدد 2','0791000004');await t.print(d);t.db.prepare("UPDATE orders SET delivery_status='partial' WHERE id=?").run(d); // review
+ const r=await t.call(closeReturns,'POST',{source_name:'كشف',rows:[a,b,c,d].map((id,i)=>({order_id:id,phone:t.get(id).phone,shipment_code:'S-'+i})),
+  snapshot_rows:[a,b,c,d].map((id,i)=>({order_id:id,shipment_code:'S-'+i,phone:t.get(id).phone,status:'matched',order_status:t.get(id).delivery_status})).concat([{shipment_code:'S-X',phone:'0799999999',status:'unmatched'}])});
+ assert.equal(r.body.restocked_pieces,2,'response counts only movements recorded for this report');
+ const det=(await t.call(closeReturns,'GET',null,'https://x/api/cargo-returns-commit?id='+r.body.report_id)).body.report;
+ const st=code=>det.shipments.find(x=>x.shipment_code===code).stock;
+ assert.equal(st('S-0').state,'added');assert.equal(st('S-0').label,'تمت إضافة +2 للمخزون');assert.ok(st('S-0').at);
+ assert.equal(st('S-1').state,'added_before');
+ assert.equal(st('S-2').state,'no_deduction');
+ assert.equal(st('S-3').state,'review');
+ assert.equal(st('S-X').state,'waiting');
+ assert.equal(det.shipments.find(x=>x.shipment_code==='S-0').proven_label,'مرتجع مثبت');
+ assert.deepEqual(det.stock_summary,{closed:3,added_pieces:2,added_before_pieces:1,review:2,by_model:[{model_name:'جاكيت فرو',quantity:2}]});
+});
+
+test('a legacy closed return without a movement is shown as missing, not as added',async()=>{
+ const t=setup();const id=t.order('جاكيت فرو عدد 1');await t.print(id);
+ t.db.prepare("UPDATE orders SET delivery_status='returned' WHERE id=?").run(id);
+ await t.call(closeReturns,'GET'); // creates the reports table
+ t.db.prepare("INSERT INTO cargo_return_close_reports(created_by,details_json) VALUES(1,?)").run(JSON.stringify({closed:[{order_id:id,order_code:1,shipment_code:'OLD'}],skipped:[]}));
+ const rid=t.db.prepare('SELECT MAX(id) id FROM cargo_return_close_reports').get().id;
+ const det=(await t.call(closeReturns,'GET',null,'https://x/api/cargo-returns-commit?id='+rid)).body.report;
+ assert.equal(det.shipments[0].stock.state,'missing');
 });
