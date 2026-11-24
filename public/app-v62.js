@@ -2088,31 +2088,45 @@ function deliveryPdfColumn(items,width,from,to){
 async function parseDeliveryPdfFile(file){
   const pdfjs=await loadDeliveryPdfJs();
   const document=await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
-  const rows=[];
+  const pages=[];
   for(let pageNumber=1;pageNumber<=document.numPages;pageNumber++){
     const page=await document.getPage(pageNumber),viewport=page.getViewport({scale:1}),content=await page.getTextContent();
-    const items=(content.items||[]).map(item=>({text:deliveryPdfText(item.str),x:Number(item.transform?.[4]||0),y:Number(item.transform?.[5]||0)})).filter(item=>item.text);
-    const phones=items.filter(item=>/^(?:00962|962|0)?7\d{8}$/.test(normalizeDigits(item.text).replace(/\D/g,''))).sort((a,b)=>b.y-a.y);
-    for(let i=0;i<phones.length;i++){
-      const phoneItem=phones[i],nextY=phones[i+1]?.y??-Infinity,band=items.filter(item=>item.y<=phoneItem.y+4&&item.y>nextY+4);
-      const shipmentDate=deliveryPdfDate(deliveryPdfColumn(band,viewport.width,0,.07));
-      const statusText=deliveryPdfColumn(band,viewport.width,.265,.385);
-      const note=deliveryPdfColumn(band,viewport.width,.62,.75);
-      const cash=deliveryPdfNumber(deliveryPdfColumn(band,viewport.width,.07,.145));
-      const fee=deliveryPdfNumber(deliveryPdfColumn(band,viewport.width,.145,.205));
-      const price=deliveryPdfNumber(deliveryPdfColumn(band,viewport.width,.205,.265));
-      let status=mapDeliveryCompanyStatus(statusText),normalizedStatus=normalizeArabic(statusText);
-      if(!status){
-        if(normalizedStatus.includes('بعد الوصول')||normalizedStatus.includes('لا رد')||normalizedStatus.includes('لارد')||cash<0)status='refused_no_fee';
-        else if(cash===0&&fee>0&&Math.abs(price-fee)<.01)status='refused_fee_paid';
-        else if(price>=0)status='delivered';
-      }
-      rows.push({__row:rows.length+1,'رقم الهاتف':normalizeDigits(phoneItem.text).replace(/\D/g,''),'تاريخ الشحنة':shipmentDate,'الحالة':statusText,'السعر':price,'أجور التوصيل':fee,'ملاحظة':note,__mapped_status:status,__cash:cash,__page:pageNumber});
-    }
+    pages.push({width:viewport.width,items:(content.items||[]).map(item=>({text:deliveryPdfText(item.str),x:Number(item.transform?.[4]||0),y:Number(item.transform?.[5]||0)})).filter(item=>item.text)});
   }
+  return deliveryRowsFromPdfPages(pages);
+}
+// Rows come from the statement's phone column only (see delivery-pdf-rows.js); phones written in
+// notes never become shipments. The statement head totals are kept for the pre-commit check.
+function deliveryRowsFromPdfPages(pages){
+  const P=globalThis.CorvexDeliveryPdf;
+  if(!P)throw new Error('قارئ الكشف لم يُحمّل بعد — أعد تحميل الصفحة');
+  const st=P.parseStatement(pages);
+  const rows=st.rows.map((r,i)=>{
+    const statusText=r.status_text,cash=r.cash,fee=r.fee,price=r.price;
+    let status=mapDeliveryCompanyStatus(statusText),normalizedStatus=normalizeArabic(statusText);
+    if(!status){
+      if(normalizedStatus.includes('بعد الوصول')||normalizedStatus.includes('لا رد')||normalizedStatus.includes('لارد')||cash<0)status='refused_no_fee';
+      else if(cash===0&&fee>0&&Math.abs(price-fee)<.01)status='refused_fee_paid';
+      else if(price>=0)status='delivered';
+    }
+    return {__row:i+1,'رقم الهاتف':r.phone,'تاريخ الشحنة':r.shipment_date,'الحالة':statusText,'السعر':price,'أجور التوصيل':fee,'الصافي':cash,'ملاحظة':r.note,__mapped_status:status,__cash:cash,__page:r.page};
+  });
   if(!rows.length)throw new Error('لم أجد أرقام هواتف قابلة للقراءة داخل ملف PDF');
-  rows.forEach(row=>row['الصافي']=row.__cash);
-  return {headers:['رقم الهاتف','تاريخ الشحنة','الحالة','السعر','أجور التوصيل','الصافي','ملاحظة'],rows};
+  return {headers:['رقم الهاتف','تاريخ الشحنة','الحالة','السعر','أجور التوصيل','الصافي','ملاحظة'],rows,
+    pdf_check:{extracted:st.extracted,header:st.header,ignored:st.ignored,result:P.checkTotals(st.extracted,st.header)}};
+}
+// Pre-commit check: the extracted statement must match its own head (count, total, fees, net cash).
+function deliveryPdfCheckHtml(check,confirmed){
+  if(!check)return '';
+  const m=v=>(Math.round(Number(v||0)*100)/100).toFixed(2).replace(/\.00$/,'');
+  const e=check.extracted,r=check.result||{};
+  const line=`المستخرج: <b>${e.count}</b> شحنة • إجمالي <b>${m(e.price)}</b> • أجور توصيل <b>${m(e.fee)}</b> • صافي كاش <b>${m(e.cash)}</b>`;
+  const ign=(check.ignored||[]).length?`<div class="sub">تم تجاهل ${check.ignored.length} رقم هاتف ليس صف شحنة: ${check.ignored.map(x=>esc(x.text)+' ('+esc(x.reason)+')').join('، ')}</div>`:'';
+  if(r.ok)return `<div class="pdf-check ok">✓ مطابق لرأس الكشف — ${line}${ign}</div>`;
+  const rowsHtml=(r.checks||[]).map(c=>`<div>${c.ok?'✓':'✗'} ${esc(c.label)}: رأس الكشف <b>${m(c.header)}</b> • المستخرج <b>${m(c.extracted)}</b></div>`).join('');
+  const msg=r.found?'⚠️ الأرقام المستخرجة لا تطابق رأس الكشف (أو لم يُقرأ عدد الشحنات) — الاعتماد موقوف':'⚠️ لم أستطع قراءة مجاميع رأس الكشف — قارنها يدويًا قبل الاعتماد';
+  return `<div class="pdf-check bad">${msg}<div>${line}</div>${rowsHtml}${ign}
+    <label class="reconcile-confirm"><input type="checkbox" id="pdfCheckConfirm" ${confirmed?'checked':''}> راجعت رأس الكشف بنفسي وأؤكد أن عدد الشحنات والمجاميع أعلاه صحيحة</label></div>`;
 }
 
 function parseDeliveryDelimitedText(text){
@@ -2298,6 +2312,7 @@ async function deliveryReconcileView(){
           <div class="field"><label>الملاحظات</label><select id="mapNote" class="select">${options(note)}</select></div>
         </div>
         <div class="sub">تم قراءة ${parsed.rows.length} صف. إذا لم يتعرف النظام على اسم العمود، اختاره يدويًا.</div>
+        <div id="pdfCheckBox">${deliveryPdfCheckHtml(parsed.pdf_check,parsed.pdf_confirmed)}</div>
         <button id="matchDeliveryReport" class="btn btn-primary">مطابقة الكشف</button>
       </div>`;
 
@@ -2320,6 +2335,8 @@ async function deliveryReconcileView(){
     }catch(error){parsed={headers:[],rows:[]};$('#deliveryMapping').style.display='none';$('#deliveryPreview').innerHTML='<div class="empty">'+esc(error.message||'تعذر قراءة الكشف')+'</div>';toast(error.message||'تعذر قراءة الكشف')}
   };
 
+  $('#deliveryMapping').addEventListener('change',e=>{if(e.target.id==='pdfCheckConfirm')parsed.pdf_confirmed=e.target.checked});
+  if(!document.getElementById('pdfCheckStyles')){const st=document.createElement('style');st.id='pdfCheckStyles';st.textContent='.pdf-check{border-radius:12px;padding:10px 12px;margin:10px 0;line-height:1.8;font-size:13px}.pdf-check.ok{background:#e9f7ef;border:1px solid #9fd8b4;color:#14532d}.pdf-check.bad{background:#fff4e5;border:1px solid #f5b971;color:#7a4100}.pdf-check .sub{margin-top:4px}';document.head.appendChild(st)}
   $('#deliveryPaste').oninput=()=>{
     const v=$('#deliveryPaste').value;
     if(v.trim())parseText(v);
@@ -2615,6 +2632,10 @@ async function deliveryReconcileView(){
         delivered_items:p?p.items.map(x=>({model_id:x.model_id,received:x.received,returned:x.returned})):undefined,
         confirm_amount_higher:r.confirm_higher===true,confirm_date_outside:r.confirm_outside===true,confirm_discount:r.confirm_discount===true});
     });
+    if(parsed.pdf_check&&!parsed.pdf_check.result?.ok&&!parsed.pdf_confirmed){
+      document.getElementById('pdfCheckBox')?.scrollIntoView({behavior:'smooth',block:'center'});
+      return toast('الكشف المستخرج لا يطابق رأس الكشف — راجع المجاميع وأكّدها أولًا');
+    }
     const ready=payload.filter(x=>x.order_id).length;
     if(!ready)return toast('لا توجد أسطر جاهزة للاعتماد — راجع سبب الإيقاف بجانب كل سطر');
     if(!confirm(`سيتم اعتماد ${ready} سطر.${heldLocal.length?`\n${heldLocal.length} سطر موقوف لن يتغير.`:''}\nهل تريد اعتماد وتسكير الكشف؟`))return;
