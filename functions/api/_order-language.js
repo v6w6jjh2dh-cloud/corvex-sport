@@ -36,7 +36,12 @@ export const DEFAULT_LEXICON={
  priceAfterNumber:['دينار','دنانير','د(?:\\s|$)','jd','jod','شامل','مع\\s','بالتوصيل','توصيل','سعر'],
  // a short name preceded by one of these words describes another item («مبطن فرو» is a lining)
  descriptorGuards:[{names:['فرو','الفرو'],before:['مبطن','مبطنه','بطانه','بطانته','ياقه','كبوس','كابيشن','قبعه','مع','فيه','فيها','داخل','داخله','داخلي']}],
- maxQuantityDigits:3
+ maxQuantityDigits:3,
+ // ---- context (T-11): used only when requireContext is on (central engine). A single general word is not
+ // enough to name a product: it needs product evidence on its line, and never counts on a personal line.
+ personalMarkers:['الاسم','اسم','ام','ابو','السيد','السيده','الاخ','الاخت','المستلم','الزبون','العميل'],
+ addressWords:['شارع','حي','منطقه','قرب','بجانب','جانب','مقابل','خلف','دوار','اشاره','عماره','بنايه','عمارة','طابق','شقه','محافظه','مدينه','قريه','بلده','عمان','اربد','الزرقاء','الزرقا','العقبه','مادبا','الكرك','جرش','عجلون','المفرق','السلط','البلقاء','الطفيله','معان','الاغوار','الغور'],
+ sizeWords:['xs','s','m','l','xl','xxl','xxxl','سمول','ميديوم','لارج','اكس','اكسل','مقاس','قياس','نمره','نمرة']
 };
 
 // Conventions learned from real orders (Corvex, 2026-11-24) that the active matcher does not read inside a
@@ -77,6 +82,10 @@ export function compile(lex=DEFAULT_LEXICON){
   standaloneUnit:new RegExp('^('+D+')\\s*(?:'+units+')$'),
   standalonePair:new RegExp('^(?:'+alt(Object.keys(lex.pairWords))+')$'),
   standaloneWord:new RegExp('^(?:'+labels+')?\\s*('+nums+')\\s*(?:'+units+')$'),
+  personal:new RegExp('^(?:'+alt((lex.personalMarkers||[]).map(norm))+')(?:\\s|[:：\\-])'),
+  address:new RegExp('(?:^|\\s)(?:'+alt((lex.addressWords||[]).map(norm))+')(?=\\s|$|[،,\\-])'),
+  size:new RegExp('(?:^|\\s)(?:'+alt((lex.sizeWords||[]).map(norm))+')(?=\\s|$|\\d)'),
+  priceOnLine:new RegExp('\\d+(?:[.,]\\d+)?\\s*(?:'+lex.priceAfterNumber.join('|')+')','i'),
   guards:(lex.descriptorGuards||[]).map(g=>({names:new Set(g.names.map(norm)),before:new RegExp('(?:'+g.before.map(norm).map(esc).join('|')+')\\s*$')}))
  };
  cache.set(lex,c);return c;
@@ -145,17 +154,31 @@ function quantityFor(c,lines,index,match,lineMatches,allMatches){
  return colours?{quantity:colours,rule:'colour_count'}:{quantity:1,rule:'default_one'};
 }
 
+// A line about a person or a place (name marker at the start, address word, phone number).
+export function personalLine(line,lexicon=DEFAULT_LEXICON){const c=compile(lexicon),v=c.norm(line);return c.personal.test(v)||c.address.test(v)||/(?:^|\D)0?7\d{8}(?:\D|$)/.test(v)}
+// T-11: is there product evidence for a single general word on this line?
+function weakAccepted(c,line,match,q,lineMatches){
+ if(personalLine(line,c.lex))return {ok:false,reason:'personal_or_address_line'};
+ if(q.rule!=='default_one')return {ok:true};
+ if(lineMatches.some(x=>x!==match&&x.alias.includes(' ')))return {ok:true};
+ if(c.size.test(line)||c.priceOnLine.test(line))return {ok:true};
+ return {ok:false,reason:'no_product_evidence'};
+}
+
 // Parse one text. Returns the same totals as the active matcher plus evidence per item.
-export function parseOrderText(text,models,lexicon=DEFAULT_LEXICON){
+// options.requireContext (central engine only): single-word names need product evidence (T-11); rejected
+// matches are returned in `uncertain` — never guessed.
+export function parseOrderText(text,models,lexicon=DEFAULT_LEXICON,options={}){
  const c=compile(lexicon);
  const lines=String(text||'').split(/\n+/).map(l=>saleLine(c,l)).filter(Boolean),all=lines.map(l=>matchesInLine(c,models,l));
- const totals=new Map(),evidence=[];
+ const totals=new Map(),evidence=[],uncertain=[];
  for(let i=0;i<lines.length;i++)for(const m of all[i]){
   const q=quantityFor(c,lines,i,m,all[i],all);
+  if(options.requireContext&&!m.alias.includes(' ')){const w=weakAccepted(c,lines[i],m,q,all[i]);if(!w.ok){uncertain.push({model_id:m.model.id,line:i,alias:m.alias,reason:w.reason});continue}}
   totals.set(m.model.id,(totals.get(m.model.id)||0)+q.quantity);
   evidence.push({model_id:m.model.id,line:i,alias:m.alias,quantity:q.quantity,rule:q.rule});
  }
- return {items:[...totals].map(([model_id,quantity])=>({model_id,quantity})),evidence,lines};
+ return {items:[...totals].map(([model_id,quantity])=>({model_id,quantity})),evidence,uncertain,lines};
 }
 
 // Learned quantity conventions on the product line (see LEARNED_DEFAULTS). productLine: raw line text.

@@ -54,7 +54,9 @@ export const PRODUCT_KNOWLEDGE=[
  {id:'K-POLO',product:'تيشيرت بولو',sources:['profit-shipping-cohorts.js','app-v62','product-rules.js polo_knit','app-v73 (بولو تريكو)','ai-parse-order prompt'],
   aliases:['تيشيرت بولو','تيشرت بولو','تيشيرت بولو تريكو','تيشرت بولو تريكو','بلوزه بولو','بولو تريكو','تريكو بولو','بولو ترند','بولو خريفي','بولو'],
   examples:[['تريكو بولو',1],['بولو خريفي',1]]},
- {id:'K-POLO-PLAIN',product:'بولو سادة',cost:2.8,sources:['product-rules.js polo_plain','app-v73 (بولو صيفي)'],
+ // T-10 (owner 2026-11-24): current cost rules stay — where the active catalogue reads «بولو …» as «تيشيرت بولو»
+ // it wins; this entry is kept (not lost) but defers to it.
+ {id:'K-POLO-PLAIN',product:'بولو سادة',cost:2.8,status:'superseded',defers_to:'تيشيرت بولو',sources:['product-rules.js polo_plain','app-v73 (بولو صيفي)'],
   aliases:['بولو ساده','ساده بولو','بولو صيفي'],
   examples:[['بولو ساده',1],['بولو صيفي عدد 2',2]]},
  {id:'K-POLO-EMBROIDERY',product:'بولو تريكو تطريز',sources:['app-v73'],

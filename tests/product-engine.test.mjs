@@ -202,3 +202,35 @@ test('learning loop: unknown phrases → alias for a NEW product; store language
  assert.ok(!base.lexicon.unitWords.includes('كراتين'),'baseline = active engine untouched');
  assert.equal(dump(),before,'orders, stock and catalogue unchanged');
 });
+
+test('rule versions: history is read with the rules of its time; rollback disables (never deletes) later rules',async()=>{
+ const {db,env}=setup();seedCorpus(db);
+ const add=(notes,created)=>Number(db.prepare(`INSERT INTO orders(order_code,recipient_name,phone,amount,order_notes,raw_text,created_by,created_at,printed,first_printed_at,store_id,delivery_status) VALUES(?,?,?,?,?,'',1,${created},1,datetime('now'),2,'delivered')`).run('V'+Math.random(),'ع','0790000000',10,notes).lastInsertRowid);
+ const old=add('جاكيت جوخ كاجوال\n4 كراتين',"'2026-01-01 10:00:00'");
+ const p=(await call(env,engineApi,'/product-engine',{action:'lexicon_propose',kind:'unit',value:'كراتين'})).body;
+ await call(env,engineApi,'/product-engine',{action:'lexicon_test',id:p.id});
+ const v0=(await call(env,engineApi,'/product-engine?view=versions')).body.current_version;
+ await call(env,engineApi,'/product-engine',{action:'lexicon_approve',id:p.id,confirm:'اعتماد القاعدة'});
+ const fresh=add('جاكيت جوخ كاجوال\n4 كراتين',"datetime('now','+1 minute')");
+ const q=async id=>(await call(env,engineApi,'/product-engine',{action:'interpret',order_id:id})).body.interpretation.system[0].quantity;
+ assert.equal(await q(old),1,'historical order keeps the reading of its time');
+ assert.equal(await q(fresh),4,'new order uses the new rule');
+ const vs=(await call(env,engineApi,'/product-engine?view=versions')).body;
+ assert.deepEqual(vs.events.map(e=>e.action).reverse(),['proposed','approved']);assert.ok(vs.current_version>v0);
+ assert.equal((await call(env,engineApi,'/product-engine',{action:'rules_rollback',to_version:v0,confirm:'خطأ'})).status,400);
+ const rb=(await call(env,engineApi,'/product-engine',{action:'rules_rollback',to_version:v0,confirm:'تراجع عن القواعد'})).body;
+ assert.equal(rb.disabled.length,1);
+ assert.equal(db.prepare('SELECT status FROM store_lexicon WHERE id=?').get(p.id).status,'disabled','kept, not deleted');
+ assert.ok(!(await loadCatalogue(env,{storeId:2})).lexicon.unitWords.includes('كراتين'));
+ assert.equal((await call(env,engineApi,'/product-engine?view=versions')).body.events[0].action,'rolled_back');
+});
+
+test('corrections are stored, never applied: the reading of the order does not change after a correction',async()=>{
+ const {db,env}=setup();const ids=seedCorpus(db);const id=ids.get('10389');
+ const before=(await call(env,engineApi,'/product-engine',{action:'interpret',order_id:id})).body.interpretation.system;
+ await call(env,engineApi,'/product-engine',{action:'correct',order_id:id,items:[{product_ref:'fur_jacket',quantity:5}]});
+ const cat=await loadCatalogue(env,{storeId:2});
+ const o=db.prepare('SELECT * FROM orders WHERE id=?').get(id);
+ assert.deepEqual((await resolveOrderItems(env,o,cat)).items.map(i=>i.quantity),before.map(i=>i.quantity));
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM product_aliases').get()?.n??0,0,'no rule created from a correction');
+});
