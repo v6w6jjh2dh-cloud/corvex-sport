@@ -116,26 +116,29 @@ export async function onRequest({request,env}){
     let p={};try{p=JSON.parse(r.payload||'{}')}catch{}sourceOf.set(Number(r.id),{system:'LiteSale',product:String(p.product||'').trim()})}}catch{}}
    const classes={known:[],missing:[],learn:[],failure:[],unclear:[]};
    const rows=[];const counts={orders:orders.length,central_vs_profit_engine:0,baseline_vs_profit_engine:0,knowledge_changes:0,central_vs_print_engine:0,central_vs_print_allocation:0,central_unrecognised:0,central_cost_unknown:0,profit_cost_unknown:0,central_needs_review:0,cost_differences:0};
+   // every order carries the counters it adds, so the page can merge batches by order id (never twice)
+   const checked=[];
    for(const o of orders){
+    const flags=[],inc=k=>{counts[k]=(counts[k]||0)+1;flags.push(k)};checked.push({id:Number(o.id),flags});
     // read with the rules in force when the order was created (no automatic re-interpretation of history)
     const central=await resolveOrderItems(env,o,await asOfCat(o.created_at),alloc.get(Number(o.id))||null);
     // baseline = central engine without the knowledge registry; must equal the active profit engine.
     const baseline=await resolveOrderItems(env,o,baseCat,alloc.get(Number(o.id))||null);
-    const knowledgeDiff=diffKinds(shape(central.items),shape(baseline.items));if(knowledgeDiff.length)counts.knowledge_changes++;
+    const knowledgeDiff=diffKinds(shape(central.items),shape(baseline.items));if(knowledgeDiff.length)inc('knowledge_changes');
     const print=(await classifyInventoryItems(env,o.raw_text||o.order_notes||'',invModels)).map(x=>({name:(invModels.find(m=>m.id===x.model_id)||{}).name||String(x.model_id),quantity:x.quantity}));
     const c=shape(central.items),p=shape(print),a=shape(alloc.get(Number(o.id))),h=cohort.has(Number(o.id))?shape(cohort.get(Number(o.id)).items):null;
     const d={vs_profit_engine:h?diffKinds(c,h):['not_in_profit_report'],vs_print_engine:diffKinds(c,p),vs_print_allocation:alloc.has(Number(o.id))?diffKinds(c,a):['no_allocation']};
-    if(h&&d.vs_profit_engine.length)counts.central_vs_profit_engine++;
-    if(h&&diffKinds(shape(baseline.items),h).length)counts.baseline_vs_profit_engine++;
+    if(h&&d.vs_profit_engine.length)inc('central_vs_profit_engine');
+    if(h&&diffKinds(shape(baseline.items),h).length)inc('baseline_vs_profit_engine');
     d.knowledge_vs_baseline=knowledgeDiff;
-    if(d.vs_print_engine.length)counts.central_vs_print_engine++;
-    if(alloc.has(Number(o.id))&&d.vs_print_allocation.length)counts.central_vs_print_allocation++;
+    if(d.vs_print_engine.length)inc('central_vs_print_engine');
+    if(alloc.has(Number(o.id))&&d.vs_print_allocation.length)inc('central_vs_print_allocation');
     // cost per order: active profit engine (items × approved unit cost) vs central engine
     const ho=cohort.get(Number(o.id))||null;
     const hCost=ho&&(ho.items||[]).length&&(ho.items||[]).every(i=>i.total_cost!=null)?round2(ho.items.reduce((n,i)=>n+Number(i.total_cost||0),0)):null;
     const costDiff=ho?(hCost===null)!==(central.cost===null)||(hCost!==null&&central.cost!==null&&Math.abs(hCost-central.cost)>0.001):false;
-    if(costDiff){counts.cost_differences++;d.cost=['cost']}
-    if(ho&&(ho.items||[]).length&&hCost===null)counts.profit_cost_unknown++;
+    if(costDiff){inc('cost_differences');d.cost=['cost']}
+    if(ho&&(ho.items||[]).length&&hCost===null)inc('profit_cost_unknown');
     // why the central reading differs from the print-time stock engine (explanation only; stock is never changed here)
     const invReasons=[];
     if(d.vs_print_engine.length){
@@ -150,9 +153,9 @@ export async function onRequest({request,env}){
      if(!invReasons.length)invReasons.push('other');
     }
     if(alloc.has(Number(o.id))&&diffKinds(p,a).length)invReasons.push('allocation_changed_since_print');
-    if(central.needs_review)counts.central_needs_review++;
-    if(!central.items.length)counts.central_unrecognised++;
-    if(central.items.length&&central.cost===null)counts.central_cost_unknown++;
+    if(central.needs_review)inc('central_needs_review');
+    if(!central.items.length)inc('central_unrecognised');
+    if(central.items.length&&central.cost===null)inc('central_cost_unknown');
     // completeness class: the whole order (notes, original text, source data, stored stock deduction)
     const analysis=analyzeOrder(o,cat.models,cat.lexicon),src=sourceOf.get(Number(o.id))||null;
     const srcProduct=src&&src.product?src.product:null;
@@ -168,7 +171,7 @@ export async function onRequest({request,env}){
      needs_review:central.needs_review,uncertain:(central.uncertain||[]).map(u=>({alias:u.alias,reason:u.reason})),
      print_engine:p,print_allocation:a,stock_reasons:invReasons,differences:d,class:cls});
    }
-   return json({engine:ENGINE_VERSION,read_only:true,store,from,to,total,batch:{size:limit,before,checked:orders.length,next_cursor:pg.next},counts,rows,
+   return json({engine:ENGINE_VERSION,read_only:true,store,from,to,total,checked,batch:{size:limit,before,checked:orders.length,next_cursor:pg.next},counts,rows,
     completeness:Object.fromEntries(Object.entries(classes).map(([k,v])=>[k,{count:v.length,orders:v}]))});
   }
   if(view==='lexicon'){
@@ -190,7 +193,7 @@ export async function onRequest({request,env}){
     for(const c of a.candidates)(c.near?aliases:products).push({...c,order_id:o.id,order_code:o.order_code});
     for(const u of a.unclear)unclear.push({...u,order_id:o.id,order_code:o.order_code});
    }
-   return json({store,from,to,read_only:true,total,batch:{size:limit,before,checked:orders.length,next_cursor:pg.next},orders_with_findings:withFindings,
+   return json({store,from,to,read_only:true,total,checked_ids:orders.map(o=>Number(o.id)),batch:{size:limit,before,checked:orders.length,next_cursor:pg.next},orders_with_findings:withFindings,
     // each group carries its order ids so the page can merge batches without counting an order twice
     products:groupPhrases(products),possible_aliases:groupPhrases(aliases),unclear:groupPhrases(unclear)});
   }
