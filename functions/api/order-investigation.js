@@ -43,6 +43,9 @@ export async function onRequestGet({request,env}){
  // ---- history: audit log, prints, departures
  const audit=await rows(env,`SELECT id,event_type,before_json,after_json,note,datetime(created_at,'+3 hours') at,created_by FROM order_audit_log WHERE order_id=? OR order_code=? ORDER BY id`,oid,o.order_code);
  const prints=await rows(env,`SELECT b.id,b.batch_code,datetime(b.created_at,'+3 hours') at,u.display_name by_name FROM print_batch_orders p JOIN print_batches b ON b.id=p.batch_id LEFT JOIN users u ON u.id=b.created_by WHERE p.order_id=? ORDER BY b.id`,oid);
+ const statusHistory=await rows(env,`SELECT h.id,h.from_status,h.to_status,h.source,h.cash_before,h.cash_after,h.settlement_before,h.settlement_after,h.note,datetime(h.created_at,'+3 hours') at,u.display_name by_name FROM order_status_history h LEFT JOIN users u ON u.id=h.changed_by WHERE h.order_id=? ORDER BY h.id`,oid);
+ const corrections=await rows(env,`SELECT c.*,datetime(c.created_at,'+3 hours') at,u.display_name by_name FROM delivery_settlement_corrections c LEFT JOIN users u ON u.id=c.created_by WHERE c.order_id=? ORDER BY c.id`,oid);
+ const historyActive=Boolean(await one(env,"SELECT 1 x FROM sqlite_master WHERE type='trigger' AND name='trg_order_status_history'"));
  const departure=await one(env,`SELECT first_batch_id,datetime(departed_at,'+3 hours') departed_local FROM order_departures WHERE order_id=?`,oid);
 
  // ---- inventory
@@ -71,6 +74,8 @@ export async function onRequestGet({request,env}){
  const deducted=movements.filter(m=>Number(m.quantity_delta)<0).reduce((n,m)=>n-Number(m.quantity_delta),0),restocked=movements.filter(m=>Number(m.quantity_delta)>0).reduce((n,m)=>n+Number(m.quantity_delta),0);
  f.push(allocation.length?`المخزون: خُصم عند الطباعة ${deducted} قطعة (${allocation.map(a=>a.model_name+' × '+a.quantity).join('، ')})، وأُرجع للمخزون ${restocked} قطعة.`:`المخزون: لا يوجد خصم مسجل عند الطباعة لهذا الطلب${movements.length?' (توجد حركات أخرى)':''}، ولا إرجاع.`);
  f.push(`الطباعة: أول طباعة ${o.first_printed_local||'—'}، آخر طباعة ${o.last_printed_local||'—'}، عدد مرات الطباعة ${Number(o.print_count||0)}${prints.length?' (دفعات: '+prints.map(p=>p.batch_code+' '+p.at).join('، ')+')':''}.${Number(o.print_count||0)>1||prints.length>1?' طباعة بوليصة بعد تاريخ التسوية قد تعني إعادة إرسال.':''}`);
+ f.push(historyActive?(statusHistory.length?`سجل تغييرات الحالة: ${statusHistory.length} تغيير (من التاريخ الذي فُعّل فيه السجل).`:'سجل تغييرات الحالة مفعّل، ولم يتغيّر حال الطلب منذ تفعيله.'):'سجل تغييرات الحالة غير مفعّل بعد على قاعدة البيانات.');
+ if(corrections.length)f.push(`تصحيحات تسوية سابقة: ${corrections.map(c=>c.at+' '+(AR[c.from_status]||c.from_status)+' ← '+(AR[c.to_status]||c.to_status)+'، فرق '+round2(c.cash_difference)+' د.أ').join('؛ ')}.`);
  if(audit.length)f.push(`سجل التعديلات: ${audit.length} حدث.`);else f.push('لا يوجد سجل تغييرات حالة لهذا الطلب (النظام لا يسجل تغيير الحالة عند تسكير كشف شركة التوصيل إلا في سطور الكشف أعلاه).');
  const openSame=samePhone.filter(x=>!Number(x.settled));
  if(samePhone.length)f.push(`طلبات أخرى لنفس الهاتف: ${samePhone.map(x=>'#'+x.order_code+' ('+(AR[x.delivery_status]||x.delivery_status)+(Number(x.settled)?'، مسوّى '+(x.settlement_code||''):'، غير مسوّى')+'، طُبع '+(x.first_printed_local||'—')+')').join('؛ ')}.`);
@@ -88,6 +93,6 @@ export async function onRequestGet({request,env}){
  return json({order:{id:oid,order_code:o.order_code,recipient_name:o.recipient_name,phone:o.phone,store_name:o.store_name,amount:o.amount,delivery_status:status,status_label:AR[status]||status,
    delivered_amount:o.delivered_amount,cash_collected:o.cash_collected,delivery_fee:o.delivery_fee,settled,settlement_id:o.delivery_company_settlement_id,settled_at:o.settled_at,
    first_printed_local:o.first_printed_local,last_printed_local:o.last_printed_local,print_count:o.print_count,created_at:o.created_at,updated_at:o.updated_at,order_text:o.order_notes||o.raw_text},
-  settlement_lines:settlementLines,same_phone_orders:samePhone,same_phone_statement_lines:phoneLines,audit,prints,departure,inventory:{allocation,movements},
+  settlement_lines:settlementLines,status_history:statusHistory.map(h=>({...h,source:String(h.source||'').split('|')[0]})),corrections,history_active:historyActive,same_phone_orders:samePhone,same_phone_statement_lines:phoneLines,audit,prints,departure,inventory:{allocation,movements},
   warehouse:{closed_report:closed,receipts,return_event:returnEvent,scans},store_settlements:storeSettlements,findings:f,hints,read_only:true});
 }

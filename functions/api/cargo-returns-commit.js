@@ -1,5 +1,6 @@
 import {classifyInventoryItems,loadInventoryModels,returnRestockPlan,restockStatements,ensureInventorySchema} from './_inventory.js';
 import {loadClosedIndex,normCode,closedText} from './_cargo-closed.js';
+import {ensureStatusHistory,statusSource} from './_status-history.js';
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 const phone=x=>{let s=String(x??'').replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g,'');if(s.startsWith('00962'))s=s.slice(2);if(s.startsWith('962'))s='0'+s.slice(3);if(s.length===9&&s.startsWith('7'))s='0'+s;return s};
 const txt=(x,n=200)=>String(x??'').trim().slice(0,n);
@@ -147,10 +148,11 @@ export async function onRequest({request,env}){
  // Record the report in the same D1 batch as status updates.
  // One D1 batch (one transaction): the report row, the status changes and the guarded
  // stock movements commit together or not at all. Movements carry source_ref of this report.
+ await ensureStatusHistory(env);
  const statements=[env.DB.prepare("INSERT INTO cargo_return_close_reports(created_by,source_name,matched_count,closed_count,skipped_count,details_json) VALUES(?,?,?,?,?,?)").bind(user.id,sourceName,accepted.length,accepted.length,skipped.length,details)];
  const REPORT_REF="'cargo_report:'||(SELECT MAX(id) FROM cargo_return_close_reports)";
  for(const x of accepted){
-  if(x.changeStatus)statements.push(env.DB.prepare("UPDATE orders SET delivery_status='returned',updated_at=datetime('now') WHERE id=? AND delivery_status='pending'").bind(x.id));
+  if(x.changeStatus)statements.push(env.DB.prepare("UPDATE orders SET delivery_status='returned',status_source=?,status_by=?,updated_at=datetime('now') WHERE id=? AND delivery_status='pending'").bind(statusSource('cargo_returns_statement',sourceName),user.id,x.id));
   statements.push(...restockStatements(env,x.id,x.restock,user.id,'استلام مرتجع بتسكير كشف المرتجعات — شحنة '+x.code,{sourceRefSql:REPORT_REF}));
  }
  const result=await env.DB.batch(statements);

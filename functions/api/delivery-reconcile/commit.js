@@ -3,6 +3,7 @@
 // and returned with its reason; nothing is guessed.
 import {dominantSettlementDate,ensureSettlementDateColumn} from '../_settlement-date.js';
 import {syncOrderInventory} from '../_inventory.js';
+import {ensureStatusHistory,statusSource} from '../_status-history.js';
 import {json,auth,normalizePhone,normalizeDigits,shipmentDateFit,loadCostedModels,shippedItems,pricePartialDelivery,RETURN_STATUSES,RECONCILE_CUTOFF,round2,ensureSettlementLineShipmentDate} from '../_partial-delivery.js';
 
 const VALID_STATUSES=new Set(['pending','delivered','delivered_adjusted','partial','refused_fee_paid','refused_no_fee','canceled_before_arrival']);
@@ -20,7 +21,7 @@ export async function onRequestPost({request,env}){
  const me=await auth(request,env);if(!me)return json({error:'غير مصرح'},401);
  const b=await request.json().catch(()=>({})),storeId=Number(b.store_id||0),sourceName=String(b.source_name||'').slice(0,200),rows=Array.isArray(b.rows)?b.rows.slice(0,3000):[];
  if(!storeId||!rows.length)return json({error:'لا توجد نتائج للاعتماد'},400);
- await ensureSettlementDateColumn(env);await ensureColumns(env);await ensureSettlementLineShipmentDate(env);
+ await ensureSettlementDateColumn(env);await ensureColumns(env);await ensureSettlementLineShipmentDate(env);await ensureStatusHistory(env);
  const models=await loadCostedModels(env);
 
  const accepted=[],held=[],used=new Set();
@@ -106,11 +107,11 @@ export async function onRequestPost({request,env}){
     settlement_note=?,
     settled_at=CASE WHEN ?='pending' THEN NULL ELSE datetime('now') END,
     delivery_company_settled=CASE WHEN ?='pending' THEN 0 ELSE 1 END,
-    delivery_company_settlement_id=?,updated_at=datetime('now')
+    delivery_company_settlement_id=?,status_source=?,status_by=?,updated_at=datetime('now')
     WHERE id=? AND COALESCE(delivery_company_settled,0)=0`)
-   .bind(x.status,x.amount,x.cash,x.fee,p?1:0,p?p.cost:0,p?1:0,p?1:0,p?JSON.stringify(p.items):'',p?1:0,p?p.received:0,p?1:0,p?sid:null,p?1:0,note,x.status,x.status,sid,x.o.id));
-  statements.push(env.DB.prepare(`INSERT INTO delivery_company_settlement_orders(settlement_id,order_id,phone,imported_status,applied_status,imported_amount,note,match_type,shipment_date) VALUES(?,?,?,?,?,?,?,?,?)`)
-   .bind(sid,x.o.id,normalizePhone(x.r.phone||x.o.phone),String(x.r.raw_status||x.r.status||''),x.status,x.amount,String(x.r.note||''),x.manual?`manual:${x.type}`:x.type,/^\d{4}-\d{2}-\d{2}$/.test(String(x.r.shipment_date||'').slice(0,10))?String(x.r.shipment_date).slice(0,10):null));
+   .bind(x.status,x.amount,x.cash,x.fee,p?1:0,p?p.cost:0,p?1:0,p?1:0,p?JSON.stringify(p.items):'',p?1:0,p?p.received:0,p?1:0,p?sid:null,p?1:0,note,x.status,x.status,sid,statusSource('delivery_statement',code),me.id,x.o.id));
+  statements.push(env.DB.prepare(`INSERT INTO delivery_company_settlement_orders(settlement_id,order_id,phone,imported_status,applied_status,imported_amount,note,match_type,shipment_date,shipment_code) VALUES(?,?,?,?,?,?,?,?,?,?)`)
+   .bind(sid,x.o.id,normalizePhone(x.r.phone||x.o.phone),String(x.r.raw_status||x.r.status||''),x.status,x.amount,String(x.r.note||''),x.manual?`manual:${x.type}`:x.type,/^\d{4}-\d{2}-\d{2}$/.test(String(x.r.shipment_date||'').slice(0,10))?String(x.r.shipment_date).slice(0,10):null,String(x.r.display_code||x.r.shipment_code||'').trim().slice(0,60)||null));
  }
  for(let i=0;i<statements.length;i+=40)await env.DB.batch(statements.slice(i,i+40));
  for(const x of accepted){const after=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(x.o.id).first();await syncOrderInventory(env,x.o,after,me.id)}

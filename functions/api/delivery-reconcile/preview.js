@@ -11,7 +11,7 @@ const ORDER_COLUMNS=`o.id,o.order_code,o.store_id,o.recipient_name,o.phone,o.amo
   CASE WHEN o.first_printed_at IS NULL THEN NULL ELSE date(o.first_printed_at,'+3 hours') END first_print_date,
   date(o.created_at,'+3 hours') created_date,
   s.name store_name,ds.settlement_code,ds.statement_date settlement_statement_date,ds.created_at settlement_created_at,
-  so.imported_amount settlement_imported_amount,so.shipment_date settlement_shipment_date,date(ds.created_at,'+3 hours') settlement_saved_date,so.imported_status settlement_imported_status,so.applied_status settlement_applied_status,
+  so.imported_amount settlement_imported_amount,so.shipment_date settlement_shipment_date,so.shipment_code settlement_shipment_code,so.match_type settlement_match_type,date(ds.created_at,'+3 hours') settlement_saved_date,so.imported_status settlement_imported_status,so.applied_status settlement_applied_status,
   o.delivered_amount,o.settled_at`;
 const orderSql=where=>`SELECT ${ORDER_COLUMNS},o.raw_text,o.order_notes FROM orders o
   LEFT JOIN stores s ON s.id=o.store_id
@@ -31,12 +31,31 @@ const previousShipDate=c=>{
  return {date:'',exact:false};
 };
 // Why an earlier settlement can NOT be this statement line (empty list = same shipment).
+// Identity of a settled candidate vs this line: the delivery company's shipment code is the
+// proof (stored per line since 24/11). A different result (delivered vs returned) for the same
+// shipment is a conflict to correct, never something to settle twice.
+const normShip=v=>String(v||'').replace(/\s+/g,'').toUpperCase();
+function settledIdentity(o,line){
+ if(!Number(o.delivery_company_settled||0))return {};
+ const prev=normShip(o.settlement_shipment_code),cur=normShip(line.displayCode);
+ const identity=prev&&cur?(prev===cur?'same_code':'different_code'):'unknown';
+ const applied=String(o.settlement_applied_status||o.delivery_status||'');
+ const result_conflict=Boolean(line.status&&applied&&RETURN_LIKE.has(applied)!==RETURN_LIKE.has(String(line.status)));
+ return {identity,result_conflict,correction_possible:result_conflict&&identity!=='different_code'&&Number(o.store_id)===Number(line.storeId)};
+}
 const settledDifferences=(c,line)=>{
  const diffs=[];
+ if(c.identity==='different_code')diffs.push(`كود الشحنة مختلف (${c.settlement_shipment_code} ≠ ${line.displayCode})`);
+ if(c.identity==='same_code'){
+  if(c.result_conflict)diffs.push('نفس كود الشحنة لكن نتيجة الكشف السابق مختلفة (مستلم/مرتجع) — تحتاج «تصحيح التسوية السابقة»');
+  const prevAmount=c.settlement_imported_amount==null?c.amount:Number(c.settlement_imported_amount);
+  if(!c.result_conflict&&Math.abs(prevAmount-Number(line.amount||0))>=.01)diffs.push(`نفس كود الشحنة لكن القيمة مختلفة (${money(prevAmount)} ≠ ${money(line.amount)})`);
+  return diffs;
+ }
  if(!c.same_store)diffs.push('متجر آخر');
  if(!isDay(line.shipmentDate))diffs.push('الكشف الحالي بلا تاريخ شحنة');
  else{
-  if(isDay(c.settlement_saved_date)&&line.shipmentDate>c.settlement_saved_date)diffs.push(`الشحنة خرجت ${line.shipmentDate} بعد حفظ الكشف السابق (${c.settlement_saved_date})`);
+  if(isDay(c.settlement_saved_date)&&line.shipmentDate>c.settlement_saved_date&&c.identity!=='same_code')diffs.push(`الشحنة خرجت ${line.shipmentDate} بعد حفظ الكشف السابق (${c.settlement_saved_date})`);
   const prev=previousShipDate(c);
   if(!prev.date)diffs.push('تاريخ شحنة الكشف السابق غير معروف');
   else if(Math.abs(dayDiff(line.shipmentDate,prev.date))>(prev.exact?0:1))diffs.push(`تاريخ الشحنة بالكشف السابق ${prev.date}${prev.exact?'':' (تقريبي)'} ≠ ${line.shipmentDate}`);
@@ -101,8 +120,9 @@ export async function onRequestPost({request,env}){
   const phone=normalizePhone(row.phone),amount=Math.max(0,Number(row.amount||0)),deliveryFee=Math.max(0,Number(row.delivery_fee||0));
   const hasNet=Boolean(row.has_net),netAmount=hasNet?Number(row.net_amount||0):amount-deliveryFee;
   const shipmentDate=String(row.shipment_date||'').trim().slice(0,10),status=String(row.status||'');
-  return {index,phone,amount,status,shipmentDate,codes:statementCodes(row),
-   common:{row_index:index+1,phone,shipment_date:shipmentDate,status,amount,delivery_fee:deliveryFee,net_amount:netAmount,has_net:hasNet,note:String(row.note||''),shipment_code:String(row.shipment_code||'')},result:null};
+  const displayCode=String(row.display_code||row.shipment_code||'').trim().slice(0,60);
+  return {index,storeId,phone,amount,status,shipmentDate,displayCode,codes:statementCodes(row),
+   common:{display_code:displayCode,row_index:index+1,phone,shipment_date:shipmentDate,status,amount,delivery_fee:deliveryFee,net_amount:netAmount,has_net:hasNet,note:String(row.note||''),shipment_code:String(row.shipment_code||'')},result:null};
  });
 
  const used=new Set();
@@ -115,11 +135,11 @@ export async function onRequestPost({request,env}){
    settlement_date:o.settlement_statement_date||(o.settlement_created_at?String(o.settlement_created_at).slice(0,10):null),
    settlement_imported_amount:o.settlement_imported_amount==null?null:Number(o.settlement_imported_amount),
    settlement_imported_status:o.settlement_imported_status||'',settlement_applied_status:o.settlement_applied_status||'',
-   settlement_shipment_date:o.settlement_shipment_date||null,settlement_saved_date:o.settlement_saved_date||null,
+   settlement_shipment_date:o.settlement_shipment_date||null,settlement_shipment_code:o.settlement_shipment_code||'',settlement_match_type:o.settlement_match_type||'',settlement_saved_date:o.settlement_saved_date||null,
    delivered_amount:o.delivered_amount==null?null:Number(o.delivered_amount),settled_at:o.settled_at||null,
    same_store:Number(o.store_id)===storeId,phone_source:source,date_known:fit.known,date_ok:fit.ok,date_gap:fit.gap,
    amount_relation:Math.abs(orderAmount-line.amount)<.01?'equal':orderAmount>line.amount?'order_higher':'order_lower',
-   used_by_other_line:used.has(Number(o.id))};
+   used_by_other_line:used.has(Number(o.id)),...settledIdentity(o,line)};
  };
  const candidatePool=line=>{
   const seen=new Map();
@@ -203,7 +223,7 @@ export async function onRequestPost({request,env}){
       reason:`نفس الشحنة سُوّيت سابقًا: الطلب #${c.order_code} في ${c.settlement_code||'كشف سابق'}${c.settlement_date?' بتاريخ '+c.settlement_date:''} بقيمة ${money(c.settlement_imported_amount??c.amount)} — لن تُحسب مرتين`});
      continue;
     }
-    finish(line,'review_settled',{candidates:pool,reason:`${codeNote}تحتاج مراجعة: لا يوجد طلب مفتوح لهذا الهاتف، ويوجد طلب مسوّى سابقًا لكن لا يوجد ما يثبت أنه نفس هذه الشحنة — ${settled.map(c=>settledSummary(c,line)).join('؛ ')}. لم يُعتبر السطر مسوّى ولن يُعتمد حتى تتأكد (قد يكون طلبًا جديدًا غير مُدخل في النظام)`});
+    finish(line,'review_settled',{candidates:pool,reason:`${codeNote}تحتاج مراجعة: لا يوجد طلب مفتوح لهذا الهاتف، ويوجد طلب مسوّى سابقًا لكن لا يوجد ما يثبت أنه نفس هذه الشحنة — ${settled.map(c=>settledSummary(c,line)).join('؛ ')}. لم يُعتبر السطر مسوّى ولن يُعتمد حتى تتأكد (قد يكون طلبًا جديدًا غير مُدخل في النظام)${settled.some(c=>c.correction_possible)?'. إذا تحققت أنها نفس الشحنة وتغيّرت نتيجتها، يمكن للمدير «تصحيح التسوية السابقة»':''}`,correction_possible:settled.some(c=>c.correction_possible)});
     continue;
    }
    const used2=pool.filter(c=>c.used_by_other_line);

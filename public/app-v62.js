@@ -2476,7 +2476,8 @@ async function deliveryReconcileView(){
     const card=cell.closest('.dr-card');if(card){card.dataset.ready=c.ok?'1':'0'}
     drRefreshCounts();
     const bar=$('#reconcileCounters');
-    if(bar){const ready=previewRows.filter(x=>reconcileCheck(x).ok).length,held=previewRows.filter(x=>{const k=reconcileCheck(x);return !k.ok&&!k.skip}).length;bar.innerHTML=`<span><strong>${previewRows.length}</strong><small>الشحنات</small></span><span><strong>${ready}</strong><small>جاهز للاعتماد</small></span><span><strong>${held}</strong><small>تحتاج مراجعة</small></span>`}
+    if(bar){const ready=previewRows.filter(x=>reconcileCheck(x).ok).length,held=previewRows.filter(x=>{const k=reconcileCheck(x);return !k.ok&&!k.skip}).length;bar.textContent=`جاهز للاعتماد: ${ready} • موقوف: ${held}`;
+      const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=String(v)};set('drStatTotal',previewRows.length);set('drStatReady',ready);set('drStatHeld',held)}
   }
   function renderReconcilePanel(i){
     const r=previewRows[i],panel=document.querySelector(`.reconcile-panel[data-i="${i}"]`);if(!panel)return;
@@ -2494,8 +2495,9 @@ async function deliveryReconcileView(){
         const blocked=Number(c.delivery_company_settled||0)||previewRows.some((x,k)=>k!==i&&Number(x.selected_order_id)===Number(c.id));
         const tags=[c.date_ok===false?tag('خارج تاريخ الشحنة','warn'):c.date_ok?tag('تاريخ الشحنة مطابق','ok'):'',!c.same_store?tag('متجر آخر: '+esc(c.store_name||'—'),'warn'):'',c.phone_source==='order_text'?tag('الرقم موجود في نص الطلب','warn'):'',c.amount_relation==='order_lower'?tag('قيمة الطلب أقل من الكشف','warn'):c.amount_relation==='equal'?tag('نفس القيمة','ok'):'',Number(c.delivery_company_settled||0)?tag('مسوّى سابقًا','bad'):''].join('');
         const prev=Number(c.delivery_company_settled||0)?`<div class="reconcile-prev">الكشف السابق: ${c.settlement_id?`<button type="button" class="rc-link" data-rc-settlement="${Number(c.settlement_id)}">${esc(c.settlement_code||'كشف سابق')}</button>`:esc(c.settlement_code||'كشف سابق')} • تاريخ الكشف: ${esc(c.settlement_date||'—')}${c.settlement_shipment_date?' • تاريخ الشحنة فيه: '+esc(c.settlement_shipment_date):''} • القيمة بالكشف: ${c.settlement_imported_amount==null?'—':money(c.settlement_imported_amount)+' د.أ'} • الحالة بالكشف: ${esc(c.settlement_imported_status||'—')} • المعتمدة: ${esc(({delivered:'تم التسليم',partial:'تسليم جزئي',delivered_adjusted:'تسليم بقيمة معدلة',refused_fee_paid:'رفض ودفع أجور',refused_no_fee:'رفض وعدم دفع أجور',canceled_before_arrival:'ملغي قبل الوصول',pending:'قيد التوصيل'})[c.settlement_applied_status||c.delivery_status]||c.settlement_applied_status||c.delivery_status||'—')}</div>`:'';
+        const fix=c.correction_possible&&state.user?.role==='admin'?`<div class="dr-fix"><span>${c.identity==='same_code'?'نفس كود الشحنة ونتيجة مختلفة':'نتيجة مختلفة عن الكشف السابق'}</span><button type="button" class="dr-fix-btn" data-fix-i="${i}" data-fix-c="${Number(c.id)}">تصحيح التسوية السابقة</button></div>`:'';
         return `<label class="reconcile-choice ${blocked?'disabled':''}"><input type="radio" name="rc-${i}" class="reconcile-order" data-i="${i}" value="${c.id}" ${Number(r.selected_order_id)===Number(c.id)?'checked':''} ${blocked?'disabled':''}>
-          <span><button type="button" class="rc-link" data-rc-order="${Number(c.id)}">#${esc(c.order_code)}</button> • ${esc(c.recipient_name||'لا يوجد')} • ${money(c.amount)} د.أ<br><span class="sub">${esc(c.store_name||'—')} • طباعة: ${esc(c.first_print_date||'بدون')} • ${esc(c.phone||'')}</span><br>${tags}${prev}</span></label>`;
+          <span><button type="button" class="rc-link" data-rc-order="${Number(c.id)}">#${esc(c.order_code)}</button> • ${esc(c.recipient_name||'لا يوجد')} • ${money(c.amount)} د.أ<br><span class="sub">${esc(c.store_name||'—')} • طباعة: ${esc(c.first_print_date||'بدون')} • ${esc(c.phone||'')}</span><br>${tags}${prev}${fix}</span></label>`;
       }).join('')+'</div>';
       if(o&&(o.date_ok===false||!o.same_store))html+=`<label class="reconcile-confirm"><input type="checkbox" class="reconcile-confirm-outside" data-i="${i}" ${r.confirm_outside?'checked':''}> أؤكد أن الطلب #${esc(o.order_code)} هو نفس هذه الشحنة رغم ${o.date_ok===false?'اختلاف التاريخ':'اختلاف المتجر'}</label>`;
     }
@@ -2566,7 +2568,8 @@ async function deliveryReconcileView(){
     const st=document.createElement('style');st.id='drStyles';
     st.textContent=`
 #deliveryPreview{min-width:0;max-width:100%}
-.dr-wrap{--navy:#1f3a5f;--ink:#24364d;--mut:#6b7889;--line:#e3e8ef;--soft:#f4f6f9;min-width:0;max-width:100%;color:var(--ink)}
+.dr-wrap{padding-bottom:calc(140px + env(safe-area-inset-bottom))}
+.dr-wrap,.dr-bar{--navy:#1f3a5f;--ink:#24364d;--mut:#6b7889;--line:#e3e8ef;--soft:#f4f6f9;min-width:0;max-width:100%;color:var(--ink)}
 .dr-wrap *{box-sizing:border-box}
 .dr-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:14px 0 10px}
 .dr-summary>div{background:var(--soft);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -2600,13 +2603,30 @@ async function deliveryReconcileView(){
 .dr-wrap .reconcile-panel{margin-top:10px;min-width:0;max-width:100%;overflow-wrap:anywhere}
 .dr-wrap .reconcile-panel:empty{display:none}
 .dr-wrap .rc-link{color:var(--navy)}
-.dr-bar.delivery-commit-bar{position:fixed;bottom:calc(8px + env(safe-area-inset-bottom));left:8px;right:8px;z-index:40;margin:0;padding:10px 12px;display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.97);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);box-shadow:0 6px 20px rgba(16,42,67,.10)}
-.dr-bar-text{display:flex;flex-direction:column;gap:2px;min-width:0}.dr-bar-text b{font-size:13px;font-weight:600;color:var(--navy)}.dr-bar-text small{font-size:11px;color:var(--mut);line-height:1.5}.dr-bar #reconcileCounters{display:flex;gap:16px}.dr-bar #reconcileCounters span{display:flex;gap:4px;align-items:center}
-.dr-bar .btn{flex:none;border-radius:12px;background:var(--navy)!important;color:#fff!important;border:0;padding:11px 16px;font-weight:700;white-space:nowrap}
-body.dr-typing .dr-bar.delivery-commit-bar{display:none}
+.dr-fix{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-top:8px;padding:8px;border-radius:10px;background:#fff7ed}
+.dr-fix span{font-size:12px;color:#9a4d00}
+.dr-fix-btn{border:1px solid #1f3a5f;background:#fff;color:#1f3a5f;border-radius:10px;padding:7px 12px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
+.dr-corr .rc-sheet-card{max-width:620px}
+.dr-corr-note{background:#f4f6f9;border-radius:10px;padding:8px 10px;font-size:12px;color:#3d4b5c;margin-bottom:10px;line-height:1.7}
+.dr-corr-table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}.dr-corr-table th,.dr-corr-table td{border-bottom:1px solid #eef1f4;padding:6px 4px;text-align:right;vertical-align:top;overflow-wrap:anywhere}.dr-corr-table thead th{font-size:12px;color:#6b7889}.dr-corr-table tbody th{width:28%;color:#6b7889;font-weight:600}
+.dr-corr-sec{margin-top:12px;display:grid;gap:6px}.dr-corr-sec>b{font-size:13px;color:#1f3a5f}.dr-corr .input{width:100%;font-size:16px;padding:9px 10px;border:1px solid #e3e8ef;border-radius:10px;box-sizing:border-box}
+.dr-ok{color:#2f7d5b;font-size:13px}.dr-muted{color:#6b7889;font-size:12px}
+.dr-corr-calc{margin-top:12px;width:100%;height:42px;border:1px solid #1f3a5f;background:#fff;color:#1f3a5f;border-radius:12px;font:inherit;font-weight:700}
+.dr-corr-result{margin-top:10px;background:#f4f6f9;border-radius:10px;padding:10px;font-size:13px;line-height:1.9}.dr-corr-result.bad{background:#fdecec;color:#b42318}
+.dr-corr-final{margin-top:10px;display:grid;gap:8px}.dr-corr-final label{display:grid;gap:4px;font-size:13px}.dr-corr .dr-commit{--navy:#1f3a5f}
+.dr-bar{max-height:calc(130px + env(safe-area-inset-bottom));overflow:hidden;flex-direction:initial;position:fixed;left:0;right:0;bottom:0;z-index:40;margin:0 auto;box-sizing:border-box;width:100%;max-width:100%;padding:8px 10px calc(8px + env(safe-area-inset-bottom));display:grid;grid-template-columns:minmax(0,1fr);gap:6px;background:#fff;border:1px solid var(--line);border-bottom:0;border-radius:16px 16px 0 0;box-shadow:0 -4px 18px rgba(16,42,67,.08);font-size:13px;line-height:1.2}
+.dr-bar *{box-sizing:border-box}
+.dr-bar-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;min-width:0}
+.dr-bar-stats>div{height:44px;min-width:0;background:var(--soft);border-radius:10px;padding:4px 6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;overflow:hidden}
+.dr-bar-stats b{font-size:17px;font-weight:800;color:var(--navy);line-height:1}
+.dr-bar-stats span{font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.dr-bar-stats .ok b{color:#2f7d5b}.dr-bar-stats .warn b{color:#b05a00}
+.dr-commit{display:block;width:100%;height:42px;border:0;border-radius:12px;background:var(--navy);color:#fff;font:inherit;font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;-webkit-appearance:none;appearance:none}
+.dr-commit:disabled{opacity:.6}
+body.dr-kb .dr-bar{display:none}
+@media(min-width:900px){.dr-bar{bottom:10px;border-bottom:1px solid var(--line);border-radius:14px;padding:8px 10px}}
 @media(max-width:899px){
   .dr-summary{display:none}
-  .dr-bar-note{display:none}
   .reconcile-items-table,.reconcile-items-table tbody,.reconcile-items-table tr,.reconcile-items-table td{display:block;width:100%}
   .reconcile-items-table thead{display:none}
   .reconcile-items-table tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin-bottom:6px}
@@ -2615,7 +2635,6 @@ body.dr-typing .dr-bar.delivery-commit-bar{display:none}
   .reconcile-items-table td:first-child{grid-column:1/-1;font-weight:700}
   .reconcile-items-table input{max-width:100%!important;width:100%;font-size:16px}
 }
-@media(max-width:899px){.dr-bar.delivery-commit-bar{display:grid!important;grid-template-columns:minmax(0,1fr)!important;align-items:stretch!important;gap:6px!important;padding:8px 10px!important;box-sizing:border-box;width:auto!important;max-width:none!important;max-height:130px;bottom:calc(4px + env(safe-area-inset-bottom));}.dr-bar .dr-bar-text{width:100%;min-width:0;display:block!important}.dr-bar #reconcileCounters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;text-align:center}.dr-bar #reconcileCounters span{display:flex;flex-direction:column;align-items:center;min-width:0;line-height:1.2}.dr-bar #reconcileCounters strong{font-size:18px}.dr-bar #reconcileCounters small{white-space:nowrap;font-size:11px}.dr-bar .dr-bar-sum,.dr-bar .dr-bar-note{display:none!important}.dr-bar #commitDeliveryReport{width:100%!important;min-width:0!important;margin:0!important;padding:9px!important;min-height:40px;box-sizing:border-box}body.dr-typing .dr-bar.delivery-commit-bar{display:none!important}}
 @media(min-width:900px){
   .dr-head{display:grid;grid-template-columns:150px minmax(0,1.4fr) minmax(0,1fr);gap:16px;padding:8px 14px;font-size:12px;color:var(--mut);background:var(--soft);border-radius:12px 12px 0 0;border:1px solid var(--line);border-bottom:0}
   .dr-list{gap:0;border:1px solid var(--line);border-radius:0 0 12px 12px;overflow:hidden}
@@ -2637,20 +2656,93 @@ body.dr-typing .dr-bar.delivery-commit-bar{display:none}
   function drPlaceBar(){
     const bar=document.querySelector('.dr-bar'),wrap=document.querySelector('.dr-wrap'),host=$('#deliveryPreview');
     if(!bar||!wrap||!host||!document.body.contains(bar))return;
-    const r=host.getBoundingClientRect(),mobile=window.innerWidth<900;
-    bar.style.left=(mobile?8:Math.max(8,r.left))+'px';
-    bar.style.right=(mobile?8:Math.max(8,window.innerWidth-r.right))+'px';
-    wrap.style.paddingBottom=(bar.offsetHeight+20)+'px';
+    if(window.innerWidth>=900){const r=host.getBoundingClientRect();bar.style.left=Math.max(8,r.left)+'px';bar.style.right=Math.max(8,window.innerWidth-r.right)+'px';bar.style.width='auto'}
+    else{bar.style.left='';bar.style.right='';bar.style.width=''}
+    wrap.style.paddingBottom=(bar.offsetHeight+24)+'px';
+    drKeyboard();
+  }
+  // Phones: the bar is hidden while the keyboard is open or a field has focus, so it never
+  // covers what is being typed.
+  function drKeyboard(){
+    const vv=window.visualViewport,open=Boolean(vv&&window.innerWidth<900&&vv.height<window.innerHeight-120);
+    const a=document.activeElement,typing=window.innerWidth<900&&a&&a.closest?.('#deliveryPreview,#deliveryMapping')&&a.matches?.('input:not([type=radio]):not([type=checkbox]),textarea,select');
+    document.body.classList.toggle('dr-kb',Boolean(open||typing));
   }
   if(!window.__drBarBound){
     window.__drBarBound=true;
     window.addEventListener('resize',()=>drPlaceBar(),{passive:true});
-    window.visualViewport?.addEventListener('resize',()=>drPlaceBar());
-    // Hide the bar while typing on a phone so it never sits over the field or the keyboard.
-    document.addEventListener('focusin',e=>{if(window.innerWidth<900&&e.target.closest?.('.dr-card')&&e.target.matches?.('input:not([type=radio]):not([type=checkbox]),textarea'))document.body.classList.add('dr-typing')});
-    document.addEventListener('focusout',()=>document.body.classList.remove('dr-typing'));
+    window.addEventListener('orientationchange',()=>setTimeout(drPlaceBar,250));
+    window.visualViewport?.addEventListener('resize',()=>drKeyboard());
+    document.addEventListener('focusin',()=>drKeyboard());
+    document.addEventListener('focusout',()=>setTimeout(drKeyboard,50));
   }
+  // ---------- correction of an earlier settlement (admin; nothing is written before the final confirmation) ----------
+  const DR_ST={delivered:'تم التسليم',partial:'تسليم جزئي',refused_fee_paid:'رفض ودفع أجور',refused_no_fee:'رفض وعدم دفع أجور',canceled_before_arrival:'ملغي قبل الوصول',pending:'قيد التوصيل',returned:'مرتجع'};
+  function drSyncRow(i){
+    const r=previewRows[i],q=c=>document.querySelector(`.${c}[data-i="${i}"]`);
+    if(q('delivery-status-choice'))r.status=q('delivery-status-choice').value;
+    for(const [k,c] of [['amount','delivery-amount-choice'],['delivery_fee','delivery-fee-choice'],['net_amount','delivery-net-choice']])if(q(c))r[k]=Number(q(c).value||0);
+  }
+  function openCorrection(i,cid){
+    drSyncRow(i);
+    const r=previewRows[i],c=(r.candidates||[]).find(x=>Number(x.id)===Number(cid));if(!c)return;
+    document.querySelectorAll('.rc-sheet').forEach(x=>x.remove());
+    const w=document.createElement('div');w.className='rc-sheet dr-corr';
+    const prevCode=c.settlement_shipment_code||'',curCode=r.display_code||'';
+    const sameCode=prevCode&&curCode&&prevCode.replace(/\s/g,'').toUpperCase()===curCode.replace(/\s/g,'').toUpperCase();
+    const row=(k,a,b)=>`<tr><th>${k}</th><td>${a}</td><td>${b}</td></tr>`;
+    w.innerHTML=`<div class="rc-sheet-card" role="dialog" aria-modal="true"><div class="rc-sheet-head"><b>تصحيح التسوية السابقة — الطلب #${esc(c.order_code)}</b><button type="button" class="rc-sheet-close" aria-label="إغلاق">✕</button></div>
+      <div class="dr-corr-note">لن يُحذف أو يُعدّل الكشف السابق. يُسجَّل تصحيح منفصل بفرق الكاش فقط، والمخزون لا يتغير.</div>
+      <table class="dr-corr-table"><thead><tr><th></th><th>الكشف السابق</th><th>الكشف الحالي</th></tr></thead><tbody>
+        ${row('الكشف',c.settlement_id?`<button type="button" class="rc-link" data-rc-settlement="${Number(c.settlement_id)}">${esc(c.settlement_code||'—')}</button>`:esc(c.settlement_code||'—'),'هذا الكشف')}
+        ${row('كود الشحنة',esc(prevCode||'غير محفوظ'),esc(curCode||'غير موجود'))}
+        ${row('تاريخ الشحنة',esc(c.settlement_shipment_date||c.settlement_date||'—'),esc(r.raw_date||r.shipment_date||'—'))}
+        ${row('الحالة',esc(c.settlement_imported_status||'—')+'<br><small>'+esc(DR_ST[c.settlement_applied_status]||c.settlement_applied_status||'')+'</small>',esc(r.raw_status||'')+'<br><small>'+esc(DR_ST[r.status]||r.status||'')+'</small>')}
+        ${row('القيمة',c.settlement_imported_amount==null?'—':money(c.settlement_imported_amount),money(r.amount))}
+        ${row('الأجور / الصافي','—',money(r.delivery_fee)+' / '+money(r.net_amount))}
+      </tbody></table>
+      <div class="dr-corr-sec"><b>هوية الشحنة</b>${sameCode?'<div class="dr-ok">✓ نفس كود الشحنة محفوظ في الكشفين</div>':'<div class="dr-muted">قارن كود الشحنة في ملفي الكشفين واكتبه.</div>'}
+        <input class="input" id="corrCode" placeholder="كود الشحنة كما في الكشفين" value="${esc(sameCode?curCode:'')}" autocomplete="off">
+        <label class="reconcile-confirm"><input type="checkbox" id="corrSame"> تحققت أنها نفس الشحنة في الكشفين</label></div>
+      <div class="dr-corr-sec"><b>نتيجة الكشف السابق لدى شركة التوصيل</b>
+        <label class="reconcile-confirm"><input type="radio" name="corrCharge" value="kept"> بقيت محسوبة (الأجور السابقة مخصومة ولم تُرجع): النهائي = السابق + الحالي</label>
+        <label class="reconcile-confirm"><input type="radio" name="corrCharge" value="reversed"> أُلغيت/أُرجعت: النهائي = الكشف الحالي فقط</label></div>
+      <div class="dr-corr-sec"><b>سبب التصحيح</b><textarea class="input" id="corrReason" rows="2" placeholder="مثال: شركة التوصيل أعادت المحاولة وسُلّمت الشحنة"></textarea></div>
+      <button type="button" class="dr-corr-calc">احسب النتيجة (بدون حفظ)</button>
+      <div class="dr-corr-result" hidden></div>
+      <div class="dr-corr-final" hidden><label>للتأكيد اكتب: <b>تصحيح التسوية</b><input class="input" id="corrConfirm" autocomplete="off"></label><button type="button" class="dr-commit dr-corr-go">تنفيذ التصحيح</button></div>
+    </div>`;
+    document.body.appendChild(w);
+    const payload=dry=>({order_id:Number(c.id),expected_settlement_id:Number(c.settlement_id),dry_run:dry,
+      line:{status:r.status,raw_status:r.raw_status||'',amount:Number(r.amount||0),delivery_fee:Number(r.delivery_fee||0),net_amount:Number(r.net_amount||0),has_net:Boolean(r.has_net),shipment_date:r.shipment_date||r.raw_date||'',shipment_code:r.display_code||'',phone:r.phone||''},
+      identity:{verified_code:w.querySelector('#corrCode').value.trim(),confirmed:w.querySelector('#corrSame').checked},
+      previous_charge:w.querySelector('input[name=corrCharge]:checked')?.value||'',reason:w.querySelector('#corrReason').value.trim(),confirm:w.querySelector('#corrConfirm')?.value.trim()||''});
+    const res=w.querySelector('.dr-corr-result'),fin=w.querySelector('.dr-corr-final');
+    w.addEventListener('input',()=>{fin.hidden=true});w.addEventListener('change',e=>{if(e.target.id!=='corrConfirm')fin.hidden=true});
+    w.querySelector('.dr-corr-calc').onclick=async()=>{
+      res.hidden=false;res.className='dr-corr-result';res.textContent='جارٍ الحساب…';
+      try{
+        const d=await api('/delivery-reconcile/correction',{method:'POST',body:JSON.stringify(payload(true))});
+        res.innerHTML=`<div>الحالة: <b>${esc(d.from.status_label)}</b> ← <b>${esc(d.to.status_label)}</b></div><div>كاش التسوية السابقة: <b>${money(d.from.cash)}</b> • صافي الكشف الحالي: <b>${money(d.to.line_net)}</b></div><div>الكاش النهائي للطلب: <b>${money(d.to.final_cash)}</b> • فرق الكاش المسجّل: <b>${d.cash_difference>0?'+':''}${money(d.cash_difference)}</b></div><div class="dr-muted">المخزون: ${esc(d.inventory)} • الأرباح تُحسب على يوم خروج الشحنة الأصلي.</div>`;
+        fin.hidden=false;
+      }catch(e){res.className='dr-corr-result bad';res.textContent=e.message}
+    };
+    w.querySelector('.dr-corr-go').onclick=async e=>{
+      const b=e.currentTarget;b.disabled=true;
+      try{
+        const d=await api('/delivery-reconcile/correction',{method:'POST',body:JSON.stringify(payload(false))});
+        w.remove();toast('تم تصحيح التسوية: '+d.correction_settlement);
+        Object.assign(c,{settlement_code:d.correction_settlement,settlement_applied_status:d.to.status,correction_possible:false,result_conflict:false});
+        r.match_type='already_settled';r.auto=false;r.selected_order_id=0;r.candidates=[c];r.settled_evidence='تصحيح التسوية السابقة';
+        r.reason=`تم تصحيح التسوية السابقة (${d.correction_settlement}): ${d.from.status_label} ← ${d.to.status_label}، فرق الكاش ${money(d.cash_difference)} — لن يُحتسب هذا السطر مرة أخرى`;
+        renderDeliveryPreview(drLastSummary);
+      }catch(err){b.disabled=false;res.hidden=false;res.className='dr-corr-result bad';res.textContent=err.message}
+    };
+    w.onclick=e=>{if(e.target===w||e.target.closest('.rc-sheet-close'))w.remove()};
+  }
+  let drLastSummary={};
   function renderDeliveryPreview(summary){
+    drLastSummary=summary||{};
     const g={matched:0,review:0,settled:0,unmatched:0};previewRows.forEach(r=>g[drGroup(r)]++);
     const filters=[['all','الكل',previewRows.length],['matched','مطابق',g.matched],['review','يحتاج مراجعة',g.review],['settled','مسوّى سابقًا',g.settled],['unmatched','غير مطابق',g.unmatched]];
     if(!filters.some(([k])=>k===deliveryFilter))deliveryFilter='all';
@@ -2684,9 +2776,14 @@ body.dr-typing .dr-bar.delivery-commit-bar{display:none}
           }).join('')}
           <div class="dr-empty" hidden>لا توجد شحنات في هذا التصنيف</div>
         </div>
-        <div class="delivery-commit-bar dr-bar">
-          <div class="dr-bar-text"><b id="reconcileCounters"></b><small class="dr-bar-sum">${previewRows.length} شحنة • ${g.matched} مطابق • ${g.review} مراجعة • ${g.settled} مسوّى سابقًا • ${g.unmatched} غير مطابق</small><small class="dr-bar-note">الأسطر الموقوفة لا تتغير وتبقى مفتوحة لكشف لاحق • الكاش المعتمد هو صافي شركة التوصيل</small></div>
-          <button id="commitDeliveryReport" class="btn btn-accent">اعتماد وتسكير الكشف</button>
+        <div class="dr-bar" role="region" aria-label="ملخص الكشف">
+          <div class="dr-bar-stats">
+            <div><b id="drStatTotal">${previewRows.length}</b><span>الشحنات</span></div>
+            <div class="ok"><b id="drStatReady">0</b><span>جاهزة للاعتماد</span></div>
+            <div class="warn"><b id="drStatHeld">0</b><span>تحتاج مراجعة</span></div>
+          </div>
+          <button id="commitDeliveryReport" type="button" class="dr-commit">اعتماد وتسكير الكشف</button>
+          <span id="reconcileCounters" hidden></span>
         </div>
       </div>`;
     drInjectStyles();
@@ -2697,6 +2794,7 @@ body.dr-typing .dr-bar.delivery-commit-bar{display:none}
     }
     drApplyFilter();drPlaceBar();
     if(window.ResizeObserver){const bar=document.querySelector('.dr-bar');if(bar)new ResizeObserver(()=>drPlaceBar()).observe(bar)}
+    if(!$('#deliveryPreview').dataset.drFix){$('#deliveryPreview').dataset.drFix='1';$('#deliveryPreview').addEventListener('click',e=>{const b=e.target.closest('.dr-fix-btn');if(!b)return;e.preventDefault();e.stopPropagation();openCorrection(Number(b.dataset.fixI),Number(b.dataset.fixC))},true)}
     $('.dr-filters').onclick=e=>{const b=e.target.closest('[data-filter]');if(!b)return;deliveryFilter=b.dataset.filter;drApplyFilter()};
     if(!$('#deliveryPreview').dataset.drToggle)$('#deliveryPreview').dataset.drToggle='1',$('#deliveryPreview').addEventListener('toggle',e=>{const d=e.target;if(!d.classList?.contains('dr-why'))return;const i=Number(d.dataset.i);if(d.open)drOpenWhy.add(i);else drOpenWhy.delete(i)},true);
     previewRows.forEach((r,i)=>renderReconcilePanel(i));
@@ -2768,7 +2866,7 @@ body.dr-typing .dr-bar.delivery-commit-bar{display:none}
       if(c.skip)return;
       if(!c.ok){heldLocal.push({row_index:r.row_index,phone:r.phone,reason:c.reason});payload.push({row_index:r.row_index,phone:r.phone,order_id:0,hold_reason:c.reason});return}
       const p=reconcileNeedsItems(r)?reconcilePieces(r):null;
-      payload.push({row_index:r.row_index,order_id:Number(r.selected_order_id),selection:r.auto?'auto':'manual',phone:r.phone,shipment_date:r.shipment_date||r.raw_date||'',status:r.status,raw_status:r.raw_status,amount:Number(r.amount||0),delivery_fee:Number(r.delivery_fee||0),net_amount:Number(r.net_amount||0),has_net:Boolean(r.has_net),note:r.note||'',match_type:r.match_type,
+      payload.push({display_code:r.display_code||'',row_index:r.row_index,order_id:Number(r.selected_order_id),selection:r.auto?'auto':'manual',phone:r.phone,shipment_date:r.shipment_date||r.raw_date||'',status:r.status,raw_status:r.raw_status,amount:Number(r.amount||0),delivery_fee:Number(r.delivery_fee||0),net_amount:Number(r.net_amount||0),has_net:Boolean(r.has_net),note:r.note||'',match_type:r.match_type,
         delivered_items:p?p.items.map(x=>({model_id:x.model_id,received:x.received,returned:x.returned})):undefined,
         confirm_amount_higher:r.confirm_higher===true,confirm_date_outside:r.confirm_outside===true,confirm_discount:r.confirm_discount===true});
     });

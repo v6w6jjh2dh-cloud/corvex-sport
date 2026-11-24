@@ -210,9 +210,14 @@ export function ensureSettlementLineShipmentDate(env){
  if(!lineShipmentReady.has(key))lineShipmentReady.set(key,(async()=>{
   const info=await env.DB.prepare('PRAGMA table_info(delivery_company_settlement_orders)').all();
   const cols=new Set((info.results||[]).map(r=>r.name));
-  if(!cols.size||cols.has('shipment_date'))return;
-  try{await env.DB.prepare('ALTER TABLE delivery_company_settlement_orders ADD COLUMN shipment_date TEXT').run()}
-  catch(e){if(!/duplicate column/i.test(String(e?.message||e)))throw e}
+  if(!cols.size)return;
+  // shipment_code: the delivery company's code of the shipment (e.g. BS05AUTOOUT) — the proof
+  // that a later statement line is the same shipment.
+  for(const col of ['shipment_date','shipment_code']){
+   if(cols.has(col))continue;
+   try{await env.DB.prepare(`ALTER TABLE delivery_company_settlement_orders ADD COLUMN ${col} TEXT`).run()}
+   catch(e){if(!/duplicate column/i.test(String(e?.message||e)))throw e}
+  }
  })().catch(e=>{lineShipmentReady.delete(key);throw e}));
  return lineShipmentReady.get(key);
 }
