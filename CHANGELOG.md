@@ -16,6 +16,10 @@
 
 ## السجل
 
+### 2026-11-24 — خصوصية مسارات OpenAI (T-12)
+- `functions/api/_ai-privacy.js` (جديد): `store:false` لكل طلب، حذف الهواتف/البريد/الروابط (مع إعادة الهواتف محليًا)، وحذف أسطر الاسم/العنوان المعنونة للمهام الخاصة بالبضاعة.
+- مطبق على `/ai-parse-order` (`[[path]].js`)، `profit-interpret.js`، `meta/webhook.js`. الوظائف تعمل كما هي. اختبارات `ai-privacy` (4). التحقق محلي فقط (OpenAI محاكى).
+
 ### 2026-11-24 — محرك لغة طلب عام قابل للتعلم (وضع الظل)
 - `functions/api/_order-language.js` (جديد): محلل عام؛ كل الكلمات في معجم بيانات (`DEFAULT_LEXICON` مطابق للمحرك النشط، `LEARNED_DEFAULTS`)، مع دليل لكل كمية واكتشاف العبارات غير المعروفة.
 - المحرك المركزي يستخدمه بدل المطابق القديم؛ جدول `store_lexicon` لقواعد اللغة لكل متجر؛ API: `view=lexicon`، `view=unknown`، `lexicon_propose/test/approve/reject/disable`؛ اقتراحات من التصحيح.

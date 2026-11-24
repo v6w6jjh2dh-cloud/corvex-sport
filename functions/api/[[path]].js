@@ -1,5 +1,6 @@
 import {dominantSettlementDate,ensureSettlementDateColumn} from './_settlement-date.js';
 import {runSchemaMigrationOnce} from './_schema-migrations.js';
+import {redactForAI,restorePlaceholders,privateAIRequest} from './_ai-privacy.js';
 import {loadInventoryModels,syncOrderInventory,deductOnFirstPrint} from './_inventory.js';
 import {ensureStatusHistory,statusSource} from './_status-history.js';
 
@@ -1725,17 +1726,20 @@ export async function onRequest(context) {
 إذا وردت كلمة مرتجع أو إرجاع أو ارجاع أو استرجاع، اجعل amount سالبًا بالقيمة نفسها؛ مثال 17 تصبح -17.
 لا تخمّن كوست لصنف غير موجود في القائمة؛ اجعله صفرًا.`;
 
+      const aiInput=redactForAI(rawText,{purpose:'order'});
       let aiResponse;
       try {
         aiResponse = await fetch('https://api.openai.com/v1/responses',{
           method:'POST',
           headers:{'authorization':`Bearer ${env.OPENAI_API_KEY}`,'content-type':'application/json'},
-          body:JSON.stringify({
+          // T-12: store:false; phones/e-mails/links replaced by placeholders (restored below). Name/address are
+          // what this endpoint extracts, so they are needed and kept.
+          body:JSON.stringify(privateAIRequest({
             model:env.OPENAI_MODEL || 'gpt-5-nano',
-            instructions, input:rawText,
+            instructions:instructions+'\nأرقام الهواتف مستبدلة برموز مثل [هاتف1]؛ ضع الرمز كما هو في phone ولا تخترع رقمًا.', input:aiInput.text,
             reasoning:{effort:'minimal'},
             text:{format:{type:'json_schema',name:'corvex_order',strict:true,schema}}
-          })
+          }))
         });
       } catch {
         return json({error:'تعذر الاتصال بخدمة التحليل الذكي'},502);
@@ -1745,6 +1749,8 @@ export async function onRequest(context) {
       const outputText=data.output_text || (data.output||[]).flatMap(x=>x.content||[]).find(x=>x.type==='output_text')?.text || '';
       let parsed;
       try{parsed=JSON.parse(outputText)}catch{return json({error:'وصلت نتيجة غير مفهومة من التحليل الذكي'},502)}
+      parsed=restorePlaceholders(parsed,aiInput.phones);
+      if(parsed.phone)parsed.phone=normalizePhone(parsed.phone)||parsed.phone;
       parsed.cost_of_goods=Math.max(0,Number(parsed.cost_of_goods||0));
       const normalizedOrder=duplicateText(rawText)
         .replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه')
