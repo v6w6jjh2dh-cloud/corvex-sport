@@ -49,4 +49,4 @@ if(base&&!/^0+$/.test(base)){
 }
 
 if(fail.length){console.error('✗ project check failed:\n- '+fail.join('\n- '));process.exit(1)}
-console.log(`✓ project check: ${files.length} JS files parse, ${refs.length} index.html assets verified${base?`, cache busting vs ${base.slice(0,7)}`:''}`);
+console.log(`✓ project check: ${files.length} JS files parse, ${refs.length} index.html assets verified${base&&!/^0+$/.test(base)?`, cache busting vs ${base.slice(0,7)}`:' (no base: cache-busting check skipped)'}`);

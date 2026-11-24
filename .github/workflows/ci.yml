@@ -34,8 +34,14 @@ jobs:
 
       - name: Syntax, index.html assets and cache-busting versions
         env:
-          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: node scripts/check-project.mjs "$BASE_REF"
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # base = PR base, else the previous commit of this push, else (new branch) where it left main
+          BASE="$PR_BASE"
+          if [ -z "$BASE" ]; then BASE="$BEFORE"; fi
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then BASE="$(git merge-base origin/main HEAD)"; fi
+          node scripts/check-project.mjs "$BASE"
 
       - name: Test-only dependency (PGlite for the Cepoxy PostgreSQL tests)
         run: npm install --prefix /tmp/corvex-test-deps --no-audit --no-fund --no-save @electric-sql/pglite
