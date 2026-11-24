@@ -2972,18 +2972,21 @@ async function dailyProfitsView(){
     const date=$('#profitDate').value,store=$('#profitStore').value||'0';
     target.textContent='جاري حساب أرباح الكشوف...';
     try{
-      const d=await api('/profit-statements?date='+encodeURIComponent(date)+'&store_id='+encodeURIComponent(store));
+      const [d,cm]=await Promise.all([api('/profit-statements?date='+encodeURIComponent(date)+'&store_id='+encodeURIComponent(store)),window.CorvexCommitment?window.CorvexCommitment.get(date,store).catch(()=>null):null]);
       if(d.date!==$('#profitDate').value)return;
+      // daily commitment: once for this date, never per statement
+      const commitBox=window.CorvexCommitment?window.CorvexCommitment.panel(cm,{profit:(d.totals||{}).profit??(d.statements.length?null:0),ads:d.ad_spend,label:'ربح الكشوف بعد الكوست والتوصيل'}):'';
       const T=d.totals||{};
       const kindLabel={final:'',as_settled:'كما سُوّي (صُحّح لاحقًا)',correction:'تصحيح',superseded:'سُوّي في كشف آخر'};
       const st=x=>({pending:'قيد التوصيل',delivered:'تم التسليم',partial:'تسليم جزئي',delivered_adjusted:'تسليم جزئي',returned:'مرتجع',refused_fee_paid:'رفض ودفع أجور',refused_no_fee:'رفض دون أجور',canceled_before_arrival:'ملغي قبل الوصول'})[x]||x||'—';
       const fig=(l,v)=>'<div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid #eef1f4"><span style="color:#5b6878">'+l+'</span><b style="direction:ltr">'+(v===null||v===undefined?'—':money(v)+' د.أ')+'</b></div>';
-      if(!d.statements.length){target.innerHTML='<div class="empty">لا توجد كشوف شركة توصيل بتاريخ '+esc(d.date)+'</div>';return}
+      if(!d.statements.length){target.innerHTML=commitBox+'<div class="empty">لا توجد كشوف شركة توصيل بتاريخ '+esc(d.date)+' — الالتزام اليومي يُحتسب رغم ذلك</div>';return}
       const unknown=d.statements.flatMap(s=>s.orders.filter(o=>o.kind!=='superseded'&&!o.cost_known).map(o=>({...o,code:s.settlement_code})));
       const mismatch=d.statements.filter(s=>!s.net_matches_statement);
       target.innerHTML='<div class="sub" style="font-size:11px;margin:8px 0">محرك: '+esc(d.engine)+' • '+d.statements.length+' كشف بتاريخ '+esc(d.date)+'</div>'+
         '<section style="display:grid;gap:12px">'+
         profitHero('صافي ربح كشوف هذا التاريخ',T.profit,T.orders+' طلب • '+T.delivered+' مستلم • '+T.returned+' مرتجع'+(T.unknown_cost?' • '+T.unknown_cost+' بكوست ناقص':''))+
+        commitBox+
         profitPanel('أداء الكشوف',profitStats(T.orders,T.delivered,T.returned,null))+
         profitPanel('الملخص المالي للكشوف',profitRow('إجمالي المبيعات',profitValue(T.sales))+profitRow('صافي الكاش من شركة التوصيل',profitValue(T.cash))+profitRow('كوست البضاعة',profitValue(T.costs))+profitRow('أجور التوصيل',profitValue(T.fees))+profitRow('نتيجة المرتجعات',profitValue(T.returns),profitTone(T.returns)))+
         (unknown.length?'<div class="partial-summary-warning">⚠ '+unknown.length+' طلب كوستها ناقصة — صافي الربح لا يُعرض حتى تكتمل (ربح المكتمل فقط: '+money(T.known_profit)+' د.أ):<ul style="margin:6px 0 0">'+unknown.map(o=>'<li><button type="button" class="rc-link" data-rc-order="'+Number(o.order_id)+'">#'+esc(o.order_code)+'</button> ('+esc(o.code)+'): '+esc(o.reason)+'</li>').join('')+'</ul></div>':'')+
@@ -3000,7 +3003,7 @@ async function dailyProfitsView(){
     const store=$('#cohortStore').value||'0';
     target.textContent='جاري حساب نتائج الشحنات...';
     try{
-      const d=await api('/profit-shipping-cohorts?date='+encodeURIComponent(date)+'&store_id='+encodeURIComponent(store));
+      const [d,cm]=await Promise.all([api('/profit-shipping-cohorts?date='+encodeURIComponent(date)+'&store_id='+encodeURIComponent(store)),window.CorvexCommitment?window.CorvexCommitment.get(date,store).catch(()=>null):null]);
       $('#cohortAdSpend').value=Number(d.ad_spend||0);
       window.__cohortOrders=d.orders; // used by order-number links (navigation only)
       const statusLabel=s=>({pending:'قيد التوصيل',delivered:'تم التسليم',partial:'تسليم جزئي',delivered_adjusted:'تسليم جزئي',returned:'مرتجع',refused_fee_paid:'مرفوض ودفع أجور',refused_no_fee:'مرفوض دون أجور',canceled_before_arrival:'ملغي قبل الوصول'})[s]||s;
@@ -3019,6 +3022,7 @@ async function dailyProfitsView(){
       target.innerHTML=(d.catalogue_error?'<div class="partial-summary-warning">⚠ تعذر تحديث قائمة الموديلات تلقائيًا؛ تم استخدام القائمة الحالية: '+esc(d.catalogue_error)+'</div>':'')+'<div class="sub" style="font-size:11px">محرك الأرباح: '+esc(d.engine||'')+' • شحنات يوم '+esc(d.date)+' فقط، بنتائجها من كل الكشوف المسكّرة مهما كان تاريخ تسكيرها</div>'+
       '<section style="margin:16px 0 20px;display:grid;gap:12px;font-family:inherit">'+
         profitHero('صافي الربح بعد الإعلانات',d.net_after_ads,d.complete?'تقرير مكتمل':'الربح الحالي • '+d.pending+' طلب معلّق')+
+        (window.CorvexCommitment?window.CorvexCommitment.panel(cm,{profit:d.gross_profit,ads:d.ad_spend,label:'الربح بعد الكوست والتوصيل'}):'')+
         (Number(d.return_fee_unknown||0)?'<div style="background:#fff4e5;border:1px solid #f5b971;border-radius:12px;padding:10px 12px;color:#7a4100">⚠ '+Number(d.return_fee_unknown)+' رفض بدون أجور فعلية مسجلة في الكشف — لم تُحسب خسارته (لا يُفترض 2 دينار). راجع الكشف وسجّل الأجور.</div>':'')+
         profitPanel('أداء الشحنات',profitStats(d.total,d.delivered,d.returned,d.pending)+'<hr><div class="pf-muted">تفاصيل المرتجعات من الكشوف</div>'+profitRow('رفض مع دفع أجور',d.refused_with_fee)+profitRow('لا رد بعد الوصول',d.no_reply_after_arrival)+profitRow('إلغاء / مرتجع آخر',d.other_returns)+'<hr>'+profitRow('القطع المستلمة',d.received_pieces)+profitRow('تسليم جزئي (من المستلمة)',d.partial)+profitRow('بحاجة مراجعة',d.unreviewed+d.other,(d.unreviewed+d.other)?'#e4bc70':'#35d07f'))+
         profitPanel('الملخص المالي',profitRow('الكاش المحصّل',profitValue(d.cash))+profitRow('كوست البضاعة المستلمة',profitValue(d.costs))+profitRow('رسوم / نتيجة المرتجعات',profitValue(d.return_cash),profitTone(d.return_cash))+profitRow('أجور التوصيل (ضمن الكاش)',profitValue(d.fees))+profitRow('الإعلانات',profitValue(d.ad_spend))+'<hr>'+profitRow('السعر قبل التوصيل (للمقارنة فقط)',profitValue(d.sales))+profitRow('الربح قبل الإعلانات',profitValue(d.gross_profit),profitTone(d.gross_profit))+(d.gross_profit===null||d.known_profit_with_returns!==d.gross_profit?profitRow('ربح الطلبات مكتملة الكوست ± المرتجعات',profitValue(d.known_profit_with_returns),profitTone(d.known_profit_with_returns)):''))+

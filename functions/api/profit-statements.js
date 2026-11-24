@@ -29,7 +29,9 @@ export async function onRequestGet({request,env}){
    date(s.created_at,'+3 hours') saved_day,datetime(s.created_at,'+3 hours') saved_at
    FROM delivery_company_settlements s LEFT JOIN stores st ON st.id=s.store_id
    WHERE COALESCE(s.statement_date,date(s.created_at,'+3 hours'))=? ${store?'AND s.store_id=?':''} ORDER BY s.id`).bind(...(store?[date,store]:[date])).all()).results||[];
- if(!settlements.length)return json({engine:'statement-v1',date,store_id:store,statements:[],totals:emptyTotals(),complete:true});
+ // ads of this date, looked up exactly like the shipment-day section stores them (store 0 = all stores)
+ const adSpend=round2(await safe(async()=>(await env.DB.prepare('SELECT COALESCE(SUM(amount),0) amount FROM shipping_cohort_ad_spend WHERE date=? AND store_id=?').bind(date,store).first())?.amount||0,0));
+ if(!settlements.length)return json({engine:'statement-v1',date,store_id:store,statements:[],totals:emptyTotals(),complete:true,ad_spend:adSpend});
  const ids=settlements.map(s=>Number(s.id)),marks=ids.map(()=>'?').join(',');
 
  const lineRows=(await env.DB.prepare(`SELECT so.rowid rid,so.settlement_id,so.order_id,so.applied_status,so.imported_status,so.imported_amount,so.match_type,
@@ -103,7 +105,7 @@ export async function onRequestGet({request,env}){
    totals:t,orders:rows});
  }
  const totals=sum(out.flatMap(s=>s.orders.filter(r=>r.kind!=='superseded')));
- return json({engine:'statement-v1',date,store_id:store,statements:out,totals,complete:totals.unknown_cost===0});
+ return json({engine:'statement-v1',date,store_id:store,statements:out,totals,complete:totals.unknown_cost===0,ad_spend:adSpend});
 }
 
 function emptyTotals(){return {orders:0,delivered:0,returned:0,sales:0,cash:0,costs:0,fees:0,returns:0,profit:0,known_profit:0,unknown_cost:0}}
