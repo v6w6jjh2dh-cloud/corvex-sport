@@ -9,7 +9,7 @@
 // real Corvex orders that the active matcher does not read (applied only by the central engine).
 // Pure module: no database access.
 
-export const LANGUAGE_VERSION='order-language-1';
+export const LANGUAGE_VERSION='order-language-2';
 
 export const DEFAULT_LEXICON={
  locale:'ar-JO',
@@ -52,6 +52,7 @@ export const DEFAULT_LEXICON={
   price:['دينار','دنانير','د','jd','jod','سعر','السعر','شامل','التوصيل','توصيل','بالتوصيل','مجاني','delivery','included','include','free','shipping','price','total','المجموع','الاجمالي','خصم'],
   dates:['يناير','فبراير','مارس','ابريل','مايو','يونيو','يوليو','اغسطس','سبتمبر','اكتوبر','نوفمبر','ديسمبر','كانون','شباط','اذار','نيسان','ايار','حزيران','تموز','اب','ايلول','تشرين','الاول','الثاني',
    'january','february','march','april','may','june','july','august','september','october','november','december','am','pm','ص','م','الساعه','ساعه','صباحا','مساء','مساءا','الصبح','المسا','اليوم','بكرا','بكره','امس','مبارح','الاحد','الاثنين','الثلاثاء','الاربعاء','الخميس','الجمعه','السبت'],
+  formLabels:['القطعه الاولي','القطعه الثانيه','القطعه الثالثه','القطعه الرابعه','اختر العرض المطلوب','اختار العرض المطلوب','اختر العرض','العرض المطلوب','اختر اللون','اختر المقاس'],
   fillers:['و','او','مع','في','فيه','على','عل','من','الى','عن','لون','الوان','اللون','الالوان','كل','عدد','العدد','كميه','الكميه','كمية','الكمية','نوع','موديل','الموديل','طلب','الطلب','جديد','بدي','بدها','بده','لو','سمحت','يا','هاد','هذا','هذه','هاي','اياه','اياها','منه','منها','منهم','ال']
  }
 };
@@ -241,7 +242,7 @@ function analysisSets(c){
   sizes:set([...(L.sizeWords||[]),...(A.sizes||[])]),
   measures:set(A.measures),price:set(A.price),dates:set(A.dates),
   labels:set(L.quantityLabels),numbers:new Set(Object.keys(L.numberWords).map(N)),pairs:new Set([...Object.keys(L.pairWords),...Object.keys(LEARNED_DEFAULTS.inlinePairWords)].map(N)),
-  fillers:set([...(A.fillers||[]),L.colourConjunction]),operations:set(L.operationWords),personal:set(L.personalMarkers||[]),address:set(L.addressWords||[])
+  formLabels:set(A.formLabels),fillers:set([...(A.fillers||[]),L.colourConjunction]),operations:set(L.operationWords),personal:set(L.personalMarkers||[]),address:set(L.addressWords||[])
  };
  return c.__an=an;
 }
@@ -281,6 +282,9 @@ export function analyzeOrder(order,models,lexicon=DEFAULT_LEXICON){
    const v=saleLine(c,l);if(!v)return {kind:'empty'};
    if(/(?:^|\D)(?:\+?962|0)?7\d{8}(?:\D|$)/.test(v.replace(/[\s-]/g,'')))return {kind:'personal'};
    if(personalLine(v,lexicon))return {kind:'personal'};
+   // Form headings and external order references are metadata, not product evidence.
+   const heading=v.replace(/[:：؟?]+$/g,'').trim();
+   if(an.formLabels.has(heading)||/^(?:litesale\s+)?(?:رقم\s+)?ord(?:er)?\b/i.test(heading)||/^رقم\s+(?:الطلب|طلب)\b/u.test(heading))return {kind:'metadata'};
    const matches=matchesInLine(c,models,v);
    let rest=v;for(const m of [...matches].sort((a,b)=>b.index-a.index))rest=rest.slice(0,m.index)+' '+rest.slice(m.index+m.length);
    const toks=tokens(rest).map(w=>({w,k:classifyToken(w,an,personalWords)}));
