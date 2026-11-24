@@ -135,7 +135,7 @@ test('report details show stock state from recorded movements, with summary',asy
  assert.equal(st('S-3').state,'review');
  assert.equal(st('S-X').state,'waiting');
  assert.equal(det.shipments.find(x=>x.shipment_code==='S-0').proven_label,'مرتجع مثبت');
- assert.deepEqual(det.stock_summary,{closed:3,added_pieces:2,added_before_pieces:1,review:2,by_model:[{model_name:'جاكيت فرو',quantity:2}]});
+ assert.deepEqual(det.stock_summary,{closed:2,added_pieces:2,added_before_pieces:1,review:2,by_model:[{model_name:'جاكيت فرو',quantity:2}]});
 });
 
 test('a legacy closed return without a movement is shown as missing, not as added',async()=>{

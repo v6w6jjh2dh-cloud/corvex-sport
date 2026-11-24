@@ -1,4 +1,5 @@
 import {classifyInventoryItems,loadInventoryModels} from './_inventory.js';
+import {loadClosedIndex,normCode,closedText} from './_cargo-closed.js';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 const clean=x=>String(x??'').trim();
 const phone=x=>{let s=clean(x).replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g,'');if(s.startsWith('00962'))s=s.slice(2);if(s.startsWith('962'))s='0'+s.slice(3);if(s.length===9&&s.startsWith('7'))s='0'+s;return s};
@@ -11,17 +12,28 @@ export async function onRequest({request,env}){
  let body;try{body=await request.json()}catch{return json({error:'invalid_json'},400)}
  if(!Array.isArray(body.rows)||body.rows.length>500)return json({error:'invalid_rows'},400);
  const models=await loadInventoryModels(env),output=[];
+ const closedIndex=await loadClosedIndex(env),seenCodes=new Set();
  for(const row of body.rows){
   const code=clean(row.shipment_code).slice(0,80),p=phone(row.phone),area=normalize(row.area),city=normalize(row.city),status=normalize(row.status),returnStatus=normalize(row.return_status);
   if(!code||!p){output.push({shipment_code:code,status:'invalid',reason:'كود الشحنة أو الهاتف غير موجود'});continue}
   if(!status.includes('ملغي')){output.push({shipment_code:code,status:'ignored',reason:'الشحنة ليست ملغية'});continue}
+  // A shipment code that was already closed can never be closed again.
+  const prior=closedIndex.codes.get(normCode(code));
+  if(prior){const po=prior.order_id?await env.DB.prepare("SELECT delivery_status,date(first_printed_at,'+3 hours') d,strftime('%d/%m/%Y %H:%M',first_printed_at,'+3 hours') a FROM orders WHERE id=?").bind(prior.order_id).first():null;output.push({shipment_code:code,phone:p,area:clean(row.area),status:'already_closed',order_status:po?.delivery_status||null,shipment_print_date:po?.d||null,shipment_print_at:po?.a||null,order_id:prior.order_id,order_code:prior.order_code,closed_report_id:prior.report_id,closed_at:prior.closed_at,reason:'تم تسكير هذه الشحنة سابقًا — '+closedText(prior)});continue}
+  if(seenCodes.has(normCode(code))){output.push({shipment_code:code,phone:p,area:clean(row.area),status:'duplicate',reason:'كود الشحنة مكرر داخل نفس الكشف'});continue}
+  seenCodes.add(normCode(code));
   const found=(await env.DB.prepare("SELECT id,order_code,recipient_name,phone,area,detailed_address,order_notes,raw_text,delivery_status,partial_received_items,created_at,first_printed_at,date(first_printed_at,'+3 hours') AS shipment_print_date,strftime('%d/%m/%Y %H:%M',first_printed_at,'+3 hours') AS shipment_print_at FROM orders WHERE (phone=? OR phone=? OR phone=?) AND date(COALESCE(first_printed_at,created_at),'+3 hours')>='2026-11-17' ORDER BY id DESC LIMIT 80").bind(p,p.replace(/^0/,''),'962'+p.replace(/^0/,'')).all()).results||[];
   // Phone is the primary match key. Area/city are hints, never exclusion criteria.
   // A single phone match is safe to resolve; multiple orders require explicit selection.
-  let matches=found;
+  // Orders already received in a closed returns statement are not candidates any more;
+  // an order whose status is "returned" but that was never received stays a candidate.
+  const received=found.filter(x=>closedIndex.orders.has(Number(x.id)));
+  let matches=found.filter(x=>!closedIndex.orders.has(Number(x.id)));
+  if(!matches.length&&received.length){const i=closedIndex.orders.get(Number(received[0].id));output.push({shipment_code:code,phone:p,area:clean(row.area),status:'already_closed',order_id:Number(received[0].id),order_code:received[0].order_code,order_status:received[0].delivery_status,shipment_print_date:received[0].shipment_print_date,shipment_print_at:received[0].shipment_print_at||null,closed_report_id:i.report_id,closed_at:i.closed_at,excluded:received.map(x=>({order_code:x.order_code,...closedIndex.orders.get(Number(x.id))})),reason:'طلبات هذا الهاتف تم تسكير مرتجعها سابقًا — '+received.map(x=>'#'+x.order_code+' في '+closedText(closedIndex.orders.get(Number(x.id)))).join('، ')});continue}
+  const excludedNote=received.length?' (تم استبعاد '+received.map(x=>'#'+x.order_code).join('، ')+' لأنه مُستلم سابقًا)':'';
   const selectedId=Number(row.selected_order_id||0);
   if(selectedId&&matches.length>1){const chosen=matches.find(x=>Number(x.id)===selectedId);if(chosen)matches=[chosen];}
-  if(matches.length!==1){output.push({shipment_code:code,phone:p,area:clean(row.area),status:matches.length?'ambiguous':'unmatched',candidate_codes:matches.map(x=>x.order_code),candidates:matches.map(x=>({id:x.id,order_code:x.order_code,recipient_name:x.recipient_name,area:x.area,created_at:x.created_at,shipment_print_date:x.shipment_print_date,shipment_print_at:x.shipment_print_at||null,delivery_status:x.delivery_status})),reason:matches.length?'أكثر من طلب بنفس رقم الهاتف — اختر الطلب الصحيح':'رقم الهاتف غير موجود في طلبات كورفكس'});continue}
+  if(matches.length!==1){output.push({shipment_code:code,phone:p,area:clean(row.area),status:matches.length?'ambiguous':'unmatched',candidate_codes:matches.map(x=>x.order_code),candidates:matches.map(x=>({id:x.id,order_code:x.order_code,recipient_name:x.recipient_name,area:x.area,created_at:x.created_at,shipment_print_date:x.shipment_print_date,shipment_print_at:x.shipment_print_at||null,delivery_status:x.delivery_status})),reason:(matches.length?'أكثر من طلب بنفس رقم الهاتف — اختر الطلب الصحيح':'رقم الهاتف غير موجود في طلبات كورفكس')+excludedNote});continue}
   const o=matches[0],items=await classifyInventoryItems(env,o.raw_text||o.order_notes||'',models);
   let expectedItems=items;
   if(o.delivery_status==='partial'){
@@ -33,7 +45,7 @@ export async function onRequest({request,env}){
    expectedItems=delivered.size?full.map(item=>({...item,quantity:Math.max(0,item.quantity-(delivered.get(item.model_id)||0))})).filter(item=>item.quantity>0):[];
   }
 
-  output.push({shipment_code:code,phone:p,area:clean(row.area),status:o.delivery_status==='partial'&&!expectedItems.length?'review_model':'matched',order_code:o.order_code,order_id:o.id,shipment_print_date:o.shipment_print_date,shipment_print_at:o.shipment_print_at||null,order_status:o.delivery_status,return_status:clean(row.return_status),return_sent:returnStatus.includes('تم ارسال المرتجع')&&!returnStatus.includes('لم يتم'),items:expectedItems.map(i=>({...i,model_name:models.find(m=>m.id===i.model_id)?.name||''})),reason:o.delivery_status==='partial'?(expectedItems.length?'تسليم جزئي — تُضاف القطع المرتجعة فقط للمخزون عند تسكير الكشف':'تسليم جزئي يحتاج مراجعة القطع المرتجعة'):expectedItems.length?'تمت مطابقة الطلب — يُضاف للمخزون عند تسكير الكشف':'تمت مطابقة الطلب برقم الهاتف — الموديل غير مطلوب للمطابقة'});
+  output.push({shipment_code:code,phone:p,area:clean(row.area),status:o.delivery_status==='partial'&&!expectedItems.length?'review_model':'matched',order_code:o.order_code,order_id:o.id,shipment_print_date:o.shipment_print_date,shipment_print_at:o.shipment_print_at||null,order_status:o.delivery_status,return_status:clean(row.return_status),return_sent:returnStatus.includes('تم ارسال المرتجع')&&!returnStatus.includes('لم يتم'),items:expectedItems.map(i=>({...i,model_name:models.find(m=>m.id===i.model_id)?.name||''})),reason:o.delivery_status==='partial'?(expectedItems.length?'تسليم جزئي — تُضاف القطع المرتجعة فقط للمخزون عند تسكير الكشف':'تسليم جزئي يحتاج مراجعة القطع المرتجعة'):(expectedItems.length?'تمت مطابقة الطلب — يُضاف للمخزون عند تسكير الكشف':'تمت مطابقة الطلب برقم الهاتف — الموديل غير مطلوب للمطابقة')+excludedNote});
  }
- return json({ok:true,preview_only:true,rows:output,summary:{total:output.length,matched:output.filter(x=>x.status==='matched').length,review:output.filter(x=>!['matched','ignored'].includes(x.status)).length}});
+ return json({ok:true,preview_only:true,rows:output,summary:{total:output.length,matched:output.filter(x=>x.status==='matched').length,already_closed:output.filter(x=>x.status==='already_closed').length,review:output.filter(x=>!['matched','ignored','already_closed'].includes(x.status)).length}});
 }

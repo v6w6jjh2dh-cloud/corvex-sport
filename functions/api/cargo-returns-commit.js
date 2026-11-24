@@ -1,9 +1,10 @@
 import {classifyInventoryItems,loadInventoryModels,returnRestockPlan,restockStatements,ensureInventorySchema} from './_inventory.js';
+import {loadClosedIndex,normCode,closedText} from './_cargo-closed.js';
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 const phone=x=>{let s=String(x??'').replace(/[٠-٩]/g,d=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g,'');if(s.startsWith('00962'))s=s.slice(2);if(s.startsWith('962'))s='0'+s.slice(3);if(s.length===9&&s.startsWith('7'))s='0'+s;return s};
 const txt=(x,n=200)=>String(x??'').trim().slice(0,n);
 const ORDER_INFO="SELECT id,order_code,phone,recipient_name,area,delivery_status,raw_text,order_notes,first_printed_at,date(first_printed_at,'+3 hours') AS shipment_print_date,strftime('%d/%m/%Y %H:%M',first_printed_at,'+3 hours') AS shipment_print_at FROM orders WHERE id=?";
-const outcomeOf=r=>r.status==='matched'?(r.order_status==='pending'?'closed':'pending'):r.status==='ambiguous'||r.status==='review_model'?'pending':r.status==='ignored'?'ignored':'unmatched';
+const outcomeOf=r=>r.status==='already_closed'?'already_closed':r.status==='matched'?(r.order_status==='pending'?'closed':'pending'):r.status==='ambiguous'||r.status==='review_model'?'pending':r.status==='ignored'?'ignored':'unmatched';
 const countShipments=list=>({total:list.length,matched:list.filter(x=>x.match_status==='matched').length,closed:list.filter(x=>x.outcome==='closed').length,pending:list.filter(x=>x.outcome==='pending').length,unmatched:list.filter(x=>x.outcome==='unmatched').length,ignored:list.filter(x=>x.outcome==='ignored').length});
 async function orderSnapshot(env,id,models){
  const o=id?await env.DB.prepare(ORDER_INFO).bind(id).first():null;if(!o)return null;
@@ -18,12 +19,12 @@ async function stockStatus(env,s,reportId,models){
  const name=id=>(models.find(m=>m.id===Number(id))||{}).name||('موديل '+id);
  const group=list=>{const m=new Map();for(const x of list)m.set(Number(x.model_id),(m.get(Number(x.model_id))||0)+Number(x.quantity_delta));return [...m].map(([id,q])=>({model_id:id,model_name:name(id),quantity:q}))};
  if(!s.order_id||s.outcome==='unmatched'||s.outcome==='ignored')return {state:'waiting',label:'بانتظار المطابقة والتسكير',items:[]};
- if(s.outcome!=='closed'){
+ if(s.outcome!=='closed'&&s.outcome!=='already_closed'){
   if(/تفصيل|الموديل|مراجعة منفصلة/.test(s.note||''))return {state:'review',label:'تحتاج مراجعة – لم يتم التعرف على الموديل أو الكمية',items:[]};
   return {state:'waiting',label:'بانتظار المطابقة والتسكير',items:[]};
  }
  const moves=(await env.DB.prepare("SELECT model_id,quantity_delta,source_ref,note,strftime('%d/%m/%Y %H:%M',created_at,'+3 hours') at FROM inventory_movements WHERE order_id=? AND movement_type='cargo_return' AND quantity_delta>0 ORDER BY id").bind(s.order_id).all()).results||[];
- const own=m=>m.source_ref==='cargo_report:'+reportId||m.source_ref==='historical_fix:cargo_report:'+reportId||(!m.source_ref&&hasCode(m.note,s.shipment_code));
+ const own=m=>s.outcome==='closed'&&(m.source_ref==='cargo_report:'+reportId||m.source_ref==='historical_fix:cargo_report:'+reportId||(!m.source_ref&&hasCode(m.note,s.shipment_code)));
  const mine=moves.filter(own),others=moves.filter(m=>!own(m));
  if(mine.length){const items=group(mine),q=items.reduce((n,i)=>n+i.quantity,0);return {state:'added',label:'تمت إضافة +'+q+' للمخزون',items,at:mine[mine.length-1].at,fix:mine.some(m=>String(m.source_ref||'').startsWith('historical_fix'))}}
  const order=await env.DB.prepare('SELECT id,delivery_status,partial_received_items FROM orders WHERE id=?').bind(s.order_id).first();
@@ -88,7 +89,8 @@ export async function onRequest({request,env}){
  let body;try{body=await request.json()}catch{return json({error:'invalid_json'},400)}
  const rows=body.rows;
  if(!Array.isArray(rows)||!rows.length||rows.length>500)return json({error:'invalid_rows'},400);
- const unique=new Set(),accepted=[],skipped=[];
+ const unique=new Set(),uniqueCodes=new Set(),accepted=[],skipped=[];
+ const closedIndex=await loadClosedIndex(env);
  const invModels=await loadInventoryModels(env).catch(()=>[]);
  const modelName=id=>(invModels.find(m=>m.id===Number(id))||{}).name||('موديل '+id);
  const RESTOCK_ONLY=new Set(['returned','partial','delivered_adjusted','refused_fee_paid','refused_no_fee','canceled_before_arrival']);
@@ -96,6 +98,12 @@ export async function onRequest({request,env}){
   const id=Number(row.order_id),code=String(row.shipment_code||'').trim(),p=phone(row.phone);
   if(!Number.isSafeInteger(id)||id<=0||!code||!p||unique.has(id)){skipped.push({order_id:id,reason:'بيانات ناقصة أو طلب مكرر'});continue}
   unique.add(id);
+  // Server-side guard: a shipment code or an order already received in a closed returns
+  // statement (or by receipt) is never closed again, whatever the browser sends.
+  const priorCode=closedIndex.codes.get(normCode(code)),priorOrder=closedIndex.orders.get(id);
+  if(priorCode||priorOrder){const i=priorCode||priorOrder;skipped.push({order_id:id,order_code:i.order_code,shipment_code:code,already_closed:true,closed_report_id:i.report_id,reason:'تم تسكير هذه الشحنة سابقًا — '+closedText(i)});continue}
+  if(uniqueCodes.has(normCode(code))){skipped.push({order_id:id,shipment_code:code,reason:'كود الشحنة مكرر داخل نفس الكشف'});continue}
+  uniqueCodes.add(normCode(code));
   const o=await env.DB.prepare("SELECT id,order_code,phone,delivery_status,partial_received_items FROM orders WHERE id=? AND date(COALESCE(first_printed_at,created_at),'+3 hours')>='2026-11-17'").bind(id).first();
   if(!o||phone(o.phone)!==p){skipped.push({order_id:id,shipment_code:code,reason:'رقم الهاتف لا يطابق الطلب'});continue}
   if(o.delivery_status!=='pending'&&!RESTOCK_ONLY.has(o.delivery_status)){skipped.push({order_id:id,order_code:o.order_code,shipment_code:code,current_status:o.delivery_status,reason:'الطلب مسجل كمستلم؛ يحتاج مراجعة ولا يتغير تلقائيًا'});continue}
@@ -122,7 +130,7 @@ export async function onRequest({request,env}){
   const id=Number(r.order_id)||0,isClosed=id&&closedIds.has(id);
   const order=id?await orderSnapshot(env,id,models):null;
   const skip=skipped.find(x=>Number(x.order_id)===id&&id);
-  const outcome=isClosed?'closed':(skip||outcomeOf(r)==='closed')?'pending':outcomeOf(r);
+  const outcome=isClosed?'closed':skip?.already_closed?'already_closed':(skip||outcomeOf(r)==='closed')?'pending':outcomeOf(r);
   shipments.push({shipment_code:txt(r.shipment_code,80),order_id:order?.order_id||null,order_code:order?.order_code||txt(r.order_code,40)||null,candidate_codes:Array.isArray(r.candidate_codes)?r.candidate_codes.slice(0,10).map(x=>txt(x,40)):[],
    candidates:Array.isArray(r.candidates)?r.candidates.slice(0,10).map(c=>({order_code:txt(c.order_code,40),recipient_name:txt(c.recipient_name,80),area:txt(c.area,80),shipment_print_at:txt(c.shipment_print_at,20)||null,shipment_print_date:txt(c.shipment_print_date,10)||null,delivery_status:txt(c.delivery_status,30)})):[],
    phone:txt(r.phone,20),recipient_name:order?.recipient_name||'',area:order?.area||'',cargo_area:txt(r.area,80),
