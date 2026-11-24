@@ -24,7 +24,7 @@ function setup(){
   return r.code};
  const report=async(date='2026-11-21')=>{const res=await onRequest({request:new Request('https://x/api/profit-shipping-cohorts?date='+date+'&store_id=0',{headers:{authorization:'Bearer t'}}),env});const d=await res.json();assert.equal(res.status,200,JSON.stringify(d));return d};
  const byCode=(d,c)=>d.orders.find(o=>Number(o.order_code)===c);
- return {db,add,report,byCode};
+ return {db,env,add,report,byCode};
 }
 
 test('#10400 partial, two identical casual jackets, one received → cost 5.20 only',async()=>{
@@ -108,3 +108,27 @@ test('a failing catalogue migration does not drop the catalogue',async()=>{
  // (migration results are cached per isolate, so the error flag is only set on a fresh run)
  assert.equal(t.byCode(d,c).calculated_cost,8.5);
 });
+
+test('a 20/11 shipment returned through a returns statement closed on 24/11 is a proven return in the 20/11 report',async()=>{
+ const {onRequest:closeReturns}=await import('../functions/api/cargo-returns-commit.js');
+ const t=setup();
+ const delivered=t.add({raw:'جاكيت جوخ كاجوال عدد 1',amount:12,cash:10,day:'2026-11-20'});
+ const ret=t.add({raw:'جاكيت فرو عدد 1',status:'pending',settled:0,cash:0,day:'2026-11-20'});
+ const manual=t.add({raw:'جاكيت فرو عدد 1',status:'returned',settled:0,cash:0,day:'2026-11-20'});
+ const before=await t.report('2026-11-20');
+ assert.equal(t.byCode(before,ret).result,'pending');
+ const id=Number(t.db.prepare('SELECT id FROM orders WHERE order_code=?').get(ret).id);
+ const res=await closeReturns({request:new Request('https://x/api/cargo-returns-commit',{method:'POST',headers:{authorization:'Bearer t','content-type':'application/json'},body:JSON.stringify({source_name:'كشف 24-11',rows:[{order_id:id,phone:'0790000000',shipment_code:'CB-9'}],snapshot_rows:[{shipment_code:'CB-9',phone:'0790000000',status:'matched',order_id:id,order_status:'pending'}]})}),env:t.env});
+ assert.equal((await res.json()).updated,1);
+ t.db.exec("UPDATE cargo_return_close_reports SET created_at='2026-11-24 06:00:00'");
+ const after=await t.report('2026-11-20');
+ const o=t.byCode(after,ret);
+ assert.equal(o.result,'return');assert.equal(o.return_source,'cargo_returns_statement');assert.equal(o.statement_closed_on,'2026-11-24');
+ assert.equal(o.return_cash,0);assert.equal(o.calculated_cost,null);
+ assert.equal(t.byCode(after,manual).result,'pending','returned without any closed statement stays pending');
+ assert.equal(after.returned,1);assert.equal(after.pending,1);assert.equal(after.delivered,1);
+ assert.equal(after.cash,10);assert.equal(after.gross_profit,round(10-5.2));
+ assert.equal(after.orders.filter(x=>x.order_code===ret).length,1);
+ const other=await t.report('2026-11-24');assert.equal(other.total,0,'never moved to the closing day');
+});
+const round=n=>Math.round(n*100)/100;
