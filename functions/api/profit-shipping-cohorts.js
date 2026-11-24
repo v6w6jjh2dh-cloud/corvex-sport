@@ -6,7 +6,7 @@
 //  - profit = actual cash from the delivery company − cost (the delivery fee is
 //    already deducted inside the cash, so it is never subtracted a second time)
 import {classifyInventoryItems,loadInventoryModels,FUR_ALIASES} from './_inventory.js';
-import {loadCostedModels,approvedCost,canonicalModelName,normalizeArabic,STATI_ALIASES,FILLER_ALIASES,round2} from './_partial-delivery.js';
+import {refusalCash,loadCostedModels,approvedCost,canonicalModelName,normalizeArabic,STATI_ALIASES,FILLER_ALIASES,round2} from './_partial-delivery.js';
 
 const json=(x,status=200)=>new Response(JSON.stringify(x),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 const COHORT_START='2026-11-17';
@@ -146,7 +146,7 @@ export async function onRequest({request,env}){
  }catch{}
 
  const deliveredStatuses=new Set(['delivered','delivered_adjusted','partial']);
- let returnCash=0,returnsUnproven=0,deliveredUnsettled=0,costReviewCount=0,receivedPieces=0,piecesUnknown=0,cashDiscrepancy=0,cashMismatchOrders=0,delivered=0,partial=0,returned=0,refusedWithFee=0,noReplyAfterArrival=0,otherReturns=0,pending=0,other=0,unreviewed=0,sales=0,cash=0,costs=0,fees=0,knownProfit=0,knownOrders=0;
+ let returnFeeUnknown=0,returnCash=0,returnsUnproven=0,deliveredUnsettled=0,costReviewCount=0,receivedPieces=0,piecesUnknown=0,cashDiscrepancy=0,cashMismatchOrders=0,delivered=0,partial=0,returned=0,refusedWithFee=0,noReplyAfterArrival=0,otherReturns=0,pending=0,other=0,unreviewed=0,sales=0,cash=0,costs=0,fees=0,knownProfit=0,knownOrders=0;
  const details=[];
  for(const o of orders){
   // The order stays on its warehouse shipment day; its result comes from whichever closed
@@ -237,8 +237,13 @@ export async function onRequest({request,env}){
    // Return result as proven by a closed statement (delivery-company statement or Cargo Box
    // returns statement): the stored net (0 when the customer paid the fee, −fee when we pay
    // it). The returns statement carries no fee, so nothing is invented for it. No goods cost.
-   let rc=Number(o.cash_collected||0);
-   if(status==='refused_no_fee'&&Math.abs(rc)<.001){rc=-Math.abs(Number(o.delivery_fee||0)||2)}
+   // Refusal result = the actual net cash of the delivery-company statement. The customer pays
+   // the company a fixed refusal charge (usually 2 JOD) while the real delivery fee depends on
+   // the area, so a paid refusal can be 0 (fee 2) or +0.25 (fee 1.75); an unpaid refusal loses
+   // the real fee (−1.75, −2, …). No fixed value is assumed and no goods cost is charged.
+   const rr=refusalCash(o,status);
+   let rc=rr.cash;
+   if(rr.unknown){returnFeeUnknown++;o.__returnFeeUnknown=true}
    const cargo=cargoReturns.get(Number(o.id));
    o.__returnSource=settled?'delivery_statement':'cargo_returns_statement';
    if(!settled&&cargo){o.statement_code='كشف مرتجعات #'+cargo.report_id;o.statement_source=cargo.source_name||null;o.statement_closed_on=cargo.closed_on}
@@ -250,7 +255,7 @@ export async function onRequest({request,env}){
   else if(status==='pending')pending++;
   else other++;
   const needsDiagnostics=me.role==='admin'&&isDelivered&&(cost===null||!itemsValid);
-  details.push({diagnostics:needsDiagnostics?{order_notes:String(o.order_notes||'').slice(0,700),raw_text:String(o.raw_text||'').slice(0,700),inventory_items:(inventory.get(Number(o.id))||[]).map(i=>({name:i.name,quantity:i.quantity})),trace,invisible_chars:/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\u00a0]/.test(String(o.raw_text||'')+String(o.order_notes||''))}:null,id:o.id,order_code:o.order_code,shipment_day:o.shipment_day,status,settled,reviewed,result:isDelivered?'delivered':o.__returnCash!==undefined?'return':'pending',return_cash:o.__returnCash??null,return_source:o.__returnSource||null,pending_reason:!isDelivered&&o.__returnCash===undefined?(missing||(status==='pending'?'قيد التوصيل — لم يظهر في كشف مسكّر بعد':'')):'',statement_closed_on:o.statement_closed_on||null,
+  details.push({diagnostics:needsDiagnostics?{order_notes:String(o.order_notes||'').slice(0,700),raw_text:String(o.raw_text||'').slice(0,700),inventory_items:(inventory.get(Number(o.id))||[]).map(i=>({name:i.name,quantity:i.quantity})),trace,invisible_chars:/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\u00a0]/.test(String(o.raw_text||'')+String(o.order_notes||''))}:null,id:o.id,order_code:o.order_code,shipment_day:o.shipment_day,status,settled,reviewed,result:isDelivered?'delivered':o.__returnCash!==undefined?'return':'pending',return_cash:o.__returnCash??null,return_source:o.__returnSource||null,return_fee:o.__returnCash==null?null:Number(o.delivery_fee||0),return_charge:o.__returnCash==null?null:Number(o.delivered_amount||0),return_fee_unknown:Boolean(o.__returnFeeUnknown),pending_reason:!isDelivered&&o.__returnCash===undefined?(missing||(status==='pending'?'قيد التوصيل — لم يظهر في كشف مسكّر بعد':'')):'',statement_closed_on:o.statement_closed_on||null,
    items,item_source:itemSource,item_quantity:shippedPieces,received_items:received,received_pieces:isDelivered?pieces:null,
    cost_of_goods:Number(o.cost_of_goods||0),calculated_cost:isDelivered?cost:null,cost_source:source,cost_difference:hasStored&&costKnown&&source!=='saved_order'&&source!=='saved_partial_review'?round2(storedCost-cost):null,
    cost_needs_review:isDelivered&&(!costKnown||!reviewed),missing_reason:isDelivered&&(!costKnown||!reviewed)?missing:'',cost_note:isDelivered&&costKnown?missing:'',
@@ -261,7 +266,7 @@ export async function onRequest({request,env}){
  const spendArgs=store?[date,toDate,store]:[date,toDate,0];
  const spend=(await env.DB.prepare("SELECT COALESCE(SUM(amount),0) amount FROM shipping_cohort_ad_spend WHERE date BETWEEN ? AND ? AND store_id=?").bind(...spendArgs).first())?.amount||0;
  const gross=costReviewCount?null:round2(cash-costs+returnCash);
- return json({engine:'cohort-v4.3',catalogue_error:catalogueError||null,return_cash:round2(returnCash),returns_unproven:returnsUnproven,delivered_unsettled:deliveredUnsettled,known_profit_with_returns:round2(knownProfit+returnCash),model_costs:MODEL_COSTS,costs_verified:costReviewCount===0,date,to_date:toDate,store_id:store,total:orders.length,delivered,partial,returned,refused_with_fee:refusedWithFee,no_reply_after_arrival:noReplyAfterArrival,other_returns:otherReturns,pending,other,unreviewed,
+ return json({engine:'cohort-v4.4',return_fee_unknown:returnFeeUnknown,catalogue_error:catalogueError||null,return_cash:round2(returnCash),returns_unproven:returnsUnproven,delivered_unsettled:deliveredUnsettled,known_profit_with_returns:round2(knownProfit+returnCash),model_costs:MODEL_COSTS,costs_verified:costReviewCount===0,date,to_date:toDate,store_id:store,total:orders.length,delivered,partial,returned,refused_with_fee:refusedWithFee,no_reply_after_arrival:noReplyAfterArrival,other_returns:otherReturns,pending,other,unreviewed,
   cost_review_count:costReviewCount,received_pieces:receivedPieces,pieces_unknown_orders:piecesUnknown,delivered_pieces_mapped:receivedPieces,
   sales:round2(sales),cash:round2(cash),costs:round2(costs),fees:round2(fees),cash_difference:round2(cashDiscrepancy),cash_mismatch_orders:cashMismatchOrders,
   gross_profit:gross,known_profit:round2(knownProfit),known_profit_orders:knownOrders,ad_spend:Number(spend),net_after_ads:gross===null?null:round2(gross-Number(spend)),

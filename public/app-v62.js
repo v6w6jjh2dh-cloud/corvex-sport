@@ -2106,7 +2106,9 @@ function deliveryRowsFromPdfPages(pages){
     let status=mapDeliveryCompanyStatus(statusText),normalizedStatus=normalizeArabic(statusText);
     if(!status){
       if(normalizedStatus.includes('بعد الوصول')||normalizedStatus.includes('لا رد')||normalizedStatus.includes('لارد')||cash<0)status='refused_no_fee';
-      else if(cash===0&&fee>0&&Math.abs(price-fee)<.01)status='refused_fee_paid';
+      // Paid refusal: the customer paid the refusal charge (≤ 2 JOD) and the company kept its real
+      // fee for the area — the net is 0 (fee 2) or a small positive rest (fee 1.75 → +0.25).
+      else if(fee>0&&price>0&&price<=DELIVERY_REFUSAL_CHARGE+.001&&cash>=-.001&&Math.abs(cash-(price-fee))<.011)status='refused_fee_paid';
       else if(price>=0)status='delivered';
     }
     return {__row:i+1,'رقم الهاتف':r.phone,'تاريخ الشحنة':r.shipment_date,'الحالة':statusText,'السعر':price,'أجور التوصيل':fee,'الصافي':cash,'ملاحظة':r.note,__mapped_status:status,__cash:cash,__page:r.page};
@@ -2199,6 +2201,9 @@ function mapDeliveryCompanyStatus(raw){
   return '';
 }
 
+// What the delivery company charges a customer who refuses and pays (JOD). The company's real
+// fee for the area can be lower (e.g. 1.75), so the net of a paid refusal is not always 0.
+const DELIVERY_REFUSAL_CHARGE=2;
 function deliveryStatusFromStatement(raw,mapped,amount,fee,netAmount,hasNet){
   const n=normalizeArabic(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();
   if(!n.includes('مرتجع'))return mapped;
@@ -2207,6 +2212,8 @@ function deliveryStatusFromStatement(raw,mapped,amount,fee,netAmount,hasNet){
   const net=hasNet?Number(netAmount||0):price-deliveryFee;
   if(net<-.001||price<.001)return 'refused_no_fee';
   if(Math.abs(net)<.001||price<=deliveryFee+.001)return 'refused_fee_paid';
+  // Refusal charge (≤ 2 JOD) paid; the real fee of the area may be lower (1.75 → net +0.25).
+  if(deliveryFee>0&&price<=DELIVERY_REFUSAL_CHARGE+.001&&net>=-.001&&net<=price-deliveryFee+.011)return 'refused_fee_paid';
   return 'partial';
 }
 
@@ -2735,6 +2742,7 @@ async function dailyProfitsView(){
         '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px">'+[
           ['الشحنات',d.total],['المستلمة',d.delivered],['المعلّقة',d.pending]
         ].map(([label,value])=>'<div style="background:#f7f9fc;border:1px solid #e7edf3;border-radius:13px;padding:13px 8px;text-align:center"><div style="font-size:11px;color:#64748b">'+label+'</div><div style="font-size:23px;font-weight:800;color:#19324f;margin-top:5px">'+Number(value||0)+'</div></div>').join('')+'</div>'+
+        (Number(d.return_fee_unknown||0)?'<div style="background:#fff4e5;border:1px solid #f5b971;border-radius:12px;padding:10px 12px;color:#7a4100">⚠ '+Number(d.return_fee_unknown)+' رفض بدون أجور فعلية مسجلة في الكشف — لم تُحسب خسارته (لا يُفترض 2 دينار). راجع الكشف وسجّل الأجور.</div>':'')+
         '<div style="background:#fff;border:1px solid #e5ebf2;border-radius:16px;padding:17px 16px">'+
           '<div style="font-weight:800;color:#19324f;margin-bottom:12px">الملخص المالي</div>'+
           [['الكاش المحصّل',d.cash],['كوست البضاعة المستلمة',d.costs],['رسوم / نتيجة المرتجعات',d.return_cash],['أجور التوصيل (ضمن الكاش)',d.fees],['الإعلانات',d.ad_spend]].map(([label,value],i)=>'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;'+(i?'border-top:1px solid #edf1f5;':'')+'"><span style="color:#64748b;font-size:13px">'+label+'</span><strong style="white-space:nowrap;color:#19324f;font-size:15px;direction:ltr">'+(value===null?'—':money(value)+' د.أ')+'</strong></div>').join('')+
@@ -2751,7 +2759,7 @@ async function dailyProfitsView(){
       (missing.length?'<div class="partial-summary-warning">⚠ '+missing.length+' طلب كوستها ناقصة — صافي الربح الإجمالي لا يُعرض حتى تكتمل:<ul style="margin:6px 0 0">'+missing.map(o=>'<li><b>#'+esc(o.order_code)+'</b> ('+esc(statusLabel(o.status))+'): '+esc(o.missing_reason||'بحاجة مراجعة')+(o.diagnostics?'<details style="margin:4px 0 8px"><summary class="sub" style="cursor:pointer">ماذا قرأ النظام من هذا الطلب؟</summary><div class="sub" style="white-space:pre-wrap;background:#f8fafc;border-radius:8px;padding:8px;direction:rtl">order_notes:\n'+esc(o.diagnostics.order_notes||'(فارغ)')+'\n\nraw_text:\n'+esc(o.diagnostics.raw_text||'(فارغ)')+'\n\ninventory_order_items: '+esc(o.diagnostics.inventory_items.map(i=>i.name+' × '+i.quantity).join('، ')||'لا يوجد')+'\nنتيجة القراءة: '+esc(o.diagnostics.trace.map(t=>t.source+': '+(t.empty?'فارغ':t.found.length?t.found.map(f=>f.name+' × '+f.quantity).join('، '):'لا شيء')).join(' | '))+(o.diagnostics.invisible_chars?'\n⚠ النص يحتوي رموزًا مخفية':'')+'</div></details>':'')+'</li>').join('')+'</ul>'+(missing.some(o=>o.diagnostics)?'<button type="button" id="copyCohortDiagnostics" class="btn btn-soft" style="margin-top:8px">نسخ تشخيص الطلبات الناقصة</button>':'')+'</div>':'<div class="badge badge-ok">✓ كوست كل الطلبات المستلمة مكتمل</div>')+
       (d.complete?'':'<div class="partial-summary-warning">⚠ التقرير غير نهائي: '+d.pending+' طلب من شحنات هذا اليوم لم يُحسم بعد بكشف مسكّر'+(d.unreviewed?' و'+d.unreviewed+' تسليم جزئي غير مراجع':'')+'. أي كشف يُسكّر لاحقًا يحدّث هذا اليوم تلقائيًا.</div>')+
       '<details style="margin-top:12px;border:1px solid #dbe4ed;border-radius:12px;padding:12px"><summary style="cursor:pointer;font-weight:700">الطلبات المعلّقة ('+d.orders.filter(o=>o.result==='pending').length+')</summary><div style="max-height:320px;overflow:auto;margin-top:10px">'+d.orders.filter(o=>o.result==='pending').map(o=>'<div style="padding:8px;border-bottom:1px solid #e5e9ee"><b>#'+esc(o.order_code)+'</b> — '+esc(statusLabel(o.status))+' <span class="sub">'+esc(o.pending_reason||'')+'</span></div>').join('')+'</div></details>'+
-      '<details style="margin-top:12px;border:1px solid #dbe4ed;border-radius:12px;padding:12px"><summary style="cursor:pointer;font-weight:700">المرتجعات المثبتة بالكشوف ('+d.returned+')</summary><div style="max-height:320px;overflow:auto;margin-top:10px">'+d.orders.filter(o=>o.result==='return').map(o=>'<div style="padding:8px;border-bottom:1px solid #e5e9ee"><b>#'+esc(o.order_code)+'</b> — '+esc(statusLabel(o.status))+' — '+money(o.return_cash)+' د.أ <span class="sub">'+esc(o.statement_code||'')+(o.statement_closed_on?' • سُكّر '+esc(o.statement_closed_on):'')+'</span></div>').join('')+'</div></details>'+
+      '<details style="margin-top:12px;border:1px solid #dbe4ed;border-radius:12px;padding:12px"><summary style="cursor:pointer;font-weight:700">المرتجعات المثبتة بالكشوف ('+d.returned+')</summary><div style="max-height:320px;overflow:auto;margin-top:10px">'+d.orders.filter(o=>o.result==='return').map(o=>'<div style="padding:8px;border-bottom:1px solid #e5e9ee"><b>#'+esc(o.order_code)+'</b> — '+esc(statusLabel(o.status))+' — '+(o.return_fee_unknown?'⚠ أجور الرفض غير معروفة في الكشف (لم تُحسب)':(o.status==='refused_fee_paid'&&o.return_charge?money(o.return_charge)+' − أجور '+money(o.return_fee)+' = ':o.status==='refused_no_fee'&&o.return_fee?'أجور '+money(o.return_fee)+' خسارة = ':'')+money(o.return_cash)+' د.أ')+' <span class="sub">'+esc(o.statement_code||'')+(o.statement_closed_on?' • سُكّر '+esc(o.statement_closed_on):'')+'</span></div>').join('')+'</div></details>'+
       '<details open style="margin-top:12px;border:1px solid #dbe4ed;border-radius:12px;padding:12px"><summary style="cursor:pointer;font-weight:700">كوست الطلبات المستلمة ('+deliveredOrders.length+')</summary><div style="max-height:520px;overflow:auto;margin-top:10px">'+deliveredOrders.map(o=>{
         const state=o.cost_needs_review?'⚠ كوست ناقص':'✓';
         return '<div style="padding:10px;border-bottom:1px solid #e5e9ee"><b>#'+esc(o.order_code)+'</b> — '+esc(statusLabel(o.status))+' — '+state+(o.shipment_day?' <span class="sub">خرج '+esc(o.shipment_day)+(o.statement_code?' • كشف '+esc(o.statement_code)+(o.statement_closed_on?' سُكّر '+esc(o.statement_closed_on):''):'')+'</span>':'')+

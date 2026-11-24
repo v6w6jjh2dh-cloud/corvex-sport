@@ -157,7 +157,8 @@ async function ensurePartialProfitColumns(env) {
       updated_at=datetime('now')
       WHERE delivery_company_settled=1
         AND delivery_status='refused_fee_paid'
-        AND COALESCE(delivered_amount,0)>COALESCE(delivery_fee,0)+0.001`).run();
+        AND COALESCE(delivered_amount,0)>COALESCE(delivery_fee,0)+0.001
+        AND COALESCE(delivered_amount,0)>2.001`).run(); // 2 JOD = refusal charge (real fee may be 1.75), not a sale
   });
 }
 

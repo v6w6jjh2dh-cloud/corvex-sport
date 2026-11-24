@@ -6,7 +6,8 @@
     const amount=Number(document.querySelector(`.delivery-amount-choice[data-i="${i}"]`)?.value||0);
     const fee=Number(document.querySelector(`.delivery-fee-choice[data-i="${i}"]`)?.value||0);
     // Business rule: a final settlement of exactly 2 JOD is delivery fee only, not a partial sale.
-    if(Math.abs(amount-2)<0.001 && (fee===0||Math.abs(fee-2)<0.001)){
+    // The real fee may be lower than the 2 JOD refusal charge (e.g. 1.75 → net +0.25).
+    if(Math.abs(amount-2)<0.001 && (fee===0||(fee>0&&fee<=2.001))){
       if(sel.value==='partial'||sel.value==='delivered_adjusted'||sel.value==='delivered'){
         sel.value='refused_fee_paid';
         sel.dispatchEvent(new Event('change',{bubbles:true}));

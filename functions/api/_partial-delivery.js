@@ -216,3 +216,17 @@ export function ensureSettlementLineShipmentDate(env){
  })().catch(e=>{lineShipmentReady.delete(key);throw e}));
  return lineShipmentReady.get(key);
 }
+
+// Net cash of a refused / cancelled shipment as recorded from the statement.
+//  - stored cash is the statement's net (commit keeps it as is): use it.
+//  - legacy rows that stored the gross refusal charge as cash (cash = amount, fee > 0) are
+//    read as amount − fee, the same correction orderSelectSql applies (company_cash_net).
+//  - unpaid refusal stored with cash 0: the loss is the real fee of that shipment; when the
+//    fee is not known either, nothing is invented (unknown = true, result 0).
+export function refusalCash(o,status){
+ const cash=Number(o.cash_collected||0),fee=Math.max(0,Number(o.delivery_fee||0)),amount=Number(o.delivered_amount||0);
+ if(status==='refused_fee_paid'&&fee>0&&amount>0&&Math.abs(cash-amount)<.001)return {cash:round2(amount-fee),unknown:false};
+ if(status==='refused_no_fee'&&Math.abs(cash)<.001)return fee>0?{cash:-fee,unknown:false}:{cash:0,unknown:true};
+ return {cash:round2(cash),unknown:false};
+}
+

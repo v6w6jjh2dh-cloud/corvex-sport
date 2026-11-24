@@ -65,9 +65,13 @@ export async function onRequestPost({request,env}){
    partial=pricePartialDelivery(items,r.delivered_items);
    if(!partial.ok){hold(r,`الطلب #${o.order_code}: ${partial.reason}`,o);continue}
   }
+  // A refusal's result is the statement's real net (charge − real fee of the area, or −fee when
+  // unpaid). Without the statement's net or its fee there is nothing real to record: hold it
+  // rather than assume a fixed 2 JOD.
+  if((status==='refused_fee_paid'||status==='refused_no_fee')&&!(r.has_net&&Number.isFinite(num(r.net_amount)))&&!(num(r.delivery_fee)>0)){hold(r,`الطلب #${o.order_code}: أجور الرفض الفعلية غير موجودة في الكشف — أدخل الأجور أو الصافي كما في الكشف`,o);continue}
   const fee=Number.isFinite(num(r.delivery_fee))?Math.max(0,num(r.delivery_fee)):Math.max(0,Number(o.delivery_fee??2));
   // Keep the actual cash reported by the delivery company; never replace it with the order price.
-  const cash=r.has_net&&Number.isFinite(num(r.net_amount))?num(r.net_amount):(isDelivered||status==='refused_fee_paid'?Math.max(0,amount-fee):(status==='refused_no_fee'?-fee:0));
+  const cash=r.has_net&&Number.isFinite(num(r.net_amount))?num(r.net_amount):(isDelivered?Math.max(0,amount-fee):status==='refused_fee_paid'?round2(amount-fee):(status==='refused_no_fee'?-fee:0));
   used.add(id);
   accepted.push({o,r,status,amount,fee,cash,partial,type:String(r.match_type||'matched'),manual});
  }
