@@ -47,3 +47,25 @@ test('classes: known / learn / failure / unclear — and source data is checked 
  assert.equal(await classify(env,cat,{order_notes:'تأكد منهم نظاف'}),'unclear');
  assert.equal(await classify(env,cat,{order_notes:''}),'unclear');
 });
+
+test('#10403 «مالاء فراغات» 3 قطع: the definite article is optional on every word of a multi-word name (generic)',async()=>{
+ const {env}=await setup();
+ const now=await loadCatalogue(env,{storeId:0}),before=await loadCatalogue(env,{storeId:0,variants:false});
+ for(const t of ['مالاء فراغات 3 قطع','مالاء فراغات\n3 قطع','ملاء فراغات عدد 3','مالي فراغات 3 قطع']){
+  const r=await resolveOrderItems(env,{order_notes:t},now);
+  assert.deepEqual(r.items.map(i=>[i.name,i.quantity]),[['مالئ الفراغات',3]],t);
+ }
+ assert.deepEqual((await resolveOrderItems(env,{order_notes:'مالاء فراغات 3 قطع'},before)).items,[],'previous engine version did not read it');
+ assert.deepEqual((await resolveOrderItems(env,{order_notes:'جاكيت الفرو عدد 2'},now)).items.map(i=>[i.name,i.quantity]),[['جاكيت فرو',2]]);
+});
+
+test('article variants never move a name owned by another product and leave the active-engine baseline untouched',async()=>{
+ const {withVariants}=await import('../functions/api/_product-engine.js');
+ const {articleVariants}=await import('../functions/api/_order-language.js');
+ assert.deepEqual(articleVariants('مالئ الفراغات').sort(),['الملئ الفراغات','الملئ فراغات','مالئ فراغات'].map(x=>x.replace('الملئ','المالئ')).sort());
+ assert.deepEqual(articleVariants('فرو'),[],'single words: no variants (T-11 context handles them)');
+ const m=withVariants([{id:1,name:'A',aliases:['بنطلون جيوب']},{id:2,name:'B',aliases:['بنطلون الجيوب']}]);
+ assert.ok(!m[0].aliases.includes('بنطلون الجيوب'),'owned by B');assert.ok(!m[1].aliases.includes('بنطلون جيوب'),'owned by A');
+ const {env}=await setup();const base=await loadCatalogue(env,{storeId:0,knowledge:false});
+ assert.ok(!base.models.some(x=>x.aliases.includes('مالاء فراغات')),'baseline = active engine, no variants');
+});

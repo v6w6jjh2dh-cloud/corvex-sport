@@ -48,6 +48,9 @@
    .el-clsrow{padding:8px 0;border-bottom:1px solid rgba(127,127,127,.2)}
    .el-range-warn{margin:8px 0;padding:10px;border-radius:10px;background:#fef3c7;color:#92400e;font-size:14px;display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
    .el-more:disabled{opacity:.55}
+   .el-diag{margin:6px 0 0;padding-inline-start:18px;font-size:13px;line-height:1.7}
+   .el-ba{width:100%;border-collapse:collapse;font-size:14px;margin:6px 0}.el-ba td,.el-ba th{padding:6px;border-bottom:1px solid rgba(127,127,127,.2);text-align:start}
+   .el-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-inline-end:6px;vertical-align:middle}
    .el-scope{font-size:13px;margin:10px 0;padding:8px 10px;border-radius:10px;background:rgba(15,118,110,.08)}
    .el-more{width:100%;margin:8px 0}
    .el-stats-3{grid-template-columns:repeat(3,1fr)}
@@ -197,8 +200,10 @@
      ${acc.show?`<div class="el-row"><div class="el-head"><b>${CLS[acc.show].t} (${shown.length})</b><button class="btn btn-soft" data-cls="">إخفاء</button></div>
        <div class="el-note">${CLS[acc.show].d}</div>
        ${shown.map(o=>`<div class="el-clsrow"><button class="el-order" data-order="${esc(o.id)}">#${esc(o.order_code)}</button>
-        <span class="el-muted">${esc(WHY[o.reason]||o.reason)}${o.names?.length?' — «'+o.names.map(esc).join('»، «')+'»':''}${o.source?' — المصدر '+esc(o.source):''}</span>
-        <div class="el-text">${esc(o.text)}</div></div>`).join('')||'<div class="el-muted">لا يوجد</div>'}</div>`:''}
+        <span class="el-muted">${esc(WHY[o.reason]||o.reason)}${o.before&&o.before!==acc.show?` · قبل الإصلاح: ${esc(CLS[o.before]?.t||o.before)}`:''}</span>
+        <div class="el-text">${esc(o.text)}</div>${diagHtml(o.diag)}</div>`).join('')||'<div class="el-muted">لا يوجد</div>'}</div>`:''}
+     ${beforeAfterHtml(acc)}
+     <div class="el-tools"><button class="btn btn-soft el-export" type="button">تنزيل تقرير الطلبات غير الخضراء (بدون بيانات شخصية)</button></div>
      <div class="el-sec">المقارنة مع المحركات الحالية</div>
      <div class="el-stats">
       <div class="el-stat"><b>${esc(acc.checked)}</b><span>طلبات مفحوصة</span></div>
@@ -232,7 +237,50 @@
         </div>`}).join('')}
      ${acc.next?`<button class="btn btn-soft el-more">فحص الدفعة التالية (${acc.total-acc.checked} متبقٍ)</button>`:''}`;
     out.querySelectorAll('[data-cls]').forEach(b=>b.onclick=()=>{if(!Scan.live(acc))return;acc.show=b.dataset.cls||null;paintCompare(out,acc)});
+    out.querySelectorAll('.el-export').forEach(b=>b.onclick=()=>exportReport(acc,b));
     openOrder(out);
+  }
+  // why an order is not green — evidence only
+  const DIAG_REASON={personal_or_address_line:'في سطر اسم/عنوان/هاتف',no_product_evidence:'كلمة عامة بدون كمية أو لون أو مقاس'};
+  const kv=o=>o?Object.entries(o).map(([k,v])=>`${esc(k)} × ${esc(v)}`).join('، '):'';
+  function diagHtml(d){
+    if(!d)return '';const L=[];
+    if(d.near?.length)L.push('كتابة قريبة من منتج معروف: '+d.near.map(n=>`«${esc(n.phrase)}» ← ${esc(n.product)}`).join('، ')+' (تحتاج اعتماد اسم بديل، لا تُخمَّن)');
+    if(d.names?.length)L.push('اسم غير موجود في الكتالوج: '+d.names.map(n=>`«${esc(n)}»`).join('، '));
+    if(d.uncertain?.length)L.push('لم يُحتسب: '+d.uncertain.map(u=>`«${esc(u.word)}» (${esc(DIAG_REASON[u.reason]||u.reason)})`).join('، '));
+    if(d.source)L.push(`المصدر ${esc(d.source.system)}: المنتج ${d.source.product?'«'+esc(d.source.product)+'»':'غير مذكور'}${d.source.color?' · اللون '+esc(d.source.color):''}${d.source.size?' · المقاس '+esc(d.source.size):''}${d.source.quantity!=null?' · الكمية '+esc(d.source.quantity):''}`);
+    if(d.others?.profit)L.push('محرك الأرباح الحالي قرأ: '+kv(d.others.profit));
+    if(d.others?.print)L.push('محرك المخزون يقرأ اليوم: '+kv(d.others.print));
+    if(d.others?.allocation)L.push('الخصم المسجل في المخزون: '+kv(d.others.allocation));
+    if(d.unclear?.length)L.push('نص غير مفهوم: '+d.unclear.map(u=>`«${esc(u)}»`).join('، '));
+    return L.length?`<ul class="el-diag">${L.map(x=>`<li>${x}</li>`).join('')}</ul>`:'';
+  }
+  // the same orders read by the previous engine version and by this one
+  function beforeAfterHtml(acc){
+    const all=Object.entries(acc.classes).flatMap(([k,m])=>[...m.values()].map(o=>({now:k,before:o.before||k,o})));
+    if(!all.length)return '';
+    const keys=['known','missing','learn','failure','unclear'],b=Object.fromEntries(keys.map(k=>[k,0])),n=Object.fromEntries(keys.map(k=>[k,0]));
+    for(const x of all){b[x.before]=(b[x.before]||0)+1;n[x.now]++}
+    const changed=all.filter(x=>x.before!==x.now);
+    return `<div class="el-sec">قبل الإصلاح وبعده (نفس الطلبات)</div>
+     <table class="el-ba"><tr><th></th><th>قبل</th><th>بعد</th></tr>${keys.map(k=>`<tr><td><span class="el-dot el-${k}"></span>${CLS[k].t}</td><td>${b[k]}</td><td><b>${n[k]}</b></td></tr>`).join('')}</table>
+     ${changed.length?`<div class="el-note">تغيّر تصنيف ${changed.length} طلب: ${changed.slice(0,40).map(x=>`<button class="el-order" data-order="${esc(x.o.id)}">#${esc(x.o.order_code)}</button> (${CLS[x.before].t} ← ${CLS[x.now].t})`).join('، ')}</div>`:'<div class="el-note">لم يتغير تصنيف أي طلب.</div>'}`;
+  }
+  // full export of non-green orders for review outside the system (server removes personal data), same range, all batches
+  async function exportReport(acc,btn){
+    const s=Scan.start('export',acc.from,acc.to),list=[];let next=null,guard=0;btn.disabled=true;
+    try{
+      do{const d=await window.api(`/product-engine?view=compare&from=${encodeURIComponent(s.from)}&to=${encodeURIComponent(s.to)}&limit=150&export=1${next?'&before='+next:''}`);
+        if(!Scan.live(s)||d.from!==s.from||d.to!==s.to)return;
+        for(const [k,v] of Object.entries(d.completeness||{}))if(k!=='known')for(const o of v.orders||[])if(!list.some(x=>x.id===o.id))list.push({class:k,...o,text:undefined});
+        for(const r of d.rows||[])if((r.differences?.vs_print_engine||[]).length&&!list.some(x=>x.id===r.id&&x.class==='stock_difference'))
+          list.push({class:'stock_difference',id:r.id,order_code:r.order_code,stock_reasons:r.stock_reasons,central:r.central?.items,print_engine:r.print_engine,stock_deduction:r.print_allocation,full_text:r.full_text});
+        next=d.batch.next_cursor;btn.textContent=`جاري التجهيز... ${list.length}`;
+      }while(next&&++guard<50);
+      const blob=new Blob([JSON.stringify({range:{from:s.from,to:s.to},engine:'shadow',generated_at:new Date().toISOString(),orders:list},null,1)],{type:'application/json'});
+      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`corvex-engine-review-${s.from}_${s.to}.json`;document.body.appendChild(a);a.click();a.remove();
+      btn.textContent=`تم التنزيل (${list.length} طلب)`;
+    }catch(e){btn.textContent='تعذر التنزيل: '+(e?.message||e)}finally{btn.disabled=false}
   }
   const CLS={known:{t:'منتج معروف',d:'تعرّف المحرك على المنتج.'},missing:{t:'اسم المنتج مفقود',d:'فيه لون أو عدد أو مقاس بدون اسم منتج في النص والملاحظات وبيانات المصدر.'},
    learn:{t:'اسم جديد يحتاج تعلّمًا',d:'اسم منتج أو طريقة كتابة لم يتعلمها المحرك بعد.'},failure:{t:'فشل في منتج معروف',d:'محرك آخر أو الخصم المسجل أو مصدر الطلب يذكر منتجًا معروفًا لم يتعرف عليه المحرك الجديد.'},

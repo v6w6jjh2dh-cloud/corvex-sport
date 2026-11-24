@@ -8,10 +8,10 @@ import {loadInventoryModels,FUR_ALIASES} from './_inventory.js';
 import {loadCostedModels,approvedCost,canonicalModelName,normalizeArabic,STATI_ALIASES,FILLER_ALIASES,round2} from './_partial-delivery.js';
 
 import {PRODUCT_KNOWLEDGE,NAME_SYNONYMS,KNOWLEDGE_VERSION} from './_product-knowledge.js';
-import {parseOrderText,inlineQuantity,DEFAULT_LEXICON,LEARNED_DEFAULTS,LANGUAGE_VERSION} from './_order-language.js';
+import {parseOrderText,inlineQuantity,DEFAULT_LEXICON,LEARNED_DEFAULTS,LANGUAGE_VERSION,articleVariants} from './_order-language.js';
 // The generic order-language parser replaces the matcher here (identical with DEFAULT_LEXICON — tested).
 const parse=(text,models,lexicon=DEFAULT_LEXICON)=>parseOrderText(text,models,lexicon).items;
-export const ENGINE_VERSION='product-engine-3-shadow';
+export const ENGINE_VERSION='product-engine-4-shadow';
 const key=x=>normalizeArabic(x);
 // ---- copied verbatim from profit-shipping-cohorts.js (kept identical; equivalence is tested)
 const MODEL_COSTS=[
@@ -241,7 +241,13 @@ export function withKnowledge(models){
 }
 // asOf (UTC 'YYYY-MM-DD HH:MM:SS'): only rules approved at or before that moment — a historical order is read
 // with the rules of its own time, never re-interpreted automatically when a new rule is learned.
-export async function loadCatalogue(env,{storeId=0,extraAliases=[],knowledge=true,extraLexicon=[],asOf=null}={}){
+export function withVariants(models,lexicon=DEFAULT_LEXICON){
+ const owner=new Map();for(const m of models)for(const a of m.aliases||[])if(!owner.has(a))owner.set(a,m.id);
+ return models.map(m=>{const extra=[];
+  for(const a of m.aliases||[])for(const v of articleVariants(a,lexicon))if(!owner.has(v)&&!extra.includes(v)){extra.push(v);owner.set(v,m.id)}
+  return extra.length?{...m,aliases:[...m.aliases,...extra].sort((x,y)=>y.length-x.length)}:m});
+}
+export async function loadCatalogue(env,{storeId=0,extraAliases=[],knowledge=true,extraLexicon=[],asOf=null,variants=true}={}){
  const base=await cohortModels(env),catalogueError=base.catalogueError;
  // knowledge:false = exactly the active engine (its catalogue, default lexicon, no store rules)
  if(!knowledge)return {models:base.models,primaryModels:base.models,catalogueError,storeId,knowledge,lexicon:DEFAULT_LEXICON,learned:null,asOf,
@@ -254,7 +260,9 @@ export async function loadCatalogue(env,{storeId=0,extraAliases=[],knowledge=tru
   return extra.length?{...m,aliases:[...new Set([...(m.aliases||[]),...extra])].sort((a,b)=>b.length-a.length)}:m;
  });
  // primary = the active catalogue + this store's approved aliases; models = primary + the legacy seed (fills gaps only, T-10)
- const primaryModels=withStore(base.models),models=withStore(withKnowledge(base.models));
+ let primaryModels=withStore(base.models),models=withStore(withKnowledge(base.models));
+ // language variants of every multi-word name (definite article on/off) — never moving a name owned by another product
+ if(variants){primaryModels=withVariants(primaryModels);models=withVariants(models)}
  const lang=buildLexicon([...(await storeLexicon(env,storeId,asOf)),...extraLexicon]);
  return {models,primaryModels,catalogueError,storeId,knowledge,lexicon:lang.lexicon,learned:lang.learned,asOf,
   version:ENGINE_VERSION+'+'+LANGUAGE_VERSION+'+'+KNOWLEDGE_VERSION};

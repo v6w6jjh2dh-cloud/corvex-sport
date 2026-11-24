@@ -294,3 +294,18 @@ test('new manual order check (any signed-in user, Corvex only) and drafts (not o
  assert.equal(db.prepare("SELECT status FROM order_drafts").get().status,'closed','kept, never deleted');
  assert.equal(db.prepare('SELECT COUNT(*) n FROM orders').get().n,before,'no order created');
 });
+
+test('compare: before/after on the same orders, diagnosis per order, redacted export (no phone, name or address)',async()=>{
+ const {db,env}=setup();
+ const add=(notes,raw='',name='ع')=>Number(db.prepare(`INSERT INTO orders(order_code,recipient_name,phone,area,detailed_address,amount,order_notes,raw_text,created_by,created_at,printed,first_printed_at,store_id,delivery_status) VALUES(?,?,?,?,?,?,?,?,1,datetime('now'),1,datetime('now'),2,'delivered')`).run('D'+Math.random(),name,'0791112223','طبربور','شارع الجامعه',10,notes,raw).lastInsertRowid);
+ const o10403=add('مالاء فراغات 3 قطع'),near=add('جاكيت جوخ كاجول عدد 2'),miss=add('','سميره خالد\n0791112223\nطبربور شارع الجامعه\n2 أسود\n1 بيج','سميره خالد');
+ const to=new Date(Date.now()+3*3600e3+86400e3).toISOString().slice(0,10);
+ const r=(await call(env,engineApi,`/product-engine?view=compare&from=2026-11-01&to=${to}&limit=500&export=1`)).body;
+ const find=id=>Object.values(r.completeness).flatMap(x=>x.orders).find(o=>o.id===id);
+ assert.equal(find(o10403).before,'learn');assert.ok(r.completeness.known.orders.some(o=>o.id===o10403),'after: known');
+ assert.ok(r.before_after.transitions['learn>known']>=1);
+ const m=find(miss);assert.equal(m.reason,'details_without_product');
+ assert.doesNotMatch(JSON.stringify(m.full_text),/0791112223|سميره|خالد|طبربور|الجامعه/,'export redacted');
+ assert.match(m.full_text.raw_text,/2 أسود/);
+ assert.ok(find(near));
+});
