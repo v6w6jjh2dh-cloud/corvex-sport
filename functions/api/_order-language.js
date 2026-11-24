@@ -41,7 +41,19 @@ export const DEFAULT_LEXICON={
  // enough to name a product: it needs product evidence on its line, and never counts on a personal line.
  personalMarkers:['الاسم','اسم','ام','ابو','السيد','السيده','الاخ','الاخت','المستلم','الزبون','العميل'],
  addressWords:['شارع','حي','منطقه','قرب','بجانب','جانب','مقابل','خلف','دوار','اشاره','عماره','بنايه','عمارة','طابق','شقه','محافظه','مدينه','قريه','بلده','عمان','اربد','الزرقاء','الزرقا','العقبه','مادبا','الكرك','جرش','عجلون','المفرق','السلط','البلقاء','الطفيله','معان','الاغوار','الغور'],
- sizeWords:['xs','s','m','l','xl','xxl','xxxl','سمول','ميديوم','لارج','اكس','اكسل','مقاس','قياس','نمره','نمرة']
+ sizeWords:['xs','s','m','l','xl','xxl','xxxl','سمول','ميديوم','لارج','اكس','اكسل','مقاس','قياس','نمره','نمرة'],
+ // ---- whole-order analysis (unknown products / unclear details). Generic commerce & date vocabulary, used only by
+ // analyzeOrder — never by the reading of quantities above. All data, extendable per store.
+ analysis:{
+  units:['قطعه','قطع','قطعتين','قطعتان','حبه','حبات','حبتين','عبوه','عبوات','علبه','علب','كرتونه','كراتين','كيس','اكياس','زوج','ازواج','دزينه','باكيت','بكت','طقم','اطقم','نسخه','نسخ','pcs','pc','piece','pieces'],
+  colours:['خمري','سكري','كريمي','اورنج','ذهبي','فضي','عنابي','تركواز','فيروزي','نيلي','كاكي','جملي','ليموني','سود','بيض','black','white','red','blue','green','grey','gray','beige','navy'],
+  sizes:['لارج','اكس','اكسل','ميديوم','مديم','سمول','فري','سايز','دبل','2xl','3xl','4xl','5xl','xs','s','m','l','xl','xxl','xxxl','مقاس','قياس','نمره','المقاس','القياس'],
+  measures:['وزن','الوزن','وزنه','وزنها','طول','الطول','طوله','طولها','كيلو','كيلوات','كغم','كغ','kg','سم','cm','عمر','عمره','عمرها','سنه','سنين','شهر'],
+  price:['دينار','دنانير','د','jd','jod','سعر','السعر','شامل','التوصيل','توصيل','بالتوصيل','مجاني','delivery','included','include','free','shipping','price','total','المجموع','الاجمالي','خصم'],
+  dates:['يناير','فبراير','مارس','ابريل','مايو','يونيو','يوليو','اغسطس','سبتمبر','اكتوبر','نوفمبر','ديسمبر','كانون','شباط','اذار','نيسان','ايار','حزيران','تموز','اب','ايلول','تشرين','الاول','الثاني',
+   'january','february','march','april','may','june','july','august','september','october','november','december','am','pm','ص','م','الساعه','ساعه','صباحا','مساء','مساءا','الصبح','المسا','اليوم','بكرا','بكره','امس','مبارح','الاحد','الاثنين','الثلاثاء','الاربعاء','الخميس','الجمعه','السبت'],
+  fillers:['و','او','مع','في','فيه','على','عل','من','الى','عن','لون','الوان','اللون','الالوان','كل','عدد','العدد','كميه','الكميه','كمية','الكمية','نوع','موديل','الموديل','طلب','الطلب','جديد','بدي','بدها','بده','لو','سمحت','يا','هاد','هذا','هذه','هاي','اياه','اياها','منه','منها','منهم','ال']
+ }
 };
 
 // Conventions learned from real orders (Corvex, 2026-11-24) that the active matcher does not read inside a
@@ -211,20 +223,116 @@ export function stripMeta(text,c=compile()){
   .replace(/\s+/g,' ').trim();
 }
 
-// Phrases that look like a product (a quantity is attached to them, or they stand on their own sale line)
-// but match no catalogue name — candidates for a NEW product or a new alias. Generic: no product word list.
-export function unknownPhrases(text,models,lexicon=DEFAULT_LEXICON){
- const c=compile(lexicon),out=new Set();
- const {lines}=parseOrderText(text,models,lexicon);
- const stopWords=new Set([...lexicon.colours,...lexicon.unitWords,...lexicon.quantityLabels,...Object.keys(lexicon.numberWords),...Object.keys(lexicon.pairWords),lexicon.colourConjunction].map(c.norm));
- for(const raw of lines){
-  const line=stripMeta(raw,c);
-  if(!line||matchesInLine(c,models,line).length)continue;
-  const hasQty=c.label.test(line)||c.unit.test(line)||/^\d{1,2}\s+\S/.test(line)||colourQuantityCount(c,line)>0;
-  if(!hasQty||c.meta.test(line)||/0?7\d{8}/.test(raw))continue;
-  const words=line.split(' ').filter(w=>!/^\d+$/.test(w)&&!stopWords.has(w)&&w.length>1);
-  const phrase=words.join(' ').trim();
-  if(phrase.length>=3&&words.length<=5)out.add(phrase);
+// ================= Whole-order analysis (T-11 spirit: understand context, never guess) =================
+// Splits every order into: known products (catalogue), details (quantity, colour, size, unit, measure, price,
+// date/time, phone, name/address of THIS order), possible new products, possible spellings of a known
+// product, and unclear details for review. Generic: no product word list — only the store's catalogue and
+// the lexicon. Used for discovery/review only; it never changes a reading, a quantity or a cost.
+const lev=(a,b)=>{if(a===b)return 0;const m=a.length,n=b.length;if(!m||!n)return m||n;let p=[...Array(n+1).keys()];for(let i=1;i<=m;i++){const q=[i];for(let j=1;j<=n;j++)q[j]=Math.min(p[j]+1,q[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=q}return p[n]};
+// grouping key: no «ال», no repeated letters, no spaces («بيسك» = «البيسك» = «بييسك»)
+export const phraseKey=t=>String(t||'').split(' ').map(w=>w.replace(/^(?:وال|بال|ال)(?=\p{L}{2,})/u,'')).join('').replace(/(\p{L})\1+/gu,'$1');
+
+function analysisSets(c){
+ if(c.__an)return c.__an;
+ const L=c.lex,A=L.analysis||{},N=w=>c.norm(w),set=list=>new Set((list||[]).map(N));
+ const an={
+  units:set([...L.unitWords,...(A.units||[])]),
+  colours:set([...L.colours,...(A.colours||[])]),
+  sizes:set([...(L.sizeWords||[]),...(A.sizes||[])]),
+  measures:set(A.measures),price:set(A.price),dates:set(A.dates),
+  labels:set(L.quantityLabels),numbers:new Set(Object.keys(L.numberWords).map(N)),pairs:new Set([...Object.keys(L.pairWords),...Object.keys(LEARNED_DEFAULTS.inlinePairWords)].map(N)),
+  fillers:set([...(A.fillers||[]),L.colourConjunction]),operations:set(L.operationWords),personal:set(L.personalMarkers||[]),address:set(L.addressWords||[])
+ };
+ return c.__an=an;
+}
+// Split numbers glued to words («2أسود», «عدد2», «3قطع», «25قطعة»), keep times/ratios/dates, drop punctuation.
+function tokens(line){
+ return line
+  .replace(/\b\d{1,2}:\d{2}\b/g,' __time__ ').replace(/\b\d{1,4}[\/\-.]\d{1,4}(?:[\/\-.]\d{2,4})?\b/g,' __ratio__ ')
+  .replace(/(\d)(\p{L})/gu,'$1 $2').replace(/(\p{L})(\d)/gu,'$1 $2')
+  .replace(/[()\[\]{}«»"'`،,؛;:!?؟.*+=#_\-–—\/\\|<>~^&%$@]/g,m=>m==='_'?m:' ')
+  .split(/\s+/).filter(Boolean);
+}
+function classifyToken(w,an,personalWords){
+ if(w==='__time__'||w==='__ratio__')return w==='__time__'?'date':'measure';
+ if(/^\d+$/.test(w))return 'number';
+ const bare=w.length>2&&w.startsWith('و')?w.slice(1):w;
+ if(personalWords.has(w)||personalWords.has(bare))return 'personal';
+ for(const [k,s] of [['unit',an.units],['colour',an.colours],['size',an.sizes],['measure',an.measures],['price',an.price],['date',an.dates],['quantity',an.labels],['quantity',an.numbers],['quantity',an.pairs],['operation',an.operations]])
+  if(s.has(w)||s.has(bare))return k;
+ if(an.fillers.has(w))return 'filler';
+ if(an.address.has(w)||an.address.has(bare))return 'address';
+ return 'word';
+}
+const SIGNAL=new Set(['number','unit','colour','size','quantity']);
+
+export function analyzeOrder(order,models,lexicon=DEFAULT_LEXICON){
+ const c=compile(lexicon),an=analysisSets(c);
+ const fields=[['order_notes',String(order.order_notes||'')],['raw_text',String(order.raw_text||'')]];
+ // whole-order context: this order's own name / area / address / phone words are personal, never products
+ const personalWords=new Set(tokens(c.norm([order.recipient_name,order.area,order.detailed_address].filter(Boolean).join(' '))).filter(w=>w.length>1&&!/^\d+$/.test(w)));
+ const amount=Number(order.amount||0);
+ const out={known:[],candidates:[],unclear:[],details:0};
+ const seen=new Set();
+ for(const [field,text] of fields){
+  if(!text.trim())continue;
+  const rawLines=text.split(/\n+/);
+  const lines=rawLines.map(l=>{
+   const v=saleLine(c,l);if(!v)return {kind:'empty'};
+   if(/(?:^|\D)(?:\+?962|0)?7\d{8}(?:\D|$)/.test(v.replace(/[\s-]/g,'')))return {kind:'personal'};
+   if(personalLine(v,lexicon))return {kind:'personal'};
+   const matches=matchesInLine(c,models,v);
+   let rest=v;for(const m of [...matches].sort((a,b)=>b.index-a.index))rest=rest.slice(0,m.index)+' '+rest.slice(m.index+m.length);
+   const toks=tokens(rest).map(w=>({w,k:classifyToken(w,an,personalWords)}));
+   // the order amount next to a price word, or equal to the order amount, is a price
+   for(const t of toks)if(t.k==='number'&&amount&&Number(t.w)===amount&&toks.some(x=>x.k==='price'))t.k='price';
+   const words=toks.filter(t=>t.k==='word').map(t=>t.w);
+   return {kind:matches.length?'product':words.length?'text':'detail',signal:toks.some(t=>SIGNAL.has(t.k)),words,dateOrPrice:toks.some(t=>t.k==='date'||t.k==='price'||t.k==='measure'),
+    known:matches.map(m=>m.model.name),toks};
+  });
+  for(let i=0;i<lines.length;i++){
+   const L=lines[i];if(L.kind==='product')out.known.push(...L.known);
+   if(L.kind==='detail')out.details++;
+   if(L.kind!=='text')continue;
+   // context: a text line borrows the product signal of the detail-only line(s) right after it (e.g. «بيسك» / «2 اسود 1 ابيض»)
+   let signal=L.signal;
+   for(let j=i+1;!signal&&j<lines.length&&lines[j].kind==='detail';j++)signal=lines[j].signal;
+   const phrase=L.words.join(' ');
+   if(phrase.length<2)continue;
+   const kind=signal&&L.words.length<=5&&!(L.dateOrPrice&&!L.toks.some(t=>t.k==='unit'||t.k==='colour'||t.k==='size'||t.k==='quantity'))?'candidate':'unclear';
+   // unclear lines are reviewed from the product field only (raw_text also carries chat, names and addresses)
+   if(kind==='unclear'&&field==='raw_text'&&fields[0][1].trim())continue;
+   const key=phraseKey(phrase);if(seen.has(kind+key))continue;seen.add(kind+key);
+   if(kind==='candidate'){
+    // before calling it new: is it a spelling of a known product (catalogue + knowledge)?
+    let near=null;
+    for(const m of models)for(const a of m.aliases||[])for(const target of [a,...(a.includes(' ')?a.split(' ').filter(w=>phraseKey(w).length>=4):[])]){
+     const d=lev(phraseKey(target),key),lim=key.length>=6?2:1;
+     if(key.length>=3&&d<=lim&&(!near||d<near.d))near={d,name:m.name,alias:a};
+    }
+    out.candidates.push({phrase,key,field,near:near?{name:near.name,alias:near.alias}:null});
+   }else out.unclear.push({phrase:rawLines[i].trim().slice(0,80)||phrase,key,field,line:rawLines[i].trim().slice(0,120)});
+  }
  }
- return [...out];
+ out.known=[...new Set(out.known)];
+ return out;
+}
+
+// Backwards-compatible helper: possible NEW product phrases of a text (used by correction suggestions).
+export function unknownPhrases(text,models,lexicon=DEFAULT_LEXICON){
+ return analyzeOrder({order_notes:text},models,lexicon).candidates.filter(c=>!c.near).map(c=>c.phrase);
+}
+
+// Group candidates across many orders: one entry per probable product, with its written variants.
+export function groupPhrases(list){
+ const groups=[];
+ for(const x of list){
+  let g=groups.find(g=>g.key===x.key||(x.key.length>=4&&g.key.length>=4&&lev(g.key,x.key)<=1));
+  if(!g){g={key:x.key,label:x.phrase,variants:new Map(),orders:new Set(),examples:[],near:x.near||null};groups.push(g)}
+  g.variants.set(x.phrase,(g.variants.get(x.phrase)||0)+1);
+  if(!g.orders.has(x.order_id)){g.orders.add(x.order_id);if(g.examples.length<8)g.examples.push({id:x.order_id,order_code:x.order_code})}
+  if(!g.near&&x.near)g.near=x.near;
+ }
+ return groups.map(g=>{const variants=[...g.variants].sort((a,b)=>b[1]-a[1]);return {label:variants[0][0],key:g.key,orders:g.orders.size,
+  variants:variants.map(([phrase,n])=>({phrase,n})),examples:g.examples,near:g.near,order_ids:[...g.orders]}}).sort((a,b)=>b.orders-a.orders);
 }
