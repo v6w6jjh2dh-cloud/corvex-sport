@@ -20,6 +20,11 @@
 - توثيق: `CLAUDE.md`، `AGENTS.md`، `BUSINESS_RULES.md`، `ARCHITECTURE.md`، `REGRESSION_TESTS.md`، `CHANGELOG.md`.
 - حماية: `.github/workflows/ci.yml` (فحص الصياغة + روابط `index.html` + كسر الكاش + كل الاختبارات مع PGlite)، `scripts/check-project.mjs`، `package.json` (سكربتات فقط)، `tests/regression-guards.test.mjs`.
 - لا تغيير في وظائف النظام أو تصميمه أو بياناته.
+- CI على GitHub Actions: `de7c03c` و`02dfa66` نجحا (97 اختبار ناجح / 0 فاشل، Node 22.23.5، مع PGlite).
+- إثبات أن CI يرفض فعليًا: الفرع `ci-proof/must-fail` — `e32ddbc` فشل عند تعديل `app-v115` دون تغيير `?v=`،
+  و`` فشل باختبار متعمد (`not ok 98`). **يُحذف الفرع يدويًا** (بيئة الوكيل تمنع حذف الفروع البعيدة).
+- **لم يُفعَّل** إلزام المرور بـ CI قبل الدمج (Branch protection) لأن صلاحيات بيئة الوكيل لا تسمح بتعديل إعدادات المستودع
+  (HTTP 403). يحتاج تفعيلًا يدويًا من صاحب المستودع — الخطوات في `CLAUDE.md` §6.
 
 ### 2026-11-24 (قبل المرحلة، كلها على `main` ومنشورة بنجاح على Cloudflare؛ التحقق محليًا ما لم يُذكر غير ذلك)
 | commit | التعديل | الاختبارات |

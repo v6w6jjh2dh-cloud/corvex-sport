@@ -61,6 +61,12 @@
   4. تأكد من نجاح نشر Cloudflare (`gh api repos/<repo>/commits/<sha>/check-runs` → «Cloudflare Pages»).
 - أي ملف في `public/` محمّل من `index.html` وتغيّر **يجب** تغيير رقم `?v=` الخاص به في `index.html` (CI يرفض غير ذلك)،
   وإلا تبقى الأجهزة على النسخة القديمة من الكاش.
+- **إلزام CI قبل الدمج (يفعّله صاحب المستودع مرة واحدة):** GitHub → Settings → Branches (أو Rules → Rulesets) → قاعدة لفرع `main`:
+  «Require a pull request before merging» + «Require status checks to pass» واختر `checks` (من workflow ‏CI) +
+  «Require branches to be up to date» + «Do not allow bypassing the above settings» (يشمل المدراء) + منع force push والحذف.
+  بعدها لا يصل إلى `main` — وبالتالي إلى نشر Cloudflare الإنتاجي — إلا ما نجح في CI. (الوكلاء لا يملكون صلاحية تعديل هذه الإعدادات.)
+- **اختياري لمنع النشر حتى لو تجاوز أحد الحماية:** في Cloudflare Pages → Settings → Builds → Build command:
+  `node scripts/check-project.mjs` (ينجح البناء فقط إذا مرّت فحوص الصياغة والروابط). الاختبارات الكاملة تبقى في CI.
 - نقطة الاستعادة الحالية وآلية الرجوع: `CHANGELOG.md` قسم «نقاط الاستعادة».
 
 ## 7. التقرير بعد كل مهمة
