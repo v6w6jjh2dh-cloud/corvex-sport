@@ -246,6 +246,8 @@ test('large ranges in batches: total in scope, cursor walks every order exactly 
   assert.equal(r.total,total);checked+=r.batch.checked;batches++;before=r.batch.next_cursor;
   for(const [k,v] of Object.entries(r.counts))sum[k]=(sum[k]||0)+v;
   for(const row of r.rows)if(row.differences.vs_print_engine.length)assert.ok(row.stock_reasons.length,JSON.stringify(row));
+  for(const row of r.rows)assert.ok(row.ship_day>=day&&row.ship_day<=day,'row inside the range');
+  assert.equal(new Set(r.checked.map(x=>x.id)).size,r.batch.checked,'each order once per batch');
   assert.ok('profit_cost_unknown' in r.counts&&'central_cost_unknown' in r.counts);
  }while(before&&batches<20);
  assert.equal(checked,total);assert.equal(sum.orders,total);assert.equal(batches,Math.ceil(total/7));

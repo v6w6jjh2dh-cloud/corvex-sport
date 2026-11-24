@@ -46,6 +46,8 @@
    .el-learn{background:#fef9c3}.el-learn b{color:#a16207}.el-failure{background:#fee2e2}.el-failure b{color:#b91c1c}.el-unclear{background:#e5e7eb}.el-unclear b{color:#374151}
    .el-rates{font-size:14px;line-height:1.9;margin:6px 0 10px}
    .el-clsrow{padding:8px 0;border-bottom:1px solid rgba(127,127,127,.2)}
+   .el-range-warn{margin:8px 0;padding:10px;border-radius:10px;background:#fef3c7;color:#92400e;font-size:14px;display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+   .el-more:disabled{opacity:.55}
    .el-scope{font-size:13px;margin:10px 0;padding:8px 10px;border-radius:10px;background:rgba(15,118,110,.08)}
    .el-more{width:100%;margin:8px 0}
    .el-stats-3{grid-template-columns:repeat(3,1fr)}
@@ -78,7 +80,20 @@
       <button class="btn btn-soft" data-tab="drafts">مسودات ناقصة</button>
      </div><div id="elBody"></div></div>`;
     c.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;paint()});
+    checkFresh();
     paint();
+  }
+  // A page left open keeps the old code after a deploy: compare with the published page and offer a reload.
+  const MY_VERSION=(document.querySelector('script[src*="app-v117-engine-lab.js"]')?.src.match(/[?&]v=([^&]+)/)||[])[1]||'';
+  function checkFresh(){
+    fetch('/index.html',{cache:'no-store'}).then(r=>r.text()).then(h=>{
+      const live=(h.match(/app-v117-engine-lab\.js\?v=([^"&]+)/)||[])[1];
+      if(live&&MY_VERSION&&live!==MY_VERSION&&!document.getElementById('elStale')){
+        const b=document.createElement('div');b.id='elStale';b.className='el-range-warn';
+        b.innerHTML='يوجد تحديث جديد لهذه الصفحة. <button class="btn btn-accent" type="button">إعادة التحميل</button>';
+        b.querySelector('button').onclick=()=>location.reload();document.querySelector('#content .page-title')?.after(b);
+      }
+    }).catch(()=>{});
   }
   function paint(){
     document.querySelectorAll('.el-tabs [data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
@@ -93,6 +108,37 @@
      <div class="filter-group"><label>إلى</label><input id="${id}To" type="date" class="input" value="${to}"></div>
      <div class="filter-actions"><button id="${id}Run" class="btn btn-accent">فحص</button></div></div><div id="${id}Out"></div>`;
   }
+  // ---- Scan state (pure, tested): one active scan per tab. A new scan replaces the old one; late responses of an
+  // old scan, of another date range or for orders already counted are ignored. Counts are rebuilt from per-order
+  // records keyed by order id, so an order can never be counted twice.
+  const Scan={seq:0,current:{},
+    start(kind,from,to){const s={id:++Scan.seq,kind,from,to,total:0,seen:new Set(),flags:new Map(),rows:new Map(),next:null,busy:false,started:false,
+      classes:{known:new Map(),missing:new Map(),learn:new Map(),failure:new Map(),unclear:new Map()},groups:{products:new Map(),possible_aliases:new Map(),unclear:new Map()},show:null};
+      Scan.current[kind]=s;return s},
+    live:s=>Scan.current[s.kind]===s,
+    accept(s,d){
+      if(!Scan.live(s)||!d||d.from!==s.from||d.to!==s.to)return false;
+      s.total=Number(d.total||0);s.next=d.batch?.next_cursor||null;s.started=true;
+      if(s.kind==='compare'){
+        for(const o of d.checked||[]){const id=Number(o.id);if(s.seen.has(id))continue;s.seen.add(id);s.flags.set(id,o.flags||[])}
+        for(const r of d.rows||[])if(s.seen.has(Number(r.id)))s.rows.set(Number(r.id),r);
+        for(const [k,v] of Object.entries(d.completeness||{}))for(const o of v.orders||[])if(s.seen.has(Number(o.id)))s.classes[k]?.set(Number(o.id),o);
+      }else{
+        for(const id of d.checked_ids||[])s.seen.add(Number(id));
+        for(const k of Object.keys(s.groups))for(const g of d[k]||[]){
+          const x=s.groups[k].get(g.key)||{key:g.key,label:g.label,near:g.near,orders:new Set(),variants:new Map(),examples:[]};
+          const fresh=(g.order_ids||[]).filter(id=>!x.orders.has(id));for(const id of fresh)x.orders.add(id);
+          if(fresh.length)for(const v of g.variants||[])x.variants.set(v.phrase,(x.variants.get(v.phrase)||0)+v.n);
+          for(const e of g.examples||[])if(x.examples.length<8&&!x.examples.some(y=>y.id===e.id))x.examples.push(e);
+          if(!x.near&&g.near)x.near=g.near;s.groups[k].set(g.key,x);
+        }
+      }
+      return true;
+    },
+    counts(s){const c={};for(const f of s.flags.values())for(const k of f)c[k]=(c[k]||0)+1;return c},
+    checked:s=>s.seen.size
+  };
+  window.__engineLabScan=Scan;
   const openOrder=root=>root.querySelectorAll('[data-order]').forEach(b=>b.onclick=()=>{if(typeof window.editOrder==='function')window.editOrder(Number(b.dataset.order))});
 
   // ---- 1) comparison old vs new (large ranges in batches; an order is never counted twice)
@@ -104,26 +150,36 @@
     body().innerHTML=range('elCmp',3);
     const out=document.getElementById('elCmpOut');
     out.innerHTML='<div class="el-note">يقارن المحرك الجديد مع محرك الأرباح الحالي ومحرك المخزون. الفترات الكبيرة تُفحص على دفعات (150 طلبًا).</div>';
-    let acc=null;
-    const run=async(first)=>{
-      const f=document.getElementById('elCmpFrom').value,t=document.getElementById('elCmpTo').value;
-      if(first)acc={from:f,to:t,total:0,checked:0,counts:{},rows:new Map(),next:null,classes:{known:new Map(),missing:new Map(),learn:new Map(),failure:new Map(),unclear:new Map()},show:null};
-      const more=document.getElementById('elCmpMore');if(more)more.disabled=true;
-      if(first)out.innerHTML='<div class="empty">جاري الفحص...</div>';
+    const fetchBatch=async s=>{
+      if(s.busy)return;s.busy=true;paintBusy();
       try{
-        const d=await window.api(`/product-engine?view=compare&from=${encodeURIComponent(acc.from)}&to=${encodeURIComponent(acc.to)}&limit=150${acc.next?'&before='+acc.next:''}`);
-        acc.total=d.total;acc.checked+=d.batch.checked;acc.next=d.batch.next_cursor;
-        for(const [k,v] of Object.entries(d.counts||{}))acc.counts[k]=(acc.counts[k]||0)+Number(v||0);
-        for(const r of d.rows||[])acc.rows.set(r.id,r);
-        for(const [k,v] of Object.entries(d.completeness||{}))for(const o of v.orders||[])acc.classes[k]?.set(o.id,o);
-        paintCompare(out,acc);
-      }catch(e){out.innerHTML=`<div class="empty">تعذر الفحص: ${esc(e?.message||e)}</div>`}
+        const d=await window.api(`/product-engine?view=compare&from=${encodeURIComponent(s.from)}&to=${encodeURIComponent(s.to)}&limit=150${s.next?'&before='+s.next:''}`);
+        if(Scan.accept(s,d))paintCompare(out,s);
+      }catch(e){if(Scan.live(s))out.innerHTML=`<div class="empty">تعذر الفحص: ${esc(e?.message||e)}</div>`}
+      finally{s.busy=false;if(Scan.live(s))paintBusy()}
     };
-    document.getElementById('elCmpRun').onclick=()=>run(true);
-    out.addEventListener('click',e=>{if(e.target.id==='elCmpMore')run(false)});
+    const paintBusy=()=>{const s=Scan.current.compare;out.querySelectorAll('.el-more').forEach(b=>{b.disabled=!!s?.busy;if(s?.busy)b.textContent='جاري فحص الدفعة...'})};
+    document.getElementById('elCmpRun').onclick=()=>{
+      const f=document.getElementById('elCmpFrom').value,t=document.getElementById('elCmpTo').value;
+      if(!f||!t||f>t){out.innerHTML='<div class="empty">اختاري فترة صحيحة</div>';return}
+      const s=Scan.start('compare',f,t);   // new scan: previous results and pending answers are dropped
+      out.innerHTML='<div class="empty">جاري الفحص...</div>';fetchBatch(s);
+    };
+    out.addEventListener('click',e=>{const s=Scan.current.compare;if(e.target.classList?.contains('el-more')&&s&&s.next&&!rangeChanged('elCmp',s))fetchBatch(s)});
+    lockRange('elCmp','compare',out);
+  }
+  // the batches of a scan always use the scan's own range; if the inputs change, «next batch» is disabled until a new scan
+  const rangeChanged=(id,s)=>document.getElementById(id+'From')?.value!==s.from||document.getElementById(id+'To')?.value!==s.to;
+  function lockRange(id,kind,out){
+    const warn=()=>{const s=Scan.current[kind];if(!s)return;const changed=rangeChanged(id,s);
+      out.querySelectorAll('.el-more,#elUnkMore').forEach(b=>{b.disabled=changed||s.busy});
+      let n=out.querySelector('.el-range-warn');
+      if(changed&&!n){n=document.createElement('div');n.className='el-range-warn';n.textContent='تغيّرت الفترة — اضغطي «فحص» لبدء فحص جديد. النتائج المعروضة للفترة السابقة.';out.prepend(n)}
+      if(!changed&&n)n.remove()};
+    for(const x of ['From','To'])document.getElementById(id+x)?.addEventListener('input',warn);
   }
   function paintCompare(out,acc){
-    const n=acc.counts;
+    const n=Scan.counts(acc);acc.checked=Scan.checked(acc);
     const stat=(v,label,tone='')=>`<div class="el-stat ${v?tone:'ok'}"><b>${esc(v??0)}</b><span>${label}</span></div>`;
     const rows=[...acc.rows.values()];
     const K=acc.classes,cnt=k=>K[k].size,checked=acc.checked||0;
@@ -132,7 +188,7 @@
     const card=k=>`<button class="el-cls el-${k} ${acc.show===k?'on':''}" data-cls="${k}"><b>${cnt(k)}</b><span>${CLS[k].t}</span></button>`;
     const shown=acc.show?[...K[acc.show].values()]:[];
     out.innerHTML=`${scopeNote(acc,acc.checked)}
-     ${acc.next?`<button id="elCmpMore" class="btn btn-soft el-more">فحص الدفعة التالية (${acc.total-acc.checked} متبقٍ)</button>`:''}
+     ${acc.next?`<button class="btn btn-soft el-more">فحص الدفعة التالية (${acc.total-acc.checked} متبقٍ)</button>`:''}
      <div class="el-sec">تصنيف الطلبات (اضغطي على الرقم لعرض الطلبات)</div>
      <div class="el-clsgrid">${['known','missing','learn','failure','unclear'].map(card).join('')}</div>
      <div class="el-rates"><div>اكتمال بيانات الطلبات: <b>${complete}%</b> <span class="el-muted">(${cnt('missing')} طلب بدون اسم منتج)</span></div>
@@ -174,8 +230,8 @@
            <div class="el-note">قراءة محرك المخزون اليوم: ${Object.entries(r.print_engine||{}).map(([k,v])=>`${esc(k)} × ${esc(v)}`).join('، ')||'لا شيء'}</div>
            <div class="el-note">السبب: ${(r.stock_reasons||[]).map(x=>esc(STOCK[x]||x)).join('، ')||'—'}</div></div>`:''}
         </div>`}).join('')}
-     ${acc.next?`<button id="elCmpMore" class="btn btn-soft el-more">فحص الدفعة التالية (${acc.total-acc.checked} متبقٍ)</button>`:''}`;
-    out.querySelectorAll('[data-cls]').forEach(b=>b.onclick=()=>{acc.show=b.dataset.cls||null;paintCompare(out,acc)});
+     ${acc.next?`<button class="btn btn-soft el-more">فحص الدفعة التالية (${acc.total-acc.checked} متبقٍ)</button>`:''}`;
+    out.querySelectorAll('[data-cls]').forEach(b=>b.onclick=()=>{if(!Scan.live(acc))return;acc.show=b.dataset.cls||null;paintCompare(out,acc)});
     openOrder(out);
   }
   const CLS={known:{t:'منتج معروف',d:'تعرّف المحرك على المنتج.'},missing:{t:'اسم المنتج مفقود',d:'فيه لون أو عدد أو مقاس بدون اسم منتج في النص والملاحظات وبيانات المصدر.'},
@@ -193,24 +249,25 @@
     const out=document.getElementById('elUnkOut');
     out.innerHTML='<div class="el-note">يحلل الطلب كاملًا ويفصل اسم المنتج عن الكمية واللون والمقاس والوزن والسعر والتاريخ والاسم والعنوان. الفترات الكبيرة على دفعات (300 طلب).</div>';
     let acc=null,filter='products',q='',min=1;
-    const merge=(into,list)=>{for(const g of list||[]){const x=into.get(g.key)||{key:g.key,label:g.label,near:g.near,orders:new Set(),variants:new Map(),examples:[]};
-      for(const id of g.order_ids||[])x.orders.add(id);for(const v of g.variants||[])x.variants.set(v.phrase,(x.variants.get(v.phrase)||0)+v.n);
-      for(const e of g.examples||[])if(x.examples.length<8&&!x.examples.some(y=>y.id===e.id))x.examples.push(e);if(!x.near&&g.near)x.near=g.near;into.set(g.key,x)}};
-    const run=async(first)=>{
-      const f=document.getElementById('elUnkFrom').value,t=document.getElementById('elUnkTo').value;
-      if(first){acc={from:f,to:t,total:0,checked:0,findings:0,next:null,products:new Map(),possible_aliases:new Map(),unclear:new Map()};out.innerHTML='<div class="empty">جاري التحليل...</div>'}
+    const fetchBatch=async s=>{
+      if(s.busy)return;s.busy=true;const more=document.getElementById('elUnkMore');if(more){more.disabled=true;more.textContent='جاري التحليل...'}
       try{
-        const d=await window.api(`/product-engine?view=unknown&from=${encodeURIComponent(acc.from)}&to=${encodeURIComponent(acc.to)}&limit=300${acc.next?'&before='+acc.next:''}`);
-        acc.total=d.total;acc.checked+=d.batch.checked;acc.findings+=d.orders_with_findings;acc.next=d.batch.next_cursor;
-        for(const k of Object.keys(UKIND))merge(acc[k],d[k]);
-        paint();
-      }catch(e){out.innerHTML=`<div class="empty">تعذر التحليل: ${esc(e?.message||e)}</div>`}
+        const d=await window.api(`/product-engine?view=unknown&from=${encodeURIComponent(s.from)}&to=${encodeURIComponent(s.to)}&limit=300${s.next?'&before='+s.next:''}`);
+        if(Scan.accept(s,d)){acc=s;paint()}
+      }catch(e){if(Scan.live(s))out.innerHTML=`<div class="empty">تعذر التحليل: ${esc(e?.message||e)}</div>`}
+      finally{s.busy=false}
+    };
+    const run=()=>{
+      const f=document.getElementById('elUnkFrom').value,t=document.getElementById('elUnkTo').value;
+      if(!f||!t||f>t){out.innerHTML='<div class="empty">اختاري فترة صحيحة</div>';return}
+      const s=Scan.start('unknown',f,t);acc=null;out.innerHTML='<div class="empty">جاري التحليل...</div>';fetchBatch(s);
     };
     const paint=()=>{
-      const list=[...acc[filter].values()].map(g=>({...g,n:g.orders.size,vs:[...g.variants].sort((a,b)=>b[1]-a[1])}))
+      acc.checked=Scan.checked(acc);
+      const list=[...acc.groups[filter].values()].map(g=>({...g,n:g.orders.size,vs:[...g.variants].sort((a,b)=>b[1]-a[1])}))
         .filter(g=>g.n>=min&&(!q||g.vs.some(([p])=>p.includes(q))||String(g.near?.name||'').includes(q))).sort((a,b)=>b.n-a.n);
       out.innerHTML=`${scopeNote(acc,acc.checked)}
-       <div class="el-stats el-stats-3">${Object.entries(UKIND).map(([k,v])=>`<button class="el-stat el-filter ${filter===k?'on':''}" data-f="${k}"><b>${acc[k].size}</b><span>${v.t}</span></button>`).join('')}</div>
+       <div class="el-stats el-stats-3">${Object.entries(UKIND).map(([k,v])=>`<button class="el-stat el-filter ${filter===k?'on':''}" data-f="${k}"><b>${acc.groups[k].size}</b><span>${v.t}</span></button>`).join('')}</div>
        <div class="el-tools"><input id="elUnkQ" class="input" placeholder="بحث في العبارات" value="${esc(q)}">
         <select id="elUnkMin" class="select"><option value="1">كل العبارات</option><option value="2" ${min===2?'selected':''}>في طلبين فأكثر</option><option value="5" ${min===5?'selected':''}>في 5 طلبات فأكثر</option></select></div>
        <div class="el-note">${UKIND[filter].d}</div>
@@ -223,10 +280,11 @@
       out.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{filter=b.dataset.f;paint()});
       const qi=document.getElementById('elUnkQ');qi.oninput=()=>{q=qi.value.trim();const pos=qi.selectionStart;paint();const n=document.getElementById('elUnkQ');n.focus();n.setSelectionRange(pos,pos)};
       document.getElementById('elUnkMin').onchange=e=>{min=Number(e.target.value);paint()};
-      const more=document.getElementById('elUnkMore');if(more)more.onclick=()=>{more.disabled=true;run(false)};
+      const more=document.getElementById('elUnkMore');if(more)more.onclick=()=>{const s=Scan.current.unknown;if(s&&s.next&&!rangeChanged('elUnk',s))fetchBatch(s)};
       openOrder(out);
     };
-    document.getElementById('elUnkRun').onclick=()=>run(true);
+    document.getElementById('elUnkRun').onclick=run;
+    lockRange('elUnk','unknown',out);
   }
 
   // ---- 3) accumulated knowledge
