@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createD1} from './_d1.mjs';
-import {parseOrderText,unknownPhrases,DEFAULT_LEXICON,inlineQuantity} from '../functions/api/_order-language.js';
+import {parseOrderText,unknownPhrases,DEFAULT_LEXICON,inlineQuantity,analyzeOrder,groupPhrases,phraseKey} from '../functions/api/_order-language.js';
 import {classifyInventoryItems,resetInventorySchemaCache} from '../functions/api/_inventory.js';
 import {loadCatalogue} from '../functions/api/_product-engine.js';
 import {PRODUCT_KNOWLEDGE,QUANTITY_RULES} from '../functions/api/_product-knowledge.js';
@@ -61,7 +61,7 @@ test('evidence explains every quantity (for review and future learning)',()=>{
 test('unknown phrases: a product-like line with a quantity that matches nothing becomes a candidate (no product word list)',()=>{
  const models=[{id:1,name:'X',aliases:['جاكيت فرو']}];
  assert.deepEqual(unknownPhrases('جاكيت فرو\nشنطه جلد عدد 2\nعمان - طبربور\n0791234567\n17 شامل التوصيل',models),['شنطه جلد']);
- assert.deepEqual(unknownPhrases('هودي اوفر سايز 2 اسود',models),['هودي اوفر سايز']);
+ assert.deepEqual(unknownPhrases('هودي اوفر سايز 2 اسود',models),['هودي اوفر'],'«سايز» is a size detail, not part of the name');
  assert.deepEqual(unknownPhrases('جاكيت فرو عدد 2',models),[]);
 });
 
@@ -69,4 +69,51 @@ test('learned conventions (single-product orders) are data, not code',()=>{
  for(const q of QUANTITY_RULES)for(const [t,n] of q.examples)assert.equal(inlineQuantity(t,{productName:t})?.quantity,n,`${q.id} «${t}»`);
  assert.equal(inlineQuantity('كيك ثلاث علب',{lexicon:{...DEFAULT_LEXICON,unitWords:[...DEFAULT_LEXICON.unitWords,'علب']}})?.quantity,3);
  assert.equal(inlineQuantity('كيك 17 شامل التوصيل'),null);
+});
+
+// ---- Production review 2026-11-24 (owner): details were reported as product names. Generic fixes, no product names in code.
+const CAT=[{id:1,name:'جاكيت فرو',aliases:['جاكيت فرو']},{id:2,name:'تيشيرت بيسك',aliases:['تيشيرت بيسك']}];
+const A=(t,extra={})=>analyzeOrder({order_notes:t,...extra},CAT);
+
+test('details are never product candidates: quantity, colours, units, sizes, measures, price, dates/times',()=>{
+ for(const t of ['الكمية: 3','الكمية:','3 ألوان','ثلاث الوان','2أسود','1أبيض','2أسود 1أبيض','عدد2','3قطع','25قطعة','إكس لارج','XL','عبوات','80/90','delivery included',
+   'نوفمبر في 6:49','17 شامل التوصيل','وزن 70 كيلو','طول 160 سم','مقاس 42','قطعتين','2 حبات','12/11/2026']){
+  const r=A(t);assert.deepEqual(r.candidates,[],`candidate from «${t}»`);assert.deepEqual(r.unclear,[],`unclear from «${t}»`);
+ }
+});
+
+test('numbers glued to words are split (2أسود, عدد2, 3قطع) and the product phrase is separated from them',()=>{
+ for(const t of ['بيسك عدد2','عدد2 بيسك','بيسك عدد3','بيسك عدد4','بيسك 3قطع','2أسود بيسك','بيسك\n2أسود 1أبيض','بيسك\nمقاس xl\n2 اسود'])
+  assert.deepEqual(A(t).candidates.map(c=>c.phrase),['بيسك'],`«${t}»`);
+});
+
+test('similar phrases are grouped under one probable product with their variants and distinct orders',()=>{
+ const list=[];let id=0;
+ for(const t of ['بيسك 1 قطعه','بيسك عدد2','عدد2 بيسك','بيسك عدد3','البيسك 2 قطع','بييسك عدد 2','شنطه جلد عدد 2','شنطة جلد 3 قطع']){
+  id++;for(const c of A(t).candidates)list.push({...c,order_id:id,order_code:String(id)});
+ }
+ // the same order twice is counted once
+ for(const c of A('بيسك عدد5').candidates)list.push({...c,order_id:1,order_code:'1'});
+ const g=groupPhrases(list);
+ assert.equal(g.length,2,JSON.stringify(g.map(x=>x.variants)));
+ assert.equal(g[0].orders,6);assert.equal(g[1].orders,2);
+ assert.equal(phraseKey('البيسك'),phraseKey('بيسك'));
+});
+
+test('catalogue and knowledge are checked first: a near spelling is a possible alias, not a new product',()=>{
+ const r=A('بيسيك عدد 2');assert.equal(r.candidates[0].near.name,'تيشيرت بيسك');
+ assert.deepEqual(unknownPhrases('بيسيك عدد 2',CAT),[],'not listed as a NEW product');
+ assert.equal(A('شنطه جلد عدد 2').candidates[0].near,null);
+ assert.deepEqual(A('جاكيت فرو اسود\nمقاس xl\nعدد 2').candidates,[],'details attach to the known product');
+});
+
+test('unknown products are separated from unclear details; unclear text is kept for review, not ignored or guessed',()=>{
+ const r=A('تأكد منهم نظاف');assert.deepEqual(r.candidates,[]);assert.equal(r.unclear.length,1);assert.equal(r.unclear[0].line,'تأكد منهم نظاف');
+ const both=A('شنطه جلد عدد 2\nتأكد منهم نظاف');assert.deepEqual(both.candidates.map(c=>c.phrase),['شنطه جلد']);assert.equal(both.unclear.length,1);
+});
+
+test('whole-order context: this order\'s name, area, address and phone are personal, never products or unclear',()=>{
+ const o={order_notes:'',raw_text:'محمد العلي\nعمان طبربور شارع الجامعه\n0791234567\nبيسك عدد 2',recipient_name:'محمد العلي',area:'طبربور',detailed_address:'شارع الجامعه'};
+ const r=analyzeOrder(o,CAT);assert.deepEqual(r.candidates.map(c=>c.phrase),['بيسك']);assert.deepEqual(r.unclear,[]);
+ assert.deepEqual(analyzeOrder({order_notes:'ام تركي\nبيسك 2 قطع'},CAT).candidates.map(c=>c.phrase),['بيسك']);
 });

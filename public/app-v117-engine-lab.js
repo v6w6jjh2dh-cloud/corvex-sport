@@ -34,6 +34,26 @@
    .el-list{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 12px}
    .el-sec{margin:14px 0 4px;font-weight:700}
    .el-note{font-size:12px;opacity:.75;margin-top:6px}
+   /* iOS Safari gives date inputs an intrinsic min-width that overflows the panel */
+   #elBody .filter-group{min-width:0}
+   #elBody input[type=date]{width:100%;max-width:100%;min-width:0;box-sizing:border-box;-webkit-appearance:none;appearance:none;display:block}
+   .el-scope{font-size:13px;margin:10px 0;padding:8px 10px;border-radius:10px;background:rgba(15,118,110,.08)}
+   .el-more{width:100%;margin:8px 0}
+   .el-stats-3{grid-template-columns:repeat(3,1fr)}
+   .el-filter{cursor:pointer;background:transparent;font:inherit;color:inherit}
+   .el-filter.on{border-color:#0f766e;box-shadow:0 0 0 2px rgba(15,118,110,.25)}
+   .el-tools{display:grid;grid-template-columns:1fr auto;gap:8px;margin:8px 0}
+   .el-ulist{margin:0 -4px}
+   .el-urow{padding:12px 6px;border-bottom:1px solid rgba(127,127,127,.2)}
+   .el-uhead{display:flex;justify-content:space-between;align-items:center;gap:8px}
+   .el-ulabel{font-size:17px;font-weight:700;word-break:break-word}
+   .el-unear{font-size:14px;margin-top:4px;color:#b45309}
+   .el-uorders{margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;font-size:15px}
+   @media(max-width:640px){
+    #content .card:has(#elBody){padding:12px 10px}
+    .el-stats-3 .el-stat b{font-size:20px}.el-stats-3 .el-stat span{font-size:11px}
+    .el-tools{grid-template-columns:1fr}
+   }
   </style>`;
 
   async function view(){
@@ -65,64 +85,115 @@
   }
   const openOrder=root=>root.querySelectorAll('[data-order]').forEach(b=>b.onclick=()=>{if(typeof window.editOrder==='function')window.editOrder(Number(b.dataset.order))});
 
-  // ---- 1) comparison old vs new
+  // ---- 1) comparison old vs new (large ranges in batches; an order is never counted twice)
+  const STOCK={different_field:'محرك المخزون يقرأ نص الطلب الكامل بينما الجديد يقرأ الملاحظات',not_in_stock_catalogue:'المنتج غير موجود في كتالوج المخزون',
+   context_rule:'كلمة عامة بدون دليل منتج — لم تُخمَّن',quantity_convention:'طريقة كتابة كمية متعلَّمة',quantity_other_field:'الكمية مكتوبة في الحقل الآخر',
+   bare_name_single:'اسم عام لقطعة واحدة',from_stock_allocation:'من الخصم المسجل في المخزون',allocation_changed_since_print:'الخصم المسجل وقت الطباعة يختلف عن قراءة اليوم',other:'سبب آخر'};
+  const scopeNote=(d,checked)=>`<div class="el-scope">النطاق: طلبات كورفكس <b>المطبوعة</b> بين <bdi>${esc(d.from)}</bdi> و<bdi>${esc(d.to)}</bdi> (حسب تاريخ أول طباعة). تم فحص <b>${checked}</b> من <b>${esc(d.total)}</b> طلبًا.</div>`;
   function compare(){
-    body().innerHTML=range('elCmp',3)+'';
+    body().innerHTML=range('elCmp',3);
     const out=document.getElementById('elCmpOut');
-    out.innerHTML='<div class="el-note">يقارن قراءة المحرك الجديد مع محرك الأرباح الحالي ومحرك المخزون للطلبات المطبوعة في الفترة (حد أقصى 150 طلبًا).</div>';
-    document.getElementById('elCmpRun').onclick=async()=>{
-      out.innerHTML='<div class="empty">جاري الفحص...</div>';
+    out.innerHTML='<div class="el-note">يقارن المحرك الجديد مع محرك الأرباح الحالي ومحرك المخزون. الفترات الكبيرة تُفحص على دفعات (150 طلبًا).</div>';
+    let acc=null;
+    const run=async(first)=>{
+      const f=document.getElementById('elCmpFrom').value,t=document.getElementById('elCmpTo').value;
+      if(first)acc={from:f,to:t,total:0,checked:0,counts:{},rows:new Map(),next:null};
+      const more=document.getElementById('elCmpMore');if(more)more.disabled=true;
+      if(first)out.innerHTML='<div class="empty">جاري الفحص...</div>';
       try{
-        const f=document.getElementById('elCmpFrom').value,t=document.getElementById('elCmpTo').value;
-        const d=await window.api(`/product-engine?view=compare&from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}&limit=150`);
-        const n=d.counts||{};
-        const stat=(v,label,tone='')=>`<div class="el-stat ${v?tone:'ok'}"><b>${esc(v??0)}</b><span>${label}</span></div>`;
-        out.innerHTML=`<div class="el-stats">
-          <div class="el-stat"><b>${esc(n.orders??0)}</b><span>طلبات مفحوصة</span></div>
-          ${stat(n.central_vs_profit_engine,'اختلاف مع محرك الأرباح','warn')}
-          ${stat(n.cost_differences,'اختلاف في الكوست','bad')}
-          ${stat(n.central_vs_print_engine,'اختلاف مع محرك المخزون','warn')}
-          ${stat(n.central_needs_review,'تحتاج مراجعة (لم يُخمَّن)','warn')}
-          ${stat(n.central_unrecognised,'غير معروفة','warn')}
-          ${stat(n.central_cost_unknown,'كوست غير معروف','warn')}
-          ${stat(n.baseline_vs_profit_engine,'المحرك الأساسي ≠ الحالي','bad')}
-         </div>
-         ${(d.rows||[]).length?'':'<div class="empty">لا توجد اختلافات في هذه الفترة ✓</div>'}
-         ${(d.rows||[]).map(r=>{
-           const kinds=[...new Set([...(r.differences?.vs_profit_engine||[]),...(r.differences?.cost||[])])].filter(k=>DIFF[k]);
-           const old=r.profit_engine_detail;
-           return `<div class="el-row"><div class="el-head"><div><button class="el-order" data-order="${esc(r.id)}">#${esc(r.order_code)}</button> <span class="el-muted">${esc(r.ship_day||'')}</span></div>
-             <div>${kinds.map(k=>`<span class="el-badge ${k==='cost'?'bad':''}">${DIFF[k]}</span>`).join('')}${r.needs_review?'<span class="el-badge">يحتاج مراجعة</span>':''}${(r.differences?.vs_print_engine||[]).length?'<span class="el-badge">مخزون</span>':''}</div></div>
-             <div class="el-text">${esc(r.text)}</div>
-             <div class="el-cols">
-              <div class="el-col"><h4>المحرك الحالي (الأرباح)</h4>${old?items(old.items)+`<div class="el-note">الكوست: <b>${money(old.cost)}</b></div>`:'<span class="el-muted">ليس في تقرير الأرباح</span>'}</div>
-              <div class="el-col"><h4>المحرك الجديد</h4>${items(r.central?.items)}<div class="el-note">الكوست: <b>${money(r.central?.cost)}</b></div>
-               ${(r.uncertain||[]).length?`<div class="el-note">لم يُخمَّن: ${r.uncertain.map(u=>`«${esc(u.alias)}» (${REASON[u.reason]||esc(u.reason)})`).join('، ')}</div>`:''}</div>
-             </div>
-             <div class="el-note">محرك المخزون (الطباعة): ${Object.entries(r.print_engine||{}).map(([k,v])=>`${esc(k)} × ${esc(v)}`).join('، ')||'لا شيء'}</div>
-            </div>`}).join('')}`;
-        openOrder(out);
+        const d=await window.api(`/product-engine?view=compare&from=${encodeURIComponent(acc.from)}&to=${encodeURIComponent(acc.to)}&limit=150${acc.next?'&before='+acc.next:''}`);
+        acc.total=d.total;acc.checked+=d.batch.checked;acc.next=d.batch.next_cursor;
+        for(const [k,v] of Object.entries(d.counts||{}))acc.counts[k]=(acc.counts[k]||0)+Number(v||0);
+        for(const r of d.rows||[])acc.rows.set(r.id,r);
+        paintCompare(out,acc);
       }catch(e){out.innerHTML=`<div class="empty">تعذر الفحص: ${esc(e?.message||e)}</div>`}
     };
+    document.getElementById('elCmpRun').onclick=()=>run(true);
+    out.addEventListener('click',e=>{if(e.target.id==='elCmpMore')run(false)});
+  }
+  function paintCompare(out,acc){
+    const n=acc.counts;
+    const stat=(v,label,tone='')=>`<div class="el-stat ${v?tone:'ok'}"><b>${esc(v??0)}</b><span>${label}</span></div>`;
+    const rows=[...acc.rows.values()];
+    out.innerHTML=`${scopeNote(acc,acc.checked)}
+     ${acc.next?`<button id="elCmpMore" class="btn btn-soft el-more">فحص الدفعة التالية (${acc.total-acc.checked} متبقٍ)</button>`:''}
+     <div class="el-stats">
+      <div class="el-stat"><b>${esc(acc.checked)}</b><span>طلبات مفحوصة</span></div>
+      ${stat(n.central_vs_profit_engine,'اختلاف مع محرك الأرباح','warn')}
+      ${stat(n.cost_differences,'اختلاف في الكوست','bad')}
+      ${stat(n.central_vs_print_engine,'اختلاف مع محرك المخزون','warn')}
+      ${stat(n.central_needs_review,'تحتاج مراجعة (لم يُخمَّن)','warn')}
+      ${stat(n.central_unrecognised,'لم يُتعرّف على منتج','warn')}
+      ${stat(n.central_cost_unknown,'منتج معروف وكوسته غير معروف (الجديد)','warn')}
+      ${stat(n.profit_cost_unknown,'منتج معروف وكوسته غير معروف (الحالي)','warn')}
+     </div>
+     <div class="el-note">«لم يُتعرّف على منتج» لا يدخل في «كوست غير معروف»: الكوست يُحسب فقط بعد معرفة المنتج.</div>
+     ${rows.length?'':'<div class="empty">لا توجد اختلافات ✓</div>'}
+     ${rows.map(r=>{
+       const kinds=[...new Set([...(r.differences?.vs_profit_engine||[]),...(r.differences?.cost||[])])].filter(k=>DIFF[k]);
+       const old=r.profit_engine_detail,cen=r.central||{};
+       const costOf=(its,cost)=>!(its||[]).length?'لم يُتعرّف على منتج':money(cost);
+       const stock=(r.differences?.vs_print_engine||[]).length||(r.stock_reasons||[]).length;
+       return `<div class="el-row"><div class="el-head"><div><button class="el-order" data-order="${esc(r.id)}">#${esc(r.order_code)}</button> <span class="el-muted">${esc(r.ship_day||'')}</span></div>
+         <div>${kinds.map(k=>`<span class="el-badge ${k==='cost'?'bad':''}">${DIFF[k]}</span>`).join('')}${r.needs_review?'<span class="el-badge">يحتاج مراجعة</span>':''}${stock?'<span class="el-badge">مخزون</span>':''}</div></div>
+         <div class="el-text">${esc(r.text)}</div>
+         <div class="el-cols">
+          <div class="el-col"><h4>المحرك الحالي (الأرباح)</h4>${old?items(old.items)+`<div class="el-note">الكوست: <b>${costOf(old.items,old.cost)}</b></div>`:'<span class="el-muted">ليس في تقرير الأرباح</span>'}</div>
+          <div class="el-col"><h4>المحرك الجديد</h4>${items(cen.items)}<div class="el-note">الكوست: <b>${costOf(cen.items,cen.cost)}</b></div>
+           ${(r.uncertain||[]).length?`<div class="el-note">لم يُخمَّن: ${r.uncertain.map(u=>`«${esc(u.alias)}» (${REASON[u.reason]||esc(u.reason)})`).join('، ')}</div>`:''}</div>
+         </div>
+         ${stock?`<div class="el-col" style="margin-top:8px"><h4>المخزون (للعرض فقط — لا يُعدَّل)</h4>
+           <div class="el-note">الخصم الفعلي المسجل: ${Object.entries(r.print_allocation||{}).map(([k,v])=>`${esc(k)} × ${esc(v)}`).join('، ')||'لا يوجد'}</div>
+           <div class="el-note">قراءة محرك المخزون اليوم: ${Object.entries(r.print_engine||{}).map(([k,v])=>`${esc(k)} × ${esc(v)}`).join('، ')||'لا شيء'}</div>
+           <div class="el-note">السبب: ${(r.stock_reasons||[]).map(x=>esc(STOCK[x]||x)).join('، ')||'—'}</div></div>`:''}
+        </div>`}).join('')}
+     ${acc.next?`<button id="elCmpMore" class="btn btn-soft el-more">فحص الدفعة التالية (${acc.total-acc.checked} متبقٍ)</button>`:''}`;
+    openOrder(out);
   }
 
-  // ---- 2) unknown phrases
+  // ---- 2) unknown phrases: grouped, filtered, merged across batches
+  const UKIND={products:{t:'منتجات جديدة محتملة',d:'عبارات معها كمية أو لون أو مقاس ولا تشبه أي منتج معروف'},
+   possible_aliases:{t:'قد تكون اسمًا لمنتج معروف',d:'كتابة قريبة من منتج في الكتالوج — تحتاج تأكيد'},
+   unclear:{t:'تفاصيل غير مفهومة',d:'نص في ملاحظات الطلب لا يحمل دليل منتج — للمراجعة فقط، دون تخمين'}};
   function unknown(){
     body().innerHTML=range('elUnk',30);
     const out=document.getElementById('elUnkOut');
-    out.innerHTML='<div class="el-note">عبارات تشبه منتجًا (معها كمية) ولم يتعرف عليها المحرك — منتجات جديدة أو أسماء بديلة تحتاج تعليمًا.</div>';
-    document.getElementById('elUnkRun').onclick=async()=>{
-      out.innerHTML='<div class="empty">جاري الفحص...</div>';
+    out.innerHTML='<div class="el-note">يحلل الطلب كاملًا ويفصل اسم المنتج عن الكمية واللون والمقاس والوزن والسعر والتاريخ والاسم والعنوان. الفترات الكبيرة على دفعات (300 طلب).</div>';
+    let acc=null,filter='products',q='',min=1;
+    const merge=(into,list)=>{for(const g of list||[]){const x=into.get(g.key)||{key:g.key,label:g.label,near:g.near,orders:new Set(),variants:new Map(),examples:[]};
+      for(const id of g.order_ids||[])x.orders.add(id);for(const v of g.variants||[])x.variants.set(v.phrase,(x.variants.get(v.phrase)||0)+v.n);
+      for(const e of g.examples||[])if(x.examples.length<8&&!x.examples.some(y=>y.id===e.id))x.examples.push(e);if(!x.near&&g.near)x.near=g.near;into.set(g.key,x)}};
+    const run=async(first)=>{
+      const f=document.getElementById('elUnkFrom').value,t=document.getElementById('elUnkTo').value;
+      if(first){acc={from:f,to:t,total:0,checked:0,findings:0,next:null,products:new Map(),possible_aliases:new Map(),unclear:new Map()};out.innerHTML='<div class="empty">جاري التحليل...</div>'}
       try{
-        const f=document.getElementById('elUnkFrom').value,t=document.getElementById('elUnkTo').value;
-        const d=await window.api(`/product-engine?view=unknown&from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}`);
-        out.innerHTML=`<div class="el-stats"><div class="el-stat"><b>${esc(d.orders)}</b><span>طلبات مفحوصة</span></div><div class="el-stat ${d.candidates.length?'warn':'ok'}"><b>${esc(d.candidates.length)}</b><span>عبارات غير معروفة</span></div></div>
-         ${d.candidates.length?'':'<div class="empty">لا توجد عبارات غير معروفة ✓</div>'}
-         ${d.candidates.map(c=>`<div class="el-row"><div class="el-head"><b>«${esc(c.phrase)}»</b><span class="el-badge">${esc(c.orders)} طلب</span></div>
-          <div class="el-note">أمثلة: ${c.examples.map(e=>`<button class="el-order" data-order="${esc(e.id)}">#${esc(e.order_code)}</button>`).join(' ')}</div></div>`).join('')}`;
-        openOrder(out);
-      }catch(e){out.innerHTML=`<div class="empty">تعذر الفحص: ${esc(e?.message||e)}</div>`}
+        const d=await window.api(`/product-engine?view=unknown&from=${encodeURIComponent(acc.from)}&to=${encodeURIComponent(acc.to)}&limit=300${acc.next?'&before='+acc.next:''}`);
+        acc.total=d.total;acc.checked+=d.batch.checked;acc.findings+=d.orders_with_findings;acc.next=d.batch.next_cursor;
+        for(const k of Object.keys(UKIND))merge(acc[k],d[k]);
+        paint();
+      }catch(e){out.innerHTML=`<div class="empty">تعذر التحليل: ${esc(e?.message||e)}</div>`}
     };
+    const paint=()=>{
+      const list=[...acc[filter].values()].map(g=>({...g,n:g.orders.size,vs:[...g.variants].sort((a,b)=>b[1]-a[1])}))
+        .filter(g=>g.n>=min&&(!q||g.vs.some(([p])=>p.includes(q))||String(g.near?.name||'').includes(q))).sort((a,b)=>b.n-a.n);
+      out.innerHTML=`${scopeNote(acc,acc.checked)}
+       <div class="el-stats el-stats-3">${Object.entries(UKIND).map(([k,v])=>`<button class="el-stat el-filter ${filter===k?'on':''}" data-f="${k}"><b>${acc[k].size}</b><span>${v.t}</span></button>`).join('')}</div>
+       <div class="el-tools"><input id="elUnkQ" class="input" placeholder="بحث في العبارات" value="${esc(q)}">
+        <select id="elUnkMin" class="select"><option value="1">كل العبارات</option><option value="2" ${min===2?'selected':''}>في طلبين فأكثر</option><option value="5" ${min===5?'selected':''}>في 5 طلبات فأكثر</option></select></div>
+       <div class="el-note">${UKIND[filter].d}</div>
+       ${list.length?'':'<div class="empty">لا توجد نتائج ✓</div>'}
+       <div class="el-ulist">${list.map(g=>`<div class="el-urow"><div class="el-uhead"><span class="el-ulabel">${esc(g.vs[0]?.[0]||g.label)}</span><span class="el-badge">${g.n} طلب</span></div>
+         ${g.near?`<div class="el-unear">قريب من: <b>${esc(g.near.name)}</b></div>`:''}
+         ${g.vs.length>1?`<div class="el-list">${g.vs.slice(0,8).map(([p,c])=>`<span class="el-chip">${esc(p)}${c>1?` <small>×${c}</small>`:''}</span>`).join('')}</div>`:''}
+         <div class="el-uorders">${g.examples.map(e=>`<button class="el-order" data-order="${esc(e.id)}">#${esc(e.order_code)}</button>`).join(' ')}${g.n>g.examples.length?` <span class="el-muted">+${g.n-g.examples.length}</span>`:''}</div></div>`).join('')}</div>
+       ${acc.next?`<button id="elUnkMore" class="btn btn-soft el-more">تحليل الدفعة التالية (${acc.total-acc.checked} متبقٍ)</button>`:''}`;
+      out.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{filter=b.dataset.f;paint()});
+      const qi=document.getElementById('elUnkQ');qi.oninput=()=>{q=qi.value.trim();const pos=qi.selectionStart;paint();const n=document.getElementById('elUnkQ');n.focus();n.setSelectionRange(pos,pos)};
+      document.getElementById('elUnkMin').onchange=e=>{min=Number(e.target.value);paint()};
+      const more=document.getElementById('elUnkMore');if(more)more.onclick=()=>{more.disabled=true;run(false)};
+      openOrder(out);
+    };
+    document.getElementById('elUnkRun').onclick=()=>run(true);
   }
 
   // ---- 3) accumulated knowledge

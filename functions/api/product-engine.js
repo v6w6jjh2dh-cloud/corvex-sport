@@ -29,7 +29,7 @@
 import {json,round2,normalizeArabic} from './_partial-delivery.js';
 import {classifyInventoryItems,loadInventoryModels} from './_inventory.js';
 import {loadCatalogue,describeCatalogue,resolveOrderItems,ensureProductAliasTable,ensureInterpretationTable,ensureLexiconTable,LEXICON_KINDS,textHash,ensureRuleEventsTable,logRuleEvent,catalogueAsOf,productRef,ENGINE_VERSION} from './_product-engine.js';
-import {unknownPhrases,DEFAULT_LEXICON,LEARNED_DEFAULTS,LANGUAGE_VERSION} from './_order-language.js';
+import {unknownPhrases,analyzeOrder,groupPhrases,DEFAULT_LEXICON,LEARNED_DEFAULTS,LANGUAGE_VERSION} from './_order-language.js';
 import {PRODUCT_KNOWLEDGE,QUANTITY_RULES,GUARD_RULES,NAME_SYNONYMS,KNOWLEDGE_VERSION} from './_product-knowledge.js';
 import {onRequest as cohortEngine} from './profit-shipping-cohorts.js';
 
@@ -47,11 +47,18 @@ async function corvexStore(env){
  const rows=(await env.DB.prepare('SELECT id,name FROM stores ORDER BY id').all()).results||[];
  return rows.find(s=>/corvex|كورفكس/i.test(String(s.name||'')))||null;
 }
-async function corvexOrders(env,storeId,from,to,limit){
- return (await env.DB.prepare(`SELECT o.id,o.order_code,o.raw_text,o.order_notes,o.delivery_status,o.created_at,date(o.first_printed_at,'+3 hours') ship_day
-   FROM orders o WHERE o.store_id=? AND o.first_printed_at IS NOT NULL AND date(o.first_printed_at,'+3 hours') BETWEEN ? AND ?
-   ORDER BY o.id DESC LIMIT ?`).bind(storeId,from,to,limit).all()).results||[];
+// Scope of every check: Corvex orders that were printed (shipped) in [from,to] by first print day (Amman).
+// Batches walk the range newest → oldest with a cursor (order id), so no order is read twice.
+async function corvexOrders(env,storeId,from,to,limit,before=null){
+ return (await env.DB.prepare(`SELECT o.id,o.order_code,o.raw_text,o.order_notes,o.delivery_status,o.created_at,o.recipient_name,o.area,o.detailed_address,o.amount,date(o.first_printed_at,'+3 hours') ship_day
+   FROM orders o WHERE o.store_id=? AND o.first_printed_at IS NOT NULL AND date(o.first_printed_at,'+3 hours') BETWEEN ? AND ?${before?' AND o.id<?':''}
+   ORDER BY o.id DESC LIMIT ?`).bind(...[storeId,from,to,...(before?[before]:[]),limit]).all()).results||[];
 }
+async function countOrders(env,storeId,from,to){
+ return Number((await env.DB.prepare(`SELECT COUNT(*) n FROM orders o WHERE o.store_id=? AND o.first_printed_at IS NOT NULL AND date(o.first_printed_at,'+3 hours') BETWEEN ? AND ?`).bind(storeId,from,to).first())?.n||0);
+}
+// fetch limit+1 rows: the extra row only tells whether another batch exists
+const page=(rows,limit)=>({rows:rows.slice(0,limit),next:rows.length>limit?Number(rows[limit-1].id):null});
 async function allocations(env,ids){
  const map=new Map();if(!ids.length)return map;
  for(let i=0;i<ids.length;i+=80){
@@ -94,7 +101,8 @@ export async function onRequest({request,env}){
    const to=url.searchParams.get('to')||todayAmman(),from=url.searchParams.get('from')||shift(to,-13);
    const limit=Math.min(500,Math.max(1,Number(url.searchParams.get('limit')||150)));
    if(!DAY.test(from)||!DAY.test(to)||from>to)return json({error:'تاريخ غير صالح'},400);
-   const orders=await corvexOrders(env,store.id,from,to,limit);
+   const before=Number(url.searchParams.get('before')||0)||null;
+   const pg=page(await corvexOrders(env,store.id,from,to,limit+1,before),limit),orders=pg.rows,total=await countOrders(env,store.id,from,to);
    const cat=await loadCatalogue(env,{storeId:store.id});
    const baseCat=await loadCatalogue(env,{storeId:store.id,knowledge:false}),asOfCat=await catalogueAsOf(env,store.id);
    const invModels=await loadInventoryModels(env);
@@ -105,7 +113,7 @@ export async function onRequest({request,env}){
     try{const r=await cohortEngine({request:new Request(`${url.origin}/api/profit-shipping-cohorts?date=${d}&store_id=${store.id}`,{headers:{authorization:auth}}),env});
      if(r.ok)for(const o of (await r.json()).orders||[])cohort.set(Number(o.id),o)}catch{}
    }
-   const rows=[];const counts={orders:orders.length,central_vs_profit_engine:0,baseline_vs_profit_engine:0,knowledge_changes:0,central_vs_print_engine:0,central_vs_print_allocation:0,central_unrecognised:0,central_cost_unknown:0,central_needs_review:0,cost_differences:0};
+   const rows=[];const counts={orders:orders.length,central_vs_profit_engine:0,baseline_vs_profit_engine:0,knowledge_changes:0,central_vs_print_engine:0,central_vs_print_allocation:0,central_unrecognised:0,central_cost_unknown:0,profit_cost_unknown:0,central_needs_review:0,cost_differences:0};
    for(const o of orders){
     // read with the rules in force when the order was created (no automatic re-interpretation of history)
     const central=await resolveOrderItems(env,o,await asOfCat(o.created_at),alloc.get(Number(o.id))||null);
@@ -125,6 +133,21 @@ export async function onRequest({request,env}){
     const hCost=ho&&(ho.items||[]).length&&(ho.items||[]).every(i=>i.total_cost!=null)?round2(ho.items.reduce((n,i)=>n+Number(i.total_cost||0),0)):null;
     const costDiff=ho?(hCost===null)!==(central.cost===null)||(hCost!==null&&central.cost!==null&&Math.abs(hCost-central.cost)>0.001):false;
     if(costDiff){counts.cost_differences++;d.cost=['cost']}
+    if(ho&&(ho.items||[]).length&&hCost===null)counts.profit_cost_unknown++;
+    // why the central reading differs from the print-time stock engine (explanation only; stock is never changed here)
+    const invReasons=[];
+    if(d.vs_print_engine.length){
+     const centralText=central.source==='raw_text'?String(o.raw_text||''):String(o.order_notes||''),printText=String(o.raw_text||o.order_notes||'');
+     if(central.items.length&&centralText.trim()!==printText.trim())invReasons.push('different_field');
+     if(central.items.some(i=>Number(i.model_id)<=0))invReasons.push('not_in_stock_catalogue');
+     if((central.uncertain||[]).length)invReasons.push('context_rule');
+     if(central.trace.some(t=>t.source==='knowledge'))invReasons.push('quantity_convention');
+     if(central.trace.some(t=>String(t.source).startsWith('quantity_from_')))invReasons.push('quantity_other_field');
+     if(String(central.source).includes('bare_jokh'))invReasons.push('bare_name_single');
+     if(central.source==='inventory')invReasons.push('from_stock_allocation');
+     if(!invReasons.length)invReasons.push('other');
+    }
+    if(alloc.has(Number(o.id))&&diffKinds(p,a).length)invReasons.push('allocation_changed_since_print');
     if(central.needs_review)counts.central_needs_review++;
     if(!central.items.length)counts.central_unrecognised++;
     if(central.items.length&&central.cost===null)counts.central_cost_unknown++;
@@ -134,9 +157,9 @@ export async function onRequest({request,env}){
      baseline:{items:baseline.items.map(i=>({name:i.name,quantity:i.quantity})),source:baseline.source},
      profit_engine:h,profit_engine_detail:ho?{items:(ho.items||[]).map(i=>({name:i.name,quantity:i.quantity,unit_cost:i.unit_cost})),cost:hCost,source:ho.item_source}:null,
      needs_review:central.needs_review,uncertain:(central.uncertain||[]).map(u=>({alias:u.alias,reason:u.reason})),
-     print_engine:p,print_allocation:a,differences:d});
+     print_engine:p,print_allocation:a,stock_reasons:invReasons,differences:d});
    }
-   return json({engine:ENGINE_VERSION,read_only:true,store,from,to,counts,rows});
+   return json({engine:ENGINE_VERSION,read_only:true,store,from,to,total,batch:{size:limit,before,checked:orders.length,next_cursor:pg.next},counts,rows});
   }
   if(view==='lexicon'){
    await ensureLexiconTable(env);
@@ -148,11 +171,18 @@ export async function onRequest({request,env}){
   if(view==='unknown'){
    const to=url.searchParams.get('to')||todayAmman(),from=url.searchParams.get('from')||shift(to,-29);
    if(!DAY.test(from)||!DAY.test(to)||from>to)return json({error:'تاريخ غير صالح'},400);
-   const orders=await corvexOrders(env,store.id,from,to,1000),cat=await loadCatalogue(env,{storeId:store.id}),groups=new Map();
-   for(const o of orders)for(const p of unknownPhrases(String(o.order_notes||'')+'\n'+String(o.raw_text||''),cat.models,cat.lexicon)){
-    const g=groups.get(p)||{phrase:p,orders:0,examples:[]};g.orders++;if(g.examples.length<5)g.examples.push({id:o.id,order_code:o.order_code});groups.set(p,g);
+   const limit=Math.min(500,Math.max(1,Number(url.searchParams.get('limit')||300))),before=Number(url.searchParams.get('before')||0)||null;
+   const pg=page(await corvexOrders(env,store.id,from,to,limit+1,before),limit),orders=pg.rows,total=await countOrders(env,store.id,from,to),cat=await loadCatalogue(env,{storeId:store.id});
+   const products=[],aliases=[],unclear=[];let withFindings=0;
+   for(const o of orders){
+    const a=analyzeOrder(o,cat.models,cat.lexicon);
+    if(a.candidates.length||a.unclear.length)withFindings++;
+    for(const c of a.candidates)(c.near?aliases:products).push({...c,order_id:o.id,order_code:o.order_code});
+    for(const u of a.unclear)unclear.push({...u,order_id:o.id,order_code:o.order_code});
    }
-   return json({store,from,to,read_only:true,orders:orders.length,candidates:[...groups.values()].sort((a,b)=>b.orders-a.orders).slice(0,200)});
+   return json({store,from,to,read_only:true,total,batch:{size:limit,before,checked:orders.length,next_cursor:pg.next},orders_with_findings:withFindings,
+    // each group carries its order ids so the page can merge batches without counting an order twice
+    products:groupPhrases(products),possible_aliases:groupPhrases(aliases),unclear:groupPhrases(unclear)});
   }
   if(view==='versions'){
    await ensureRuleEventsTable(env);

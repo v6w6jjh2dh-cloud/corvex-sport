@@ -182,7 +182,8 @@ test('learning loop: unknown phrases → alias for a NEW product; store language
  const before=dump();
  // 1) the engine finds the new product phrase on its own (no product word list)
  const u=(await call(env,engineApi,'/product-engine?view=unknown')).body;
- const bag=u.candidates.find(c=>c.phrase==='شنطه جلد');assert.ok(bag,JSON.stringify(u.candidates));assert.equal(bag.orders,2);
+ const bag=u.products.find(c=>c.label==='شنطه جلد');assert.ok(bag,JSON.stringify(u.products));assert.equal(bag.orders,2);
+ assert.ok(u.total>=u.batch.checked);assert.deepEqual(bag.order_ids.sort(),[o1,o2].sort());
  // 2) a manager correction suggests the alias; nothing is applied automatically
  const c=(await call(env,engineApi,'/product-engine',{action:'correct',order_id:o1,items:[{product_ref:'gap_filler',quantity:2}]})).body;
  assert.deepEqual(c.suggestions,[{action:'propose',product_ref:'gap_filler',alias:'شنطه جلد'}]);
@@ -233,4 +234,20 @@ test('corrections are stored, never applied: the reading of the order does not c
  const o=db.prepare('SELECT * FROM orders WHERE id=?').get(id);
  assert.deepEqual((await resolveOrderItems(env,o,cat)).items.map(i=>i.quantity),before.map(i=>i.quantity));
  assert.equal(db.prepare('SELECT COUNT(*) n FROM product_aliases').get()?.n??0,0,'no rule created from a correction');
+});
+
+test('large ranges in batches: total in scope, cursor walks every order exactly once; reasons for stock differences; cost-unknown counters',async()=>{
+ const {db,env}=setup();seedCorpus(db);
+ const total=corpus.length;let before=null,checked=0,batches=0,sum={};
+ do{
+  const r=(await call(env,engineApi,`/product-engine?view=compare&from=${day}&to=${day}&limit=7${before?'&before='+before:''}`)).body;
+  assert.equal(r.total,total);checked+=r.batch.checked;batches++;before=r.batch.next_cursor;
+  for(const [k,v] of Object.entries(r.counts))sum[k]=(sum[k]||0)+v;
+  for(const row of r.rows)if(row.differences.vs_print_engine.length)assert.ok(row.stock_reasons.length,JSON.stringify(row));
+  assert.ok('profit_cost_unknown' in r.counts&&'central_cost_unknown' in r.counts);
+ }while(before&&batches<20);
+ assert.equal(checked,total);assert.equal(sum.orders,total);assert.equal(batches,Math.ceil(total/7));
+ // unknown view batches the same way
+ let ub=null,uc=0;do{const u=(await call(env,engineApi,`/product-engine?view=unknown&from=${day}&to=${day}&limit=10${ub?'&before='+ub:''}`)).body;uc+=u.batch.checked;ub=u.batch.next_cursor}while(ub);
+ assert.equal(uc,total);
 });
