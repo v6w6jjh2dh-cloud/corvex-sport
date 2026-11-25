@@ -2,7 +2,7 @@
 // Used by /api/delivery-reconcile/preview, /api/delivery-reconcile/commit and
 // /api/partial-delivery-items so the browser and the server always agree on
 // which order a statement line belongs to and how partial-delivery cost is built.
-import {classifyInventoryItems,loadInventoryModels,FUR_ALIASES} from './_inventory.js';
+import {classifyInventoryItems,loadInventoryModels,FUR_ALIASES,CASUAL_ALIASES} from './_inventory.js';
 import {runSchemaMigrationOnce} from './_schema-migrations.js';
 
 export const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
@@ -158,10 +158,21 @@ async function ensureWomenJacketAlias(env){
  });
 }
 
+async function ensureCasualAliases(env){
+ await runSchemaMigrationOnce(env,'2026-11-25-casual-jokh-aliases-v1',async()=>{
+  const rows=(await env.DB.prepare('SELECT id,model_key,name,aliases_json FROM profit_models WHERE active=1').all()).results||[];
+  const row=rows.find(r=>r.model_key==='jokh_casual')||rows.find(r=>normalizeArabic(r.name)==='جاكيت جوخ كاجوال');
+  if(!row)throw new Error('Existing casual jacket model not found');
+  let aliases=JSON.parse(row.aliases_json||'[]');
+  const next=[...new Set([...aliases,...CASUAL_ALIASES])];
+  if(next.length!==aliases.length)await env.DB.prepare("UPDATE profit_models SET aliases_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify(next),row.id).run();
+ });
+}
 export async function loadCostedModels(env){
  await ensureApprovedCatalogue(env);
  await ensureStatiMerged(env);
  await ensureWomenJacketAlias(env);
+ await ensureCasualAliases(env);
  const models=await loadInventoryModels(env);
  const rows=(await env.DB.prepare('SELECT id,model_key,name,cost FROM profit_models WHERE active=1').all()).results||[];
  const byId=new Map(rows.map(r=>[Number(r.id),r]));
