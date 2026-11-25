@@ -19,6 +19,7 @@ const COLOR_QUANTITY=/(?:^|\s)(\d{1,3})\s*(?:اسود|ابيض|بني|زيتي|�
 // Merchant-approved spellings of the single model «جاكيت فرو» (2026-11-24). One list for
 // inventory, cost, profit, returns and model performance (public/app-v73 mirrors it).
 export const FUR_ALIASES=['جاكيت فرو','جكيت فرو','جاكيت الفرو','جكيت الفرو','جاكت فرو','فرو جاكيت','جاكيت فروه','فرو','الفرو'];
+export const CASUAL_ALIASES=["جاكيت جوخ رجالي","جاكيت رجالي جوخ","جاكيت كاجول جوخ","جاكيت كاجوال جوخ","جاكيت جوخ كاجول","جاكيت جوخ كاجوال","جكيت جوخ رجالي","جكيت رجالي جوخ","جكيت كاجول جوخ","جكيت كاجوال جوخ","جكيت جوخ كاجول","جكيت جوخ كاجوال","جاكت جوخ رجالي","جاكت رجالي جوخ","جاكت كاجول جوخ","جاكت كاجوال جوخ","جاكت جوخ كاجول","جاكت جوخ كاجوال"];
 const BARE_FUR=new Set(['فرو','الفرو']);
 // "مبطن فرو" / "بطانة فرو" / "ياقة فرو" describe another garment's lining, not a fur jacket.
 const FUR_LINING_BEFORE=/(?:مبطن|مبطنه|بطانه|بطانته|ياقه|كبوس|كابيشن|قبعه|مع|فيه|فيها|داخل|داخله|داخلي)\s*$/;
@@ -82,6 +83,7 @@ function parseAliases(row){
  // Resolve both spellings to the existing model id and stored unit cost.
  if(names.some(name=>/^(?:سي\s+)?(?:ايبوكسي|ايوبكسي)$/.test(normalize(name))))names.push('ايبوكسي','سي ايبوكسي','ايوبكسي');
  if(isFurModel(row))names.push(...FUR_ALIASES);
+ if(row.model_key==='jokh_casual'||normalize(row.name)==='جاكيت جوخ كاجوال')names.push(...CASUAL_ALIASES);
  return [...new Set(names.map(normalize).filter(x=>x.length>1))].sort((a,b)=>b.length-a.length);
 }
 
