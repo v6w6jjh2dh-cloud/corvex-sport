@@ -5,7 +5,7 @@
 //  - partial: only the pieces the customer received (partial_received_items)
 //  - profit = actual cash from the delivery company − cost (the delivery fee is
 //    already deducted inside the cash, so it is never subtracted a second time)
-import {classifyInventoryItems,loadInventoryModels,FUR_ALIASES} from './_inventory.js';
+import {classifyInventoryItems,loadInventoryModels,FUR_ALIASES,CASUAL_ALIASES} from './_inventory.js';
 import {refusalCash,loadCostedModels,approvedCost,canonicalModelName,normalizeArabic,STATI_ALIASES,FILLER_ALIASES,round2} from './_partial-delivery.js';
 
 const json=(x,status=200)=>new Response(JSON.stringify(x),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
@@ -23,7 +23,7 @@ const unitCostFor=(name,catalogueCost)=>approvedCost({name})??listCost(name)??(N
 
 const FALLBACK_MODELS=[
  {id:-1,name:'جاكيت فرو',aliases:[...FUR_ALIASES]},
- {id:-2,name:'جاكيت جوخ كاجوال',aliases:['جاكيت جوخ كاجوال','جكيت جوخ كاجوال','جاكيت جوخ كاجول','جوخ كاجوال','جاكيت الجوخ الكاجوال']},
+ {id:-2,name:'جاكيت جوخ كاجوال',aliases:[...CASUAL_ALIASES,'جاكيت جوخ كاجوال','جكيت جوخ كاجوال','جاكيت جوخ كاجول','جوخ كاجوال','جاكيت الجوخ الكاجوال']},
  {id:-3,name:'جاكيت جوخ سكايفو',aliases:['جاكيت جوخ سكايفو','جكيت جوخ سكايفو','جاكيت جوخ سكارفو','جاكيت الجوخ سكارفو','جوخ سكايفو','جوخ سكارفو','جاكيت سكايفو','جاكيت سكارفو','جاكيت نسائي','جكيت نسائي','جاكيت نساءي','جكيت نساءي','جوخ شتائي',...STATI_ALIASES]},
  {id:-4,name:'مالئ الفراغات',aliases:['مالئ الفراغات','مالى الفراغات','ملي الفراغات','مالئ فراغات',...FILLER_ALIASES]},
  {id:-5,name:'بنطلون جيوب سحاب',aliases:['بنطلون جيوب سحاب','جيوب سحاب']},
@@ -44,7 +44,7 @@ const FALLBACK_MODELS=[
  {id:-18,name:'بلوز صوف',cost:3.5,aliases:['بلوز صوف','بلوزه صوف','صوف بلوز']}
 ].map(m=>({...m,unit_cost:m.cost??null,aliases:[...new Set(m.aliases.map(key))].sort((a,b)=>b.length-a.length)}));
 
-const BARE_JOKH=/(?:^|[^\p{L}])(?:جكيت|جاكيت|جاكت)\s+جوخ(?![\p{L}])(?!\s*(?:ال)?(?:كاجوال|كاجول|سكايفو|سكارفو|ستا|شتا|نسا))/u;
+const BARE_JOKH=/(?:^|[^\p{L}])(?:جكيت|جاكيت|جاكت)\s+جوخ(?![\p{L}])(?!\s*(?:ال)?(?:كاجوال|كاجول|رجالي|سكايفو|سكارفو|ستا|شتا|نسا))/u;
 const QTY_LABEL=/(?:^|[^\p{L}])(?:عدد|العدد|كميه|الكميه|كمية|الكمية)\s*[:：=\-]?\s*(\d{1,2})(?!\d)/u;
 // Explicit quantity in a free-text field: «عدد2», «الكمية: 3», «قطعتين», «لونين».
 function explicitQuantity(text){
